@@ -30,6 +30,8 @@ services:
       OVAULTD_TOKEN_TTL_HOURS: "${OVAULTD_TOKEN_TTL_HOURS:-720}"
       OVAULTD_CHALLENGE_TTL: "${OVAULTD_CHALLENGE_TTL:-300}"
       OVAULTD_UPLOAD_TTL_HOURS: "${OVAULTD_UPLOAD_TTL_HOURS:-24}"
+      # Vacío = bootstrap /setup abierto mientras no haya cuentas (ver docs/deploy.md, ADR-0016).
+      OVAULTD_SETUP_TOKEN: "${OVAULTD_SETUP_TOKEN:-}"
       OVAULTD_LOG_JSON: "${OVAULTD_LOG_JSON:-1}"
     volumes:
       # Default: volumen nombrado. Para un bind mount (backups con rsync, NFS, etc.):

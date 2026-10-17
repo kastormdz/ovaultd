@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # cli-e2e.sh — E2E de la CLI del núcleo (fase 2): server real + cuenta real + flujo completo.
 #
-#   login → create-remote → setup → list-local → sync (dos pasadas: add; mod/del/add)
-#   → list-local (todo igual, outbox vacía) → config → unlink --purge
+#   /setup (bootstrap de la primera cuenta por web) → login → create-remote → setup →
+#   list-local → sync (dos pasadas: add; mod/del/add) → list-local (todo igual, outbox
+#   vacía) → config → unlink --purge
 #
 # Verifica contra la base del server: las revisiones quedaron con los ops correctos
 # (add,add / add,mod,del). Nada de mocks: el push real firma msg_rec y commitea por WS.
@@ -55,8 +56,20 @@ done
 [ "$CODIGO" = "401" ] || fallo "el server no respondió en :$PUERTO"
 nota "arriba (401 sin token)"
 
-paso "cuenta con ovaultd-admin"
-printf 'password-de-cuenta-cli\n' | "$ADMIN" --db "$D/datos/metadata.db" create-account --email cli-e2e@example.test
+paso "bootstrap por web: /setup crea la primera cuenta"
+FORMULARIO="$(curl -sf "http://127.0.0.1:$PUERTO/setup")"
+grep -q 'name="email"' <<<"$FORMULARIO" || fallo "el formulario de /setup no aparece"
+CUENTA_EMAIL='cli-e2e@example.test'
+CUENTA_PW='password-de-cuenta-cli'
+curl -sf -X POST "http://127.0.0.1:$PUERTO/setup" \
+    --data-urlencode "email=$CUENTA_EMAIL" --data-urlencode "password=$CUENTA_PW" > /dev/null
+CODIGO_SETUP="$(curl -s -o /dev/null -w '%{http_code}' -X POST "http://127.0.0.1:$PUERTO/setup" \
+    --data-urlencode "email=otra@example.test" --data-urlencode "password=password-de-cuenta-otra")"
+[ "$CODIGO_SETUP" = "410" ] || fallo "/setup no se cerró tras la primera cuenta (dio $CODIGO_SETUP)"
+
+paso "cuentas siguientes con ovaultd-admin (la segunda la ve inspect)"
+printf 'password-de-cuenta-dos\n' | "$ADMIN" --db "$D/datos/metadata.db" create-account --email segunda@example.test > /dev/null
+"$ADMIN" --db "$D/datos/metadata.db" inspect | grep -Eq 'cuentas: +2' || fallo "inspect no ve las 2 cuentas"
 
 export OVAULTD_CONFIG_DIR="$D/config"
 export OVAULTD_RUNTIME_DIR="$D/runtime"

@@ -20,7 +20,7 @@ crates/ovaultd-server/src/
   db.rs              pool + PRAGMAs + migrate()                            <- Luna
   storage.rs         CasStore: publicar/leer blobs                         <- Luna
   auth.rs            cuentas, devices, challenge, verificación de firma    <- Luna
-  routes.rs          router axum: /healthz, /metrics, vaults, push, pull   <- Luna
+  routes.rs          router axum: /healthz, /metrics, /setup, vaults, push, pull   <- Luna
   sync/mod.rs        pub mod commit;                                      <- YA ESCRITO
   sync/commit.rs     la ÚNICA ruta de escritura (transacción atómica)      <- Luna
   delta.rs           paginado por revisiones COMPLETAS                     <- Luna
@@ -365,6 +365,9 @@ una variante ni un código nuevo acá.
 
 | método | ruta | auth | qué hace |
 |---|---|---|---|
+| GET | `/` | no | raíz web: sin cuentas -> redirect a `/setup`; con cuentas, página mínima de identificación |
+| GET | `/setup` | no | **bootstrap del primer usuario** (ADR-0016): formulario SOLO mientras `accounts = 0`; con cuentas, 410 Gone; `OVAULTD_SETUP_TOKEN` (opcional) la condiciona con `?token=…` |
+| POST | `/setup` | no | crea la primera cuenta (form: `email`, `password`, `token?`); 410 con cuentas existentes; 403 sin token cuando está configurado; `INSERT` con `WHERE NOT EXISTS` (carrera-safe) |
 | GET | `/healthz` | no | liveness/readiness: `{"status":"ok"}` (503 si la base no responde) — healthcheck de compose |
 | GET | `/metrics` | no | Prometheus mínimo de operación (`ovaultd_up`, `ovaultd_uptime_seconds`); sin secretos; restringir en el proxy |
 | POST | `/api/v1/auth/signin` | no | `{email, password, mfa?}` -> `{token, device_id}` |

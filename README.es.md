@@ -29,7 +29,7 @@ Lo que figura como hecho está respaldado por gates de ejecución real, no mocks
 - Plano de control HTTP y plano de datos por WebSocket para las deltas de revisión.
 - Un solo contenedor endurecido: uid non-root, rootfs de solo lectura, sin capabilities, SQLite WAL y almacén de blobs content-addressed bajo `/data`.
 - Proxy reverso de primera clase: el E2E de contenedor corre por la misma config de nginx que viene en `docker/proxy/nginx.conf.example`.
-- Sin registro público. Las cuentas se crean fuera de banda con el CLI de administración, que viene dentro de la imagen (ADR-0011).
+- Sin registro público. La primera cuenta se crea por la web en `/setup` (solo el primer arranque, ADR-0016); las siguientes, con el CLI de administración que viene dentro de la imagen (ADR-0011).
 
 ## Cómo funciona
 
@@ -92,11 +92,13 @@ Para correr una imagen ya publicada, seteá `OVAULTD_IMAGE` con un digest real `
 
 ### 2. Crear tu cuenta
 
-Las cuentas no son autoservicio (ADR-0011); el CLI de administración viene dentro de la imagen:
+La **primera** cuenta se crea desde el navegador: abrí `http://127.0.0.1:8080/setup` (por el proxy: `http://127.0.0.1:8888/setup`). Esa página existe solo mientras el servidor no tenga ninguna cuenta y se desactiva al crearla — no hay registro público (ADR-0011/0016). Si el server puede quedar expuesto antes de completarla, seteá `OVAULTD_SETUP_TOKEN`.
+
+Para las cuentas **siguientes** (otra persona — una segunda laptop es solo otro dispositivo, y se suma con `login`), el CLI de administración viene dentro de la imagen:
 
 ```bash
 printf '%s\n' 'una-password-larga' | docker compose exec -T ovaultd \
-  ovaultd-admin create-account --email vos@ejemplo.com
+  ovaultd-admin create-account --email otro@ejemplo.com
 ```
 
 La password se lee **siempre** de stdin, nunca como argumento. `ovaultd-admin` también responde `health` e `inspect` sin descifrar nada.

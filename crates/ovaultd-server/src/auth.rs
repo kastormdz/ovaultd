@@ -146,6 +146,37 @@ pub async fn crear_cuenta(
     })
 }
 
+/// Crea la PRIMERA cuenta del servidor (bootstrap de `/setup`, ADR-0016). A diferencia de
+/// `crear_cuenta`, falla si ya existe CUALQUIER cuenta: la condición vive DENTRO del INSERT
+/// (`WHERE NOT EXISTS`) para que dos envíos simultáneos no puedan crear dos cuentas — SQLite
+/// serializa a los escritores, el segundo ve el COMMIT del primero, el `INSERT … SELECT`
+/// afecta 0 filas y no hay `RETURNING`.
+pub async fn crear_cuenta_si_vacio(
+    pool: &SqlitePool,
+    email: &str,
+    password: &str,
+) -> Result<Cuenta> {
+    let email = normalize_email(email);
+    let password_hash = hash_password(password)?;
+
+    let fila = sqlx::query_as::<_, FilaCuenta>(
+        "INSERT INTO accounts (email, password_hash)
+         SELECT ?, ? WHERE NOT EXISTS (SELECT 1 FROM accounts)
+         RETURNING id, email",
+    )
+    .bind(&email)
+    .bind(password_hash)
+    .fetch_optional(pool)
+    .await
+    .map_err(ServerError::Db)?;
+
+    fila.map(|fila| Cuenta {
+        id: fila.id,
+        email: fila.email,
+    })
+    .ok_or_else(|| ServerError::Invalid("el servidor ya tiene una cuenta".to_owned()))
+}
+
 pub async fn iniciar_sesion(
     pool: &SqlitePool,
     email: &str,

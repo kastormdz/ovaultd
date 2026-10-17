@@ -3,14 +3,14 @@ use std::sync::Arc;
 use axum::{
     body::Body,
     extract::{
-        FromRequestParts, Json, Path, Query, Request, State,
+        Form, FromRequestParts, Json, Path, Query, Request, State,
     },
     http::{
         header::{AUTHORIZATION, CONTENT_RANGE, CONTENT_TYPE, HOST, LOCATION, RANGE},
         request::Parts,
         HeaderMap, HeaderValue, Method, StatusCode,
     },
-    response::IntoResponse,
+    response::{IntoResponse, Redirect, Response},
     routing::{delete, get, head, post, put},
     Router,
 };
@@ -44,6 +44,8 @@ pub fn router(estado: EstadoServidor) -> Router {
     Router::new()
         .route("/healthz", get(healthz))
         .route("/metrics", get(metrics))
+        .route("/", get(raiz))
+        .route("/setup", get(setup_form).post(setup_crear))
         .route("/api/v1/auth/signin", post(signin))
         .route("/api/v1/auth/signout", post(signout))
         .route("/api/v1/me", get(me))
@@ -122,6 +124,218 @@ async fn healthz(State(state): State<EstadoServidor>) -> impl IntoResponse {
                 Json(serde_json::json!({ "status": "degraded" })),
             )
         }
+    }
+}
+
+/// Cuentas del servidor. El bootstrap por web (`/setup`) depende de que este número sea cero.
+async fn contar_cuentas(pool: &SqlitePool) -> Result<i64> {
+    Ok(sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM accounts")
+        .fetch_one(pool)
+        .await?)
+}
+
+/// Página HTML mínima. El cuerpo es SIEMPRE una constante de este archivo: nunca se interpola
+/// input del usuario, así que acá no hay superficie de XSS.
+fn pagina(status: StatusCode, titulo: &str, cuerpo: &str) -> Response {
+    let html = format!(
+        "<!doctype html>\n\
+         <html lang=\"es\">\n\
+         <head>\n\
+         <meta charset=\"utf-8\">\n\
+         <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n\
+         <title>ovaultd — {titulo}</title>\n\
+         </head>\n\
+         <body style=\"font-family: system-ui, sans-serif; max-width: 28rem; margin: 3rem auto; padding: 0 1rem; line-height: 1.6\">\n\
+         <h1 style=\"font-size: 1.25rem\">{titulo}</h1>\n\
+         {cuerpo}\n\
+         </body>\n\
+         </html>\n"
+    );
+
+    (
+        status,
+        [
+            ("content-type", "text/html; charset=utf-8"),
+            ("cache-control", "no-store"),
+        ],
+        html,
+    )
+        .into_response()
+}
+
+/// ¿El pedido de setup trae la autorización correcta? Sin `OVAULTD_SETUP_TOKEN` el formulario
+/// queda abierto (existe solo mientras no haya cuentas); con token, se exige.
+fn setup_autorizado(config: &Config, token: Option<&str>) -> bool {
+    match config.setup_token.as_deref() {
+        None => true,
+        Some(esperado) => token
+            .map(|recibido| tokens_iguales(recibido, esperado))
+            .unwrap_or(false),
+    }
+}
+
+/// Comparación en tiempo constante, sin dependencias: un `==` filtra por `timing` cuántos bytes
+/// acertó quien prueba. El token de instalación es de bajo riesgo, pero esto sale gratis.
+fn tokens_iguales(a: &str, b: &str) -> bool {
+    let (a, b) = (a.as_bytes(), b.as_bytes());
+    if a.len() != b.len() {
+        return false;
+    }
+
+    a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
+}
+
+/// Escape mínimo para interpolar el token (que viene de la config) en un atributo HTML.
+fn escapar(texto: &str) -> String {
+    let mut salida = String::with_capacity(texto.len());
+    for caracter in texto.chars() {
+        match caracter {
+            '&' => salida.push_str("&amp;"),
+            '<' => salida.push_str("&lt;"),
+            '>' => salida.push_str("&gt;"),
+            '"' => salida.push_str("&quot;"),
+            '\'' => salida.push_str("&#39;"),
+            _ => salida.push(caracter),
+        }
+    }
+    salida
+}
+
+const SETUP_CERRADO: (&str, &str) = (
+    "Configuración cerrada",
+    "<p>Este servidor ya tiene cuentas. Pedile al admin que te cree la tuya con \
+     <code>ovaultd-admin create-account</code>.</p>",
+);
+
+/// `GET /` — raíz web: sin cuentas lleva al bootstrap; con cuentas, página mínima.
+async fn raiz(State(state): State<EstadoServidor>) -> Result<Response> {
+    if contar_cuentas(&state.pool).await? == 0 {
+        return Ok(Redirect::to("/setup").into_response());
+    }
+
+    Ok(pagina(
+        StatusCode::OK,
+        "ovaultd",
+        "<p>Servidor self-hosted de sincronización cifrada de punta a punta.</p>\
+         <p>No hay nada para ver acá: usá tu cliente (la CLI o el plugin de Obsidian).</p>\
+         <p>Estado: <a href=\"/healthz\">/healthz</a></p>",
+    ))
+}
+
+#[derive(Deserialize)]
+struct ConsultaSetup {
+    #[serde(default)]
+    token: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct FormularioSetup {
+    email: String,
+    password: String,
+    #[serde(default)]
+    token: Option<String>,
+}
+
+/// `GET /setup` — bootstrap del primer usuario (ADR-0016): existe solo mientras el servidor no
+/// tenga NINGUNA cuenta. Con cuentas, 410 Gone para siempre.
+async fn setup_form(
+    State(state): State<EstadoServidor>,
+    Query(consulta): Query<ConsultaSetup>,
+) -> Result<Response> {
+    if contar_cuentas(&state.pool).await? > 0 {
+        return Ok(pagina(StatusCode::GONE, SETUP_CERRADO.0, SETUP_CERRADO.1));
+    }
+
+    let token = consulta.token.as_deref();
+    if !setup_autorizado(&state.config, token) {
+        return Ok(pagina(
+            StatusCode::FORBIDDEN,
+            "Falta el token de instalación",
+            "<p>Este servidor espera su primera cuenta, pero pide un token de instalación. \
+             Abrí <code>/setup?token=…</code> con el valor de <code>OVAULTD_SETUP_TOKEN</code>.</p>",
+        ));
+    }
+
+    let oculto = match token {
+        Some(token) => format!(
+            "<input type=\"hidden\" name=\"token\" value=\"{}\">",
+            escapar(token)
+        ),
+        None => String::new(),
+    };
+
+    Ok(pagina(
+        StatusCode::OK,
+        "Primera cuenta",
+        &format!(
+            "<p>Este servidor todavía no tiene cuentas. Creá la primera: esta página se \
+             desactiva sola apenas exista una.</p>\
+             <form method=\"post\" action=\"/setup\">\
+             {oculto}\
+             <label>Email<br><input name=\"email\" type=\"email\" required \
+             autocomplete=\"username\" style=\"width:100%\"></label><br><br>\
+             <label>Password de la cuenta<br><input name=\"password\" type=\"password\" \
+             required minlength=\"8\" autocomplete=\"new-password\" style=\"width:100%\"></label>\
+             <p style=\"font-size:.85rem;color:#666\">Es la password de INGRESO (login y \
+             dispositivos). Cada vault tiene su password de cifrado aparte: se define en el \
+             cliente y este servidor nunca la ve.</p>\
+             <button type=\"submit\">Crear cuenta</button>\
+             </form>"
+        ),
+    ))
+}
+
+/// `POST /setup` — crea la primera cuenta. La condición "no hay ninguna" viaja DENTRO del
+/// INSERT (`crear_cuenta_si_vacio`): dos envíos simultáneos no pueden crear dos cuentas.
+async fn setup_crear(
+    State(state): State<EstadoServidor>,
+    Form(formulario): Form<FormularioSetup>,
+) -> Result<Response> {
+    if contar_cuentas(&state.pool).await? > 0 {
+        return Ok(pagina(StatusCode::GONE, SETUP_CERRADO.0, SETUP_CERRADO.1));
+    }
+
+    if !setup_autorizado(&state.config, formulario.token.as_deref()) {
+        return Ok(pagina(
+            StatusCode::FORBIDDEN,
+            "Falta el token de instalación",
+            "<p>Mandá el <code>token</code> que corresponde a <code>OVAULTD_SETUP_TOKEN</code>.</p>",
+        ));
+    }
+
+    let email = formulario.email.trim();
+    if !email.contains('@') || email.len() > 254 {
+        return Ok(pagina(
+            StatusCode::BAD_REQUEST,
+            "Email inválido",
+            "<p>Ese email no parece válido: volvé atrás y corregilo.</p>",
+        ));
+    }
+
+    if formulario.password.chars().count() < 8 {
+        return Ok(pagina(
+            StatusCode::BAD_REQUEST,
+            "Password muy corta",
+            "<p>Usá al menos 8 caracteres para la password de la cuenta.</p>",
+        ));
+    }
+
+    match auth::crear_cuenta_si_vacio(&state.pool, email, &formulario.password).await {
+        Ok(cuenta) => {
+            tracing::info!(cuenta = cuenta.id, "bootstrap: primera cuenta creada por /setup");
+            Ok(pagina(
+                StatusCode::OK,
+                "Cuenta creada",
+                "<p>Listo. Entrá con tu cliente (email + esta password) y creá tu primer vault: \
+                 la password de cifrado la definís ahí, no acá.</p>\
+                 <p>Esta página queda desactivada.</p>",
+            ))
+        }
+        // Carrera perdida: otro POST creó la cuenta entre el conteo y el INSERT.
+        Err(ServerError::Invalid(_)) => {
+            Ok(pagina(StatusCode::GONE, SETUP_CERRADO.0, SETUP_CERRADO.1))
+        }
+        Err(error) => Err(error),
     }
 }
 

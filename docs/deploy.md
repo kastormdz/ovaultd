@@ -23,8 +23,11 @@ un digest inventado) y `docker compose -f compose.yaml up -d`, sin el overlay de
 
 ## Cuentas
 
-No hay registro público (ADR-0011): las cuentas se crean con `ovaultd-admin`, que viene
-**dentro de la imagen**:
+No hay registro público (ADR-0011). La **primera** cuenta se crea por la web en
+`http://<server>/setup`: solo existe mientras el servidor no tenga ninguna y se desactiva sola
+al crearla (con `OVAULTD_SETUP_TOKEN` seteado además exige `?token=…` — útil si el server va a
+quedar expuesto antes de terminar el bootstrap; ver ADR-0016). Las cuentas **siguientes** se
+crean con `ovaultd-admin`, que viene **dentro de la imagen**:
 
 ```bash
 printf '%s\n' '<password>' | docker compose exec -T ovaultd \
@@ -35,6 +38,10 @@ La password se lee **siempre** de stdin (nunca por argumento). `ovaultd-admin` t
 responde `health` (SELECT 1 contra la base) e `inspect` (conteos y tamaños; nada de esto
 descifra contenido). Para operar contra una base que no está corriendo en el contenedor,
 acepta `--db <ruta>` (o la variable `OVAULTD_DB`).
+
+Ojo con el modelo: una cuenta nueva es para **otra persona**. Un dispositivo nuevo (otra
+laptop, otro celular) se suma con `login` sobre la MISMA cuenta — no se crean cuentas por
+dispositivo.
 
 ## Qué lleva el contenedor
 

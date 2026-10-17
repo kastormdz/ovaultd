@@ -11,6 +11,10 @@ pub struct Config {
     /// TTL de una subida reanudable sin actividad (horas): vencida, el barrido la borra y
     /// libera su reserva de cuota (ADR-0012).
     pub upload_ttl_hours: i64,
+    /// Token de instalación del bootstrap por web (`/setup`, ADR-0016). Seteado, el formulario
+    /// de la primera cuenta exige `?token=…`; ausente/vacío, queda abierto MIENTRAS el servidor
+    /// no tenga ninguna cuenta. Nunca se imprime en logs (el `Display` solo dice set/unset).
+    pub setup_token: Option<String>,
 }
 
 impl Config {
@@ -51,6 +55,8 @@ impl Config {
             24,
         )?;
 
+        let setup_token = valor(&get, "OVAULTD_SETUP_TOKEN");
+
         Ok(Self {
             bind_addr,
             database_path,
@@ -58,6 +64,7 @@ impl Config {
             token_ttl_hours,
             challenge_ttl_seconds,
             upload_ttl_hours,
+            setup_token,
         })
     }
 }
@@ -66,13 +73,14 @@ impl fmt::Display for Config {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             formatter,
-            "bind_addr={}, database_path={}, cas_root={}, token_ttl_hours={}, challenge_ttl_seconds={}, upload_ttl_hours={}",
+            "bind_addr={}, database_path={}, cas_root={}, token_ttl_hours={}, challenge_ttl_seconds={}, upload_ttl_hours={}, setup_token={}",
             self.bind_addr,
             self.database_path,
             self.cas_root.display(),
             self.token_ttl_hours,
             self.challenge_ttl_seconds,
             self.upload_ttl_hours,
+            if self.setup_token.is_some() { "set" } else { "unset" },
         )
     }
 }
@@ -121,6 +129,7 @@ mod tests {
         assert_eq!(config.token_ttl_hours, 720);
         assert_eq!(config.challenge_ttl_seconds, 300);
         assert_eq!(config.upload_ttl_hours, 24);
+        assert!(config.setup_token.is_none());
     }
 
     #[test]
@@ -132,6 +141,7 @@ mod tests {
             "OVAULTD_TOKEN_TTL_HOURS" => Some(" ".to_owned()),
             "OVAULTD_CHALLENGE_TTL" => Some("   ".to_owned()),
             "OVAULTD_UPLOAD_TTL_HOURS" => Some(String::new()),
+            "OVAULTD_SETUP_TOKEN" => Some("   ".to_owned()),
             _ => None,
         })
         .unwrap();
@@ -142,6 +152,21 @@ mod tests {
         assert_eq!(config.token_ttl_hours, 720);
         assert_eq!(config.challenge_ttl_seconds, 300);
         assert_eq!(config.upload_ttl_hours, 24);
+        assert!(config.setup_token.is_none());
+    }
+
+    #[test]
+    fn setup_token_se_lee_de_la_variable() {
+        let config = Config::construir(|name| match name {
+            "OVAULTD_SETUP_TOKEN" => Some("token-de-instalacion".to_owned()),
+            _ => None,
+        })
+        .unwrap();
+
+        assert_eq!(config.setup_token.as_deref(), Some("token-de-instalacion"));
+        // el Display nunca imprime el valor: solo set/unset
+        assert!(config.to_string().contains("setup_token=set"));
+        assert!(!config.to_string().contains("token-de-instalacion"));
     }
 
     #[test]

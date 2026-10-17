@@ -27,7 +27,7 @@ The parts marked done are backed by real-execution gates, not mocks: Rust unit a
 - HTTP control plane plus a WebSocket data plane for revision deltas.
 - A single hardened container: non-root uid, read-only rootfs, every capability dropped, SQLite WAL and a content-addressed blob store under `/data`.
 - Reverse proxy first-class: the container E2E runs through the same nginx config that ships in `docker/proxy/nginx.conf.example`.
-- No public registration. Accounts are created out-of-band with the admin CLI, which ships inside the image (ADR-0011).
+- No public registration. The first account is created from the web at `/setup` (first run only, ADR-0016); further accounts with the admin CLI inside the image (ADR-0011).
 
 ## How it works
 
@@ -90,11 +90,13 @@ To run a published image later, set `OVAULTD_IMAGE` to a real `repository@sha256
 
 ### 2. Create your account
 
-Accounts are not self-service (ADR-0011); the admin tool ships inside the image:
+The **first** account is created in the browser: open `http://127.0.0.1:8080/setup` (through the proxy: `http://127.0.0.1:8888/setup`). That page exists only while the server has zero accounts and disables itself the moment one exists — no public registration (ADR-0011/0016). Set `OVAULTD_SETUP_TOKEN` if the server may be exposed before you finish this step.
+
+For **further accounts** (another person — a second laptop is just another device, added with `login`), the admin tool ships inside the image:
 
 ```bash
 printf '%s\n' 'a-long-password' | docker compose exec -T ovaultd \
-  ovaultd-admin create-account --email you@example.com
+  ovaultd-admin create-account --email them@example.com
 ```
 
 The password is always read from stdin, never passed as an argument. `ovaultd-admin` also answers `health` and `inspect` without ever decrypting anything.

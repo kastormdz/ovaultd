@@ -33,6 +33,8 @@ cd "$REPO" || exit 2
 SECRETS='(password|passwd|secret|token|api[_-]?key)["'"'"']?[[:space:]]*[:=][[:space:]]*["'"'"'][^"'"'"']{8,}'
 SECRETS_VETADOS='password-de-prueba|token-de-prueba|contrase'
 # `X="$(cmd)"` es una sustitución de shell, no un secreto literal.
+# `X="${VAR}"` / `X: "${VAR:-default}"` es una expansión de variable, tampoco.
+SECRETS_EXPANSION='[:=][[:space:]]*"\$\{'
 SECRETS_SUSTITUCION='=[[:space:]]*["'"'"']\$[(]'
 KEYS='BEGIN (RSA|OPENSSH|EC|DSA) PRIVATE KEY'
 
@@ -67,7 +69,7 @@ reportar() { # $1 = bloque de hallazgos ya formateado
 scan_archivo() { # $1 = archivo trackeado; imprime hallazgos con prefijo archivo:línea
   # Case-insensitive a propósito: los nombres propios capitalizados filtran igual.
   local f="$1" out=""
-  out+="$(grep -IniE -- "$SECRETS" "$f" 2>/dev/null | grep -viE -- "$SECRETS_VETADOS" | grep -vE -- "$SECRETS_SUSTITUCION")"$'\n'
+  out+="$(grep -IniE -- "$SECRETS" "$f" 2>/dev/null | grep -viE -- "$SECRETS_VETADOS" | grep -vE -- "$SECRETS_SUSTITUCION" | grep -vE -- "$SECRETS_EXPANSION")"$'\n'
   out+="$(grep -IniE -- "$KEYS" "$f" 2>/dev/null)"$'\n'
   out+="$(grep -InE -- "$HOME_PATHS" "$f" 2>/dev/null)"$'\n'
   out+="$(grep -InE -- "$REDES_PRIVADAS" "$f" 2>/dev/null | grep -vF -e '10.0.0.0/8' -e '172.16.0.0/12' -e '192.168.0.0/16')"$'\n'
