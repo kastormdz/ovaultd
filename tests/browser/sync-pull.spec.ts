@@ -178,6 +178,45 @@ test.describe('sync E2E (stack real)', () => {
       );
       expect(await runtime.call('apply.pending')).toEqual([]);
 
+      // ---------------------------------------------------------------- ciclo completo
+      // SyncClient (SyncClient.ts): la tabla de decisión pull→push en una sola pasada.
+      const cicloArchivo = new TextEncoder().encode('# Ciclo\nsubido por el ciclo\n');
+      writeFileSync(join(vaultRoot, 'Notas/ciclo.md'), cicloArchivo);
+
+      const ciclo = (await runtime.call('sync.cycle')) as {
+        estado: string;
+        pull: { status: string; applied: number };
+        push: { encoladas: number; empujadas: number; headRev: number } | null;
+        conflictos: unknown[];
+      };
+      expect(ciclo.estado).toBe('convergido');
+      expect(ciclo.conflictos).toEqual([]);
+      expect(ciclo.pull).toMatchObject({ status: 'pulled', applied: 0 });
+      expect(ciclo.push?.encoladas).toBe(1);
+      expect(ciclo.push?.empujadas).toBe(1);
+      expect(ciclo.push?.headRev).toBe(6);
+
+      // El server lo confirma y el blob del ciclo descifra al contenido escrito.
+      const deltaCiclo = (await pedirJson(`/api/v1/vaults/${vault}/changes?since=5&limit=10`, {
+        headers: { authorization: `Bearer ${signin.token}` },
+      })) as { items: Array<{ rev: number; op: string; blob_id: string }> };
+      expect(deltaCiclo.items.length).toBe(1);
+      expect(deltaCiclo.items[0]!.op).toBe('add');
+      expect(Buffer.from(await descargarYDescifrar(deltaCiclo.items[0]!.blob_id))).toEqual(
+        Buffer.from(cicloArchivo),
+      );
+
+      // Idempotente: un ciclo sin nada pendiente no sube ni baja nada.
+      const cicloQuieto = (await runtime.call('sync.cycle')) as {
+        estado: string;
+        pull: { applied: number };
+        push: { encoladas: number; empujadas: number } | null;
+      };
+      expect(cicloQuieto.estado).toBe('convergido');
+      expect(cicloQuieto.pull.applied).toBe(0);
+      expect(cicloQuieto.push?.encoladas).toBe(0);
+      expect(cicloQuieto.push?.empujadas).toBe(0);
+
       await runtime.call('sync.close');
     } finally {
       await runtime.close();

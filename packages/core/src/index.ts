@@ -16,4 +16,5 @@ export * from './scan.js';
 export * from './push.js';
 export * from './SyncConnection.js';
 export * from './reconcile.js';
+export * from './SyncClient.js';
 export * from './vault-path.js';

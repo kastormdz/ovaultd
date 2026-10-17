@@ -11,7 +11,9 @@
  * snapshot verificado) y journal de aplicación (begin/verify/complete atómico). Corte 3:
  * orquestación real de `apply` contra el filesystem (puente confinado al vault) y
  * recuperación de intenciones al reiniciar. Corte 4: `SyncConnection` (WS+HTTP contra el
- * wire, commit solo por WS) y `pullOnce` (convergencia).
+ * wire, commit solo por WS) y `pullOnce` (convergencia). Corte 5: `pushOnce` (save-first →
+ * cifrar → firmar → batch por WS) y `correrCiclo` — la tabla de decisión pull→push con
+ * conflictos explícitos (SyncClient).
  */
 
 import type { SubKeys } from '@ovaultd/crypto';
@@ -24,6 +26,7 @@ import { prepareOutboxEntry, type EnqueueRequest } from './outbox.js';
 import { pushOnce } from './push.js';
 import { pullOnce } from './reconcile.js';
 import { diffLocal, escanearVault } from './scan.js';
+import { correrCiclo } from './SyncClient.js';
 import { SyncConnection } from './SyncConnection.js';
 import {
   SCHEMA_VERSION,
@@ -33,7 +36,7 @@ import {
   type OutboxEntry,
 } from './StateStore.js';
 
-export const RUNTIME_VERSION = '0.4.0';
+export const RUNTIME_VERSION = '0.5.0';
 
 interface RuntimeRequest {
   id: number;
@@ -326,6 +329,25 @@ const handlers: Record<string, Handler> = {
     syncConn = null;
     syncVaultMeta = null;
     return { closed: true };
+  },
+
+  /**
+   * Ciclo completo (SyncClient): pull → push con la tabla de decisión. Pull bloqueado
+   * o resync ⇒ NO se pushea (el checkpoint quedaría atrás de una revisión sin aplicar).
+   */
+  'sync.cycle': async () => {
+    if (!syncConn || !syncVaultMeta) {
+      throw new Error('sync: no hay conexión abierta (sync.open primero)');
+    }
+    const { store, keys } = exigirApply();
+    return correrCiclo({
+      store,
+      port: new HttpFileSystemPort(globalThis.location.origin),
+      keys,
+      conn: syncConn,
+      vaultUuid: syncVaultMeta.vaultUuid,
+      epoch: syncVaultMeta.epoch,
+    });
   },
 };
 

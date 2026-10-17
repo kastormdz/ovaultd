@@ -8,8 +8,10 @@
  * Decisiones:
  *  - Solo archivos: las carpetas existen implícitas en el server (el protocolo las
  *    soporta, pero el MVP no las empuja y la convergencia no las necesita).
- *  - Los temporales `.ovaultd-tmp-*` del apply JAMÁS se escanean: son residuos de una
- *    publicación en curso, no contenido del usuario.
+ *  - Las exclusiones viven en `SyncFilter` (política única del núcleo): temporales del
+ *    apply, configuración del vault, papelera, git anidado, node_modules. Acá solo se
+ *    aplican — y "excluir no significa borrar": un path excluido que ya esté en la base
+ *    NO se propone como borrado.
  *  - Sin heurística de rename en esta pasada: un rename se emite `del` + `add`, que es
  *    correcto SIEMPRE; la detección por `prev_path_id` es una optimización posterior.
  */
@@ -18,6 +20,7 @@ import { cryptoProvider, pathId as calcularPathId, type SubKeys } from '@ovaultd
 import { toHex } from '@ovaultd/protocol';
 
 import type { FileSystemPort } from './file-port.js';
+import { estaExcluido } from './SyncFilter.js';
 import type { StateStore } from './StateStore.js';
 
 export interface EntradaEscaneada {
@@ -39,8 +42,6 @@ export interface DiffLocal {
   yaEncolados: number;
 }
 
-const PREFIJO_TEMP = '.ovaultd-tmp-';
-
 /** Recorre el vault completo (recursivo) y devuelve los archivos con su hash. */
 export async function escanearVault(
   port: FileSystemPort,
@@ -54,12 +55,13 @@ export async function escanearVault(
     const listado = await port.list(relDir === '' ? '.' : relDir);
     for (const entrada of listado) {
       const rel = relDir === '' ? entrada.name : `${relDir}/${entrada.name}`;
+      // Exclusiones PRIMERO: una carpeta excluida no se escanea NI se recursa.
+      if (estaExcluido(rel)) continue;
       if (entrada.isDirectory) {
         await recorrer(rel);
         continue;
       }
       if (!entrada.isFile) continue;
-      if (entrada.name.startsWith(PREFIJO_TEMP)) continue;
 
       const bytes = await port.read(rel);
       const stat = await port.stat(rel);
@@ -120,6 +122,8 @@ export async function diffLocal(store: StateStore, entradas: EntradaEscaneada[])
     if (enDisco.has(pathIdHex) || baseEntry.contentHash == null) continue;
     const indexEntry = index.get(pathIdHex);
     if (indexEntry?.deleted === true) continue;
+    // Excluir NO significa borrar el remoto: un path hoy excluido jamás se propone `del`.
+    if (indexEntry?.path && estaExcluido(indexEntry.path)) continue;
     if (pendientes.has(pathIdHex)) {
       diff.yaEncolados += 1;
       continue;
