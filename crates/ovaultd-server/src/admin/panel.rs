@@ -33,6 +33,7 @@ pub fn rutas() -> Router<EstadoServidor> {
         .route("/admin/login", get(login_form).post(login_post))
         .route("/admin/logout", post(logout))
         .route("/admin/mi-cuenta", get(mi_cuenta_form).post(mi_cuenta_post))
+        .merge(super::cuentas::rutas())
         .route("/admin/assets/admin.css", get(asset_css))
         .route("/admin/assets/htmx.min.js", get(asset_htmx))
 }
@@ -75,7 +76,7 @@ fn cookie_de(headers: &HeaderMap, nombre: &str) -> Option<String> {
 }
 
 /// ¿Este request llegó por HTTPS? (el borde setea `X-Forwarded-Proto`).
-fn es_https(headers: &HeaderMap) -> bool {
+pub(crate) fn es_https(headers: &HeaderMap) -> bool {
     headers
         .get("x-forwarded-proto")
         .and_then(|valor| valor.to_str().ok())
@@ -111,7 +112,7 @@ fn cookie_expirada(segura: bool) -> String {
 }
 
 /// IP del cliente tal como la ve el borde (`X-Real-IP` o el primer `X-Forwarded-For`).
-fn ip_del_cliente(headers: &HeaderMap) -> Option<String> {
+pub(crate) fn ip_del_cliente(headers: &HeaderMap) -> Option<String> {
     headers
         .get("x-real-ip")
         .or_else(|| headers.get("x-forwarded-for"))
@@ -129,7 +130,7 @@ fn respuesta_html(html: String) -> Response {
     ([(CACHE_CONTROL, "no-store")], Html(html)).into_response()
 }
 
-fn error_interno(contexto: &str, error: impl std::fmt::Display) -> Response {
+pub(crate) fn error_interno(contexto: &str, error: impl std::fmt::Display) -> Response {
     tracing::error!(contexto, %error, "error en el panel");
     (
         StatusCode::INTERNAL_SERVER_ERROR,
@@ -139,7 +140,7 @@ fn error_interno(contexto: &str, error: impl std::fmt::Display) -> Response {
         .into_response()
 }
 
-fn render<F>(renderizar: F, contexto: &str) -> Response
+pub(crate) fn render<F>(renderizar: F, contexto: &str) -> Response
 where
     F: FnOnce() -> std::result::Result<String, askama::Error>,
 {
@@ -180,7 +181,6 @@ struct PlantillaDashboard {
 struct PlantillaVaults {
     version: String,
     email: String,
-    csrf: String,
     vaults: Vec<VistaVault>,
 }
 
@@ -197,7 +197,6 @@ struct VistaVault {
 #[template(path = "admin/mi_cuenta.html")]
 struct PlantillaMiCuenta {
     version: String,
-    email: String,
     csrf: String,
     error: Option<String>,
     ok: Option<String>,
@@ -448,7 +447,6 @@ async fn vaults(State(estado): State<EstadoServidor>, Sesion(sesion): Sesion) ->
             PlantillaVaults {
                 version: VERSION.to_owned(),
                 email: sesion.email.clone(),
-                csrf: sesion.csrf_token.clone(),
                 vaults: vista,
             }
             .render()
@@ -488,7 +486,6 @@ async fn mi_cuenta_form(Sesion(sesion): Sesion) -> Response {
         || {
             PlantillaMiCuenta {
                 version: VERSION.to_owned(),
-                email: sesion.email.clone(),
                 csrf: sesion.csrf_token.clone(),
                 error: None,
                 ok: None,
@@ -521,7 +518,6 @@ async fn mi_cuenta_post(
             || {
                 PlantillaMiCuenta {
                     version: VERSION.to_owned(),
-                    email: sesion.email.clone(),
                     csrf: sesion.csrf_token.clone(),
                     error,
                     ok,

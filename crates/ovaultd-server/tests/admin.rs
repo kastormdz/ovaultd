@@ -491,3 +491,438 @@ async fn cambiar_password_valida_y_revoca_las_demas_sesiones() -> Result<()> {
 
     Ok(())
 }
+
+// ------------------------------------------------------------------ W1: cuentas
+
+use common::TestContext;
+use ovaultd_server::auth;
+
+/// Promueve la cuenta del contexto a admin (los tests de W1 lo necesitan).
+async fn hacer_admin(contexto: &common::TestContext) -> Result<()> {
+    sqlx::query("UPDATE accounts SET role = 'admin' WHERE email = ?")
+        .bind(EMAIL)
+        .execute(&contexto.pool)
+        .await?;
+    Ok(())
+}
+
+fn post_json(uri: &str, cuerpo: &str) -> Result<Request<Body>> {
+    Ok(Request::builder()
+        .method(Method::POST)
+        .uri(uri)
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(cuerpo.to_owned()))?)
+}
+
+/// Extrae el token del link de reset que aparece en el HTML de /admin/cuentas.
+fn token_del_link(html: &str) -> Option<String> {
+    let resto = html.split("/reset?token=").nth(1)?;
+    let token: String = resto
+        .chars()
+        .take_while(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
+        .collect();
+    if token.is_empty() {
+        None
+    } else {
+        Some(token)
+    }
+}
+
+#[tokio::test]
+async fn cuentas_es_solo_para_admins() -> Result<()> {
+    let contexto = TestContext::new().await?;
+    let cookie = login(&contexto).await?;
+
+    // Cuenta 'user' (el default): la página es 403 (hay sesión, falta el rol).
+    let resp = contexto
+        .request(get_con_cookie("/admin/cuentas", &cookie)?)
+        .await?;
+    let status = resp.status();
+    let html = cuerpo(resp).await?;
+    assert_eq!(
+        status,
+        StatusCode::FORBIDDEN,
+        "página devuelta: {}",
+        &html[..400.min(html.len())]
+    );
+
+    // Promovida a admin: 200, y la tabla la muestra.
+    hacer_admin(&contexto).await?;
+    let resp = contexto
+        .request(get_con_cookie("/admin/cuentas", &cookie)?)
+        .await?;
+    assert_eq!(resp.status(), StatusCode::OK);
+    let html = cuerpo(resp).await?;
+    assert!(html.contains(EMAIL), "la tabla lista la cuenta propia");
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn crear_cuenta_desde_el_panel_y_login_de_la_nueva() -> Result<()> {
+    let contexto = TestContext::new().await?;
+    hacer_admin(&contexto).await?;
+    let cookie = login(&contexto).await?;
+    let csrf = csrf_de_la_ultima_sesion(&contexto).await?;
+
+    let resp = contexto
+        .request(post_form_con_cookie(
+            "/admin/cuentas/crear",
+            &format!(
+                "csrf={csrf}&email=nueva%40ejemplo.com&password=password-de-prueba&rol=user"
+            ),
+            &cookie,
+        )?)
+        .await?;
+    assert_eq!(resp.status(), StatusCode::SEE_OTHER);
+
+    // La nueva cuenta existe y puede loguear en el panel.
+    let resp = contexto
+        .request(post_form(
+            "/admin/login",
+            "email=nueva%40ejemplo.com&password=password-de-prueba",
+        )?)
+        .await?;
+    assert_eq!(resp.status(), StatusCode::SEE_OTHER, "login de la cuenta nueva");
+
+    // Y queda auditada.
+    let eventos: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM audit_log WHERE action = 'cuenta_creada'",
+    )
+    .fetch_one(&contexto.pool)
+    .await?;
+    assert_eq!(eventos, 1);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn deshabilitar_corta_el_login_web_y_el_api() -> Result<()> {
+    let contexto = TestContext::new().await?;
+    let otra = auth::crear_cuenta(&contexto.pool, "otra@ejemplo.com", PASSWORD).await?;
+
+    // Antes: la API la deja entrar.
+    let resp = contexto
+        .request(post_json(
+            "/api/v1/auth/signin",
+            &format!(
+                r#"{{"email":"otra@ejemplo.com","password":"{PASSWORD}","name":"dev"}}"#
+            ),
+        )?)
+        .await?;
+    assert_eq!(resp.status(), StatusCode::OK, "signin antes de deshabilitar");
+
+    hacer_admin(&contexto).await?;
+    let cookie = login(&contexto).await?;
+    let csrf = csrf_de_la_ultima_sesion(&contexto).await?;
+
+    let resp = contexto
+        .request(post_form_con_cookie(
+            "/admin/cuentas/accion",
+            &format!("csrf={csrf}&id={}&accion=deshabilitar", otra.id),
+            &cookie,
+        )?)
+        .await?;
+    assert_eq!(resp.status(), StatusCode::SEE_OTHER);
+
+    // Después: la API la rebota…
+    let resp = contexto
+        .request(post_json(
+            "/api/v1/auth/signin",
+            &format!(
+                r#"{{"email":"otra@ejemplo.com","password":"{PASSWORD}","name":"dev"}}"#
+            ),
+        )?)
+        .await?;
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED, "signin deshabilitada");
+
+    // …y el panel no le da cookie tampoco.
+    let resp = contexto
+        .request(post_form(
+            "/admin/login",
+            "email=otra%40ejemplo.com&password=password-de-prueba",
+        )?)
+        .await?;
+    assert!(
+        resp.headers().get(header::SET_COOKIE).is_none(),
+        "una deshabilitada no recibe cookie de sesión"
+    );
+
+    // Habilitar la devuelve al ruedo.
+    let resp = contexto
+        .request(post_form_con_cookie(
+            "/admin/cuentas/accion",
+            &format!("csrf={csrf}&id={}&accion=habilitar", otra.id),
+            &cookie,
+        )?)
+        .await?;
+    assert_eq!(resp.status(), StatusCode::SEE_OTHER);
+    let resp = contexto
+        .request(post_json(
+            "/api/v1/auth/signin",
+            &format!(
+                r#"{{"email":"otra@ejemplo.com","password":"{PASSWORD}","name":"dev"}}"#
+            ),
+        )?)
+        .await?;
+    assert_eq!(resp.status(), StatusCode::OK, "signin tras habilitar");
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn el_ultimo_admin_no_se_degrada_ni_deshabilita() -> Result<()> {
+    let contexto = TestContext::new().await?;
+    hacer_admin(&contexto).await?;
+    let cookie = login(&contexto).await?;
+    let csrf = csrf_de_la_ultima_sesion(&contexto).await?;
+
+    let propio_id: i64 = sqlx::query_scalar("SELECT id FROM accounts WHERE email = ?")
+        .bind(EMAIL)
+        .fetch_one(&contexto.pool)
+        .await?;
+
+    // Degradarse siendo el único admin: rebotado, el rol no cambia.
+    let resp = contexto
+        .request(post_form_con_cookie(
+            "/admin/cuentas/accion",
+            &format!("csrf={csrf}&id={propio_id}&accion=degradar"),
+            &cookie,
+        )?)
+        .await?;
+    assert_eq!(resp.status(), StatusCode::SEE_OTHER);
+    let destino = resp.headers().get(header::LOCATION).unwrap().to_str()?;
+    assert!(destino.contains("error"), "debe volver con error: {destino}");
+    let rol: String = sqlx::query_scalar("SELECT role FROM accounts WHERE id = ?")
+        .bind(propio_id)
+        .fetch_one(&contexto.pool)
+        .await?;
+    assert_eq!(rol, "admin");
+
+    // Deshabilitarse a sí mismo: rebotado, la cuenta queda activa.
+    let resp = contexto
+        .request(post_form_con_cookie(
+            "/admin/cuentas/accion",
+            &format!("csrf={csrf}&id={propio_id}&accion=deshabilitar"),
+            &cookie,
+        )?)
+        .await?;
+    assert_eq!(resp.status(), StatusCode::SEE_OTHER);
+    let deshabilitada: Option<String> =
+        sqlx::query_scalar("SELECT disabled_at FROM accounts WHERE id = ?")
+            .bind(propio_id)
+            .fetch_one(&contexto.pool)
+            .await?;
+    assert!(deshabilitada.is_none());
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn borrar_cuenta_exige_confirmacion_y_purga_vaults() -> Result<()> {
+    let contexto = TestContext::new().await?;
+    let (vault_id, _token) = contexto.agregar_vault_ajeno("con-vaults@ejemplo.com").await?;
+
+    hacer_admin(&contexto).await?;
+    let cookie = login(&contexto).await?;
+    let csrf = csrf_de_la_ultima_sesion(&contexto).await?;
+
+    let cuenta_id: i64 = sqlx::query_scalar("SELECT id FROM accounts WHERE email = ?")
+        .bind("con-vaults@ejemplo.com")
+        .fetch_one(&contexto.pool)
+        .await?;
+
+    // Sin el email exacto: rebotado.
+    let resp = contexto
+        .request(post_form_con_cookie(
+            "/admin/cuentas/borrar",
+            &format!("csrf={csrf}&id={cuenta_id}&confirm=nada"),
+            &cookie,
+        )?)
+        .await?;
+    assert_eq!(resp.status(), StatusCode::SEE_OTHER);
+    let destino = resp.headers().get(header::LOCATION).unwrap().to_str()?;
+    assert!(destino.contains("cuentas/borrar"), "vuelve al form: {destino}");
+
+    // Con el email pero sin marcar los vaults: rebotado (todavía tiene datos).
+    let resp = contexto
+        .request(post_form_con_cookie(
+            "/admin/cuentas/borrar",
+            &format!("csrf={csrf}&id={cuenta_id}&confirm=con-vaults%40ejemplo.com"),
+            &cookie,
+        )?)
+        .await?;
+    assert_eq!(resp.status(), StatusCode::SEE_OTHER);
+    let destino = resp.headers().get(header::LOCATION).unwrap().to_str()?;
+    assert!(destino.contains("vaults"), "exige la confirmación de vaults: {destino}");
+
+    // Completo: cuenta + vault + blobs.
+    let resp = contexto
+        .request(post_form_con_cookie(
+            "/admin/cuentas/borrar",
+            &format!(
+                "csrf={csrf}&id={cuenta_id}&confirm=con-vaults%40ejemplo.com&borrar_vaults=si"
+            ),
+            &cookie,
+        )?)
+        .await?;
+    assert_eq!(resp.status(), StatusCode::SEE_OTHER);
+    let destino = resp.headers().get(header::LOCATION).unwrap().to_str()?;
+    assert!(destino.starts_with("/admin/cuentas?ok="), "éxito: {destino}");
+
+    let cuentas: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM accounts WHERE id = ?")
+        .bind(cuenta_id)
+        .fetch_one(&contexto.pool)
+        .await?;
+    let vaults: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM vaults WHERE id = ?")
+        .bind(vault_id)
+        .fetch_one(&contexto.pool)
+        .await?;
+    assert_eq!(cuentas, 0);
+    assert_eq!(vaults, 0, "el vault se purgó con la cuenta");
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn reset_password_cambia_y_viejo_login_muere() -> Result<()> {
+    let contexto = TestContext::new().await?;
+    auth::crear_cuenta(&contexto.pool, "reset@ejemplo.com", PASSWORD).await?;
+
+    hacer_admin(&contexto).await?;
+    let cookie = login(&contexto).await?;
+    let csrf = csrf_de_la_ultima_sesion(&contexto).await?;
+
+    let cuenta_id: i64 = sqlx::query_scalar("SELECT id FROM accounts WHERE email = ?")
+        .bind("reset@ejemplo.com")
+        .fetch_one(&contexto.pool)
+        .await?;
+
+    // El admin genera el link: se renderiza UNA vez con el token adentro.
+    let resp = contexto
+        .request(post_form_con_cookie(
+            "/admin/cuentas/accion",
+            &format!("csrf={csrf}&id={cuenta_id}&accion=reset"),
+            &cookie,
+        )?)
+        .await?;
+    assert_eq!(resp.status(), StatusCode::OK);
+    let html = cuerpo(resp).await?;
+    let token = token_del_link(&html).ok_or("el HTML trae el link de reset")?;
+
+    // El form de reset acepta el token…
+    let resp = contexto
+        .request(
+            Request::builder()
+                .method(Method::GET)
+                .uri(format!("/reset?token={token}"))
+                .body(Body::empty())?,
+        )
+        .await?;
+    assert_eq!(resp.status(), StatusCode::OK);
+    let html = cuerpo(resp).await?;
+    assert!(html.contains("reset@ejemplo.com"), "el form dice de quién es");
+
+    // …y el POST deja la password nueva + quema el token.
+    let resp = contexto
+        .request(post_form(
+            "/reset",
+            &format!("token={token}&nueva=password-nueva-99&repetir=password-nueva-99"),
+        )?)
+        .await?;
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    // La nueva entra; la vieja murió.
+    let resp = contexto
+        .request(post_form(
+            "/admin/login",
+            "email=reset%40ejemplo.com&password=password-nueva-99",
+        )?)
+        .await?;
+    assert_eq!(resp.status(), StatusCode::SEE_OTHER, "login con la nueva");
+    let resp = contexto
+        .request(post_form(
+            "/admin/login",
+            &format!("email=reset%40ejemplo.com&password={PASSWORD}"),
+        )?)
+        .await?;
+    assert!(
+        resp.headers().get(header::SET_COOKIE).is_none(),
+        "la password vieja ya no entra"
+    );
+
+    // Reusar el token: link muerto.
+    let resp = contexto
+        .request(post_form(
+            "/reset",
+            &format!("token={token}&nueva=otra-password-77&repetir=otra-password-77"),
+        )?)
+        .await?;
+    assert_eq!(resp.status(), StatusCode::OK);
+    let html = cuerpo(resp).await?;
+    assert!(html.contains("no es válido"), "un token usado no vuelve a valer");
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn register_respeta_el_toggle_del_admin() -> Result<()> {
+    let contexto = TestContext::new().await?;
+
+    // Cerrado (default): el POST no crea nada, la página lo dice.
+    let resp = contexto
+        .request(post_form(
+            "/register",
+            "email=colado%40ejemplo.com&password=password-de-prueba&repetir=password-de-prueba",
+        )?)
+        .await?;
+    assert_eq!(resp.status(), StatusCode::OK);
+    let html = cuerpo(resp).await?;
+    assert!(html.contains("cerrado"), "el server avisa que está cerrado");
+    let cuentas: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM accounts WHERE email = ?")
+        .bind("colado@ejemplo.com")
+        .fetch_one(&contexto.pool)
+        .await?;
+    assert_eq!(cuentas, 0, "cerrado = no entra nadie");
+
+    // El admin lo abre desde Ajustes.
+    hacer_admin(&contexto).await?;
+    let cookie = login(&contexto).await?;
+    let csrf = csrf_de_la_ultima_sesion(&contexto).await?;
+    let resp = contexto
+        .request(post_form_con_cookie(
+            "/admin/ajustes",
+            &format!("csrf={csrf}&registro=on"),
+            &cookie,
+        )?)
+        .await?;
+    assert_eq!(resp.status(), StatusCode::SEE_OTHER);
+
+    // Abierto: el alta funciona y la cuenta nueva entra al panel.
+    let resp = contexto
+        .request(post_form(
+            "/register",
+            "email=colado%40ejemplo.com&password=password-de-prueba&repetir=password-de-prueba",
+        )?)
+        .await?;
+    assert_eq!(resp.status(), StatusCode::OK);
+    let html = cuerpo(resp).await?;
+    assert!(html.contains("Cuenta creada"), "alta confirmada");
+    let resp = contexto
+        .request(post_form(
+            "/admin/login",
+            "email=colado%40ejemplo.com&password=password-de-prueba",
+        )?)
+        .await?;
+    assert_eq!(resp.status(), StatusCode::SEE_OTHER, "la cuenta registrada loguea");
+
+    // Y queda auditado el alta pública.
+    let eventos: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM audit_log WHERE action = 'cuenta_registrada'",
+    )
+    .fetch_one(&contexto.pool)
+    .await?;
+    assert_eq!(eventos, 1);
+
+    Ok(())
+}

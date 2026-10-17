@@ -1,0 +1,101 @@
+{% extends "admin/base.html" %}
+{% block titulo %}Cuentas — ovaultd{% endblock %}
+{% block nav %}<a class="boton fantasma" href="/admin">← Panel</a><a class="boton fantasma" href="/admin/ajustes">Ajustes</a>{% endblock %}
+{% block contenido %}
+<div class="cabecera-seccion">
+  <h1>Cuentas</h1>
+  <span class="chip">{{ email }}</span>
+</div>
+
+{% if let Some(texto) = error %}<div class="alerta error">{{ texto }}</div>{% endif %}
+{% if let Some(texto) = ok %}<div class="alerta bien">{{ texto }}</div>{% endif %}
+{% if let Some(link) = reset_link %}
+<div class="alerta bien">
+  <p>Link de reset (se muestra <strong>UNA vez</strong>):</p>
+  <pre class="codigo">{{ link }}</pre>
+</div>
+{% endif %}
+
+<section class="tarjeta">
+  <h2>Crear cuenta</h2>
+  <form method="post" action="/admin/cuentas/crear" class="formulario">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <div class="campos-linea">
+      <label>Email
+        <input type="email" name="email" required autocomplete="off">
+      </label>
+      <label>Password inicial
+        <input type="password" name="password" required minlength="8" autocomplete="new-password">
+      </label>
+      <label>Rol
+        <select name="rol">
+          <option value="user">user</option>
+          <option value="admin">admin</option>
+        </select>
+      </label>
+      <button class="boton primario" type="submit">Crear</button>
+    </div>
+  </form>
+  <p class="ayuda">La password inicial la definís vos y se la pasás a la persona (no hay SMTP acá).
+  Puede cambiarla sola desde «Mi cuenta» o con un link de reset.</p>
+</section>
+
+<section class="tarjeta">
+  {% if cuentas.len() == 0 %}
+  <p>No hay cuentas todavía.</p>
+  {% else %}
+  <table class="tabla">
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>Email</th>
+        <th>Rol</th>
+        <th>Estado</th>
+        <th class="num">Vaults</th>
+        <th>Creada</th>
+        <th>Última actividad</th>
+        <th>Acciones</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for c in cuentas %}
+      <tr>
+        <td>{{ c.id }}</td>
+        <td>{{ c.email }}{% if c.es_yo %} <span class="chip">vos</span>{% endif %}</td>
+        <td>{{ c.role }}</td>
+        <td>{% if c.deshabilitada %}<span class="estado-malo">deshabilitada</span>{% else %}<span class="estado-bien">activa</span>{% endif %}</td>
+        <td class="num">{{ c.vaults }}</td>
+        <td>{{ c.creada }}</td>
+        <td>{% if let Some(ts) = c.ultima %}{{ ts }}{% else %}—{% endif %}</td>
+        <td>
+          <div class="acciones">
+            <form method="post" action="/admin/cuentas/accion" class="en-linea">
+              <input type="hidden" name="csrf" value="{{ csrf }}">
+              <input type="hidden" name="id" value="{{ c.id }}">
+              {% if c.deshabilitada %}
+              <button class="boton mini" name="accion" value="habilitar">Habilitar</button>
+              {% else %}
+              <button class="boton mini" name="accion" value="deshabilitar">Deshabilitar</button>
+              {% endif %}
+              {% if c.role == "admin" %}
+              <button class="boton mini" name="accion" value="degradar" title="Pasar a user">→ user</button>
+              {% else %}
+              <button class="boton mini" name="accion" value="promover" title="Pasar a admin">→ admin</button>
+              {% endif %}
+              <button class="boton mini" name="accion" value="reset">Reset</button>
+            </form>
+            <a class="boton mini peligro" href="/admin/cuentas/borrar?id={{ c.id }}">Borrar…</a>
+          </div>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <div class="paginacion">
+    <span>{% if pagina > 1 %}<a class="boton mini" href="/admin/cuentas?pagina={{ pagina - 1 }}">← Anterior</a>{% endif %}</span>
+    <span class="ayuda">página {{ pagina }}</span>
+    <span>{% if hay_mas %}<a class="boton mini" href="/admin/cuentas?pagina={{ pagina + 1 }}">Siguiente →</a>{% endif %}</span>
+  </div>
+  {% endif %}
+</section>
+{% endblock %}

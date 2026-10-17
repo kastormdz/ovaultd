@@ -69,7 +69,7 @@ pub async fn verificar_sesion(pool: &SqlitePool, token: &str) -> Result<Option<S
         "SELECT s.id, s.account_id, s.csrf_token, a.email, a.role
          FROM sessions s
          JOIN accounts a ON a.id = s.account_id
-         WHERE s.token_hash = ? AND datetime('now') < s.expires_at",
+         WHERE s.token_hash = ? AND datetime('now') < s.expires_at AND a.disabled_at IS NULL",
     )
     .bind(auth::hash_token(token))
     .fetch_optional(pool)
@@ -101,6 +101,16 @@ pub fn csrf_valido(sesion: &SesionActiva, csrf_recibido: &str) -> bool {
 pub async fn revocar_sesion(pool: &SqlitePool, token: &str) -> Result<()> {
     sqlx::query("DELETE FROM sessions WHERE token_hash = ?")
         .bind(auth::hash_token(token))
+        .execute(pool)
+        .await?;
+
+    Ok(())
+}
+
+/// Revoca TODAS las sesiones web de una cuenta (deshabilitar, borrar, reset de password).
+pub async fn revocar_todas(pool: &SqlitePool, account_id: i64) -> Result<()> {
+    sqlx::query("DELETE FROM sessions WHERE account_id = ?")
+        .bind(account_id)
         .execute(pool)
         .await?;
 

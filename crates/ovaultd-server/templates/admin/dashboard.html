@@ -32,4 +32,12 @@
   <h2>Tu cuenta</h2>
   <p><a href="/admin/mi-cuenta">Cambiar tu password</a> — al cambiarla, las demás sesiones del panel se cierran.</p>
 </section>
+
+{% if rol == "admin" %}
+<section class="tarjeta">
+  <h2>Administración</h2>
+  <p><a href="/admin/cuentas">Cuentas</a> — crear, roles, deshabilitar, reset de passwords y borrado.
+  <a href="/admin/ajustes">Ajustes</a> — registro de cuentas y parámetros del server.</p>
+</section>
+{% endif %}
 {% endblock %}

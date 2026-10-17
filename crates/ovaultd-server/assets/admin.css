@@ -177,3 +177,25 @@ input:focus { outline: 2px solid var(--acento); outline-offset: 1px; border-colo
   .contenedor { width: 100% - 1rem; margin-top: 1rem; }
   .tarjeta { padding: 1.1rem; }
 }
+
+/* W1: cuentas, registro, reset y ajustes */
+.boton.mini { padding: 0.15rem 0.55rem; font-size: 0.8rem; }
+.boton.peligro { border-color: var(--error); color: var(--error); }
+.boton.peligro:hover { background: rgb(255 107 129 / 12%); border-color: var(--error); }
+.campos-linea { display: flex; gap: 0.75rem; align-items: flex-end; flex-wrap: wrap; }
+.campos-linea label { flex: 1; min-width: 11rem; }
+.acciones { display: flex; gap: 0.35rem; flex-wrap: wrap; align-items: center; }
+.acciones .en-linea { display: inline-flex; gap: 0.25rem; }
+.estado-bien { color: var(--bien); }
+.estado-malo { color: var(--error); }
+.codigo {
+  background: var(--fondo);
+  border: 1px solid var(--borde);
+  border-radius: 8px;
+  padding: 0.5rem 0.75rem;
+  overflow-x: auto;
+  user-select: all;
+  font-size: 0.85rem;
+}
+.paginacion { display: flex; justify-content: space-between; align-items: center; margin-top: 0.9rem; }
+.check { flex-direction: row !important; align-items: center; gap: 0.5rem !important; }

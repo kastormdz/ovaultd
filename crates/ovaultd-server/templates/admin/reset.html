@@ -1,0 +1,36 @@
+{% extends "admin/base.html" %}
+{% block titulo %}Reset de password — ovaultd{% endblock %}
+{% block nav %}{% endblock %}
+{% block contenido %}
+<section class="tarjeta estrecha">
+  <h1>Reset de password</h1>
+
+  {% if !valido %}
+  <div class="alerta error">
+    <p>Este link <strong>no es válido</strong>: puede estar vencido o ya haberse usado.</p>
+    <p>Pedile a un administrador que te genere uno nuevo.</p>
+  </div>
+
+  {% else if hecho %}
+  <div class="alerta bien">
+    <p>Password actualizada para <strong>{{ email }}</strong>. Por seguridad se cerraron
+    todas tus sesiones y se revocaron los tokens de tus devices: volvé a entrar con la nueva.</p>
+  </div>
+  <a class="boton primario" href="/admin/login">Ir al login</a>
+
+  {% else %}
+  {% if let Some(texto) = error %}<div class="alerta error">{{ texto }}</div>{% endif %}
+  <p class="ayuda">Estás reseteando la password de <strong>{{ email }}</strong>.</p>
+  <form method="post" action="/reset" class="formulario">
+    <input type="hidden" name="token" value="{{ token }}">
+    <label>Password nueva
+      <input type="password" name="nueva" required minlength="8" autocomplete="new-password">
+    </label>
+    <label>Repetir la password nueva
+      <input type="password" name="repetir" required minlength="8" autocomplete="new-password">
+    </label>
+    <button class="boton primario" type="submit">Cambiar password</button>
+  </form>
+  {% endif %}
+</section>
+{% endblock %}

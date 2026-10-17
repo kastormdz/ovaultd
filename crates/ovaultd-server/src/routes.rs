@@ -371,9 +371,10 @@ pub(crate) async fn autenticar_token(
         .map_err(|_| ServerError::Unauthorized)?;
 
     let account_id = sqlx::query_scalar::<_, i64>(
-        "SELECT account_id
-         FROM devices
-         WHERE id = ?",
+        "SELECT d.account_id
+         FROM devices d
+         JOIN accounts a ON a.id = d.account_id
+         WHERE d.id = ? AND a.disabled_at IS NULL",
     )
     .bind(device_id)
     .fetch_optional(&state.pool)
@@ -736,6 +737,42 @@ struct ConfirmacionBorrado {
     confirm: Option<String>,
 }
 
+/// Núcleo del borrado: cascada en la DB + barrido del CAS de los blobs sin referencias en
+/// ningún otro vault. Devuelve cuántos blobs físicos se barrieron. Lo comparten la API y
+/// el panel (W1: borrado forzado de una cuenta con vaults).
+pub(crate) async fn purgar_vault(
+    pool: &SqlitePool,
+    cas: &crate::storage::CasStore,
+    vault_id: i64,
+) -> Result<usize> {
+    // Los hashes del vault ANTES del DELETE (la cascada se lleva la tabla `blobs`).
+    let hashes: Vec<Vec<u8>> = sqlx::query_scalar("SELECT hash FROM blobs WHERE vault_id = ?")
+        .bind(vault_id)
+        .fetch_all(pool)
+        .await?;
+
+    sqlx::query("DELETE FROM vaults WHERE id = ?")
+        .bind(vault_id)
+        .execute(pool)
+        .await?;
+
+    // Barrido del CAS: solo los blobs que ya no referencia ningún vault.
+    let mut barridos = 0usize;
+    for hash in hashes {
+        let referencias: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM blobs WHERE hash = ?")
+            .bind(&hash)
+            .fetch_one(pool)
+            .await?;
+        if referencias == 0 {
+            if let Ok(bytes) = <[u8; 32]>::try_from(hash.as_slice()) {
+                cas.remove(&BlobId::new(bytes)).await?;
+                barridos += 1;
+            }
+        }
+    }
+    Ok(barridos)
+}
+
 /// `DELETE /api/v1/vaults/{id}?confirm=<nombre>` — borrado REAL de un vault de la cuenta.
 ///
 /// La cascada de la DB (`ON DELETE CASCADE` + `foreign_keys(true)`) limpia devices, files,
@@ -761,31 +798,7 @@ async fn borrar_vault(
         ));
     }
 
-    // Los hashes del vault ANTES del DELETE (la cascada se lleva la tabla `blobs`).
-    let hashes: Vec<Vec<u8>> = sqlx::query_scalar("SELECT hash FROM blobs WHERE vault_id = ?")
-        .bind(vault_id)
-        .fetch_all(&state.pool)
-        .await?;
-
-    sqlx::query("DELETE FROM vaults WHERE id = ?")
-        .bind(vault_id)
-        .execute(&state.pool)
-        .await?;
-
-    // Barrido del CAS: solo los blobs que ya no referencia ningún vault.
-    let mut barridos = 0usize;
-    for hash in hashes {
-        let referencias: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM blobs WHERE hash = ?")
-            .bind(&hash)
-            .fetch_one(&state.pool)
-            .await?;
-        if referencias == 0 {
-            if let Ok(bytes) = <[u8; 32]>::try_from(hash.as_slice()) {
-                state.cas.remove(&BlobId::new(bytes)).await?;
-                barridos += 1;
-            }
-        }
-    }
+    let barridos = purgar_vault(&state.pool, &state.cas, vault_id).await?;
 
     tracing::info!(vault = vault_id, %nombre, barridos, "vault borrado");
     sqlx::query(

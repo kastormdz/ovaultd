@@ -1,0 +1,39 @@
+{% extends "admin/base.html" %}
+{% block titulo %}Crear cuenta — ovaultd{% endblock %}
+{% block nav %}{% endblock %}
+{% block contenido %}
+<section class="tarjeta estrecha">
+  <h1>Crear cuenta</h1>
+
+  {% if !abierto %}
+  <div class="alerta error">
+    <p>El registro está <strong>cerrado</strong> en este server.</p>
+    <p>Pedile a un administrador que te cree la cuenta, o entrá si ya tenés una.</p>
+  </div>
+  <a class="boton primario" href="/admin/login">Ir al login</a>
+
+  {% else if hecho %}
+  <div class="alerta bien">
+    <p>¡Cuenta creada! Ya podés entrar con tu email y password.</p>
+  </div>
+  <a class="boton primario" href="/admin/login">Ir al login</a>
+
+  {% else %}
+  {% if let Some(texto) = error %}<div class="alerta error">{{ texto }}</div>{% endif %}
+  <p class="ayuda">Es la password de <strong>cuenta</strong> (login y devices). Cada vault tiene
+  su password de cifrado aparte, que se define en tu cliente y este server nunca ve.</p>
+  <form method="post" action="/register" class="formulario">
+    <label>Email
+      <input type="email" name="email" required autocomplete="username">
+    </label>
+    <label>Password
+      <input type="password" name="password" required minlength="8" autocomplete="new-password">
+    </label>
+    <label>Repetir la password
+      <input type="password" name="repetir" required minlength="8" autocomplete="new-password">
+    </label>
+    <button class="boton primario" type="submit">Crear cuenta</button>
+  </form>
+  {% endif %}
+</section>
+{% endblock %}

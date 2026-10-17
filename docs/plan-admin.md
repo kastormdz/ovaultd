@@ -1,8 +1,8 @@
 # Plan — Panel web de administración, versionado y borde
 
-- Estado: **en ejecución** — **PD ✅ y W0 ✅** (2026-10-17); las 4 decisiones se confirmaron
+- Estado: **en ejecución** — **PD ✅, W0 ✅ y W1 ✅** (2026-10-17); las 4 decisiones se confirmaron
   tal cual (stack server-rendered, registro cerrado + toggle, borrado con bloques, español).
-  Sigue: **W1**.
+  Sigue: **W2**.
 - Origen: pedido directo del operador (2026-10-17): el admin tiene que ser **web, moderno y
   PRO** (cuentas, passwords, stats, registro on/off); **sin proxy en el docker** (el borde lo
   pone NPM Plus, que ya opera); **versiones explícitas** server ↔ plugin y **releases en
@@ -50,14 +50,27 @@
   sobre el binario: bootstrap → login → dashboard → auditoría en la DB. Plan de W1 continúa
   abajo sin cambios.
 
-### W1 — Cuentas, registro y reset
+### W1 — Cuentas, registro y reset ✅
 
-- `/admin/cuentas`: listar (paginado), crear, deshabilitar, borrar (confirmación por doble
-  paso), promover/degradar rol.
-- `/register` (solo con registro abierto) + `/reset?token=…` con token de un uso.
-- `/admin/ajustes`: toggle de registro + parámetros del server.
-- **Gate**: tests + specs de browser (Playwright del repo) sobre flujo completo:
-  login → crear cuenta → reset → cambiar password → borrar.
+- ✅ Migración `006_w1_cuentas.sql`: `accounts.disabled_at` + `password_resets` (`token_hash`
+  SHA-256, vence a las 24 h, un solo uso — sin SMTP: el link lo ve el admin UNA vez).
+- ✅ `/admin/cuentas` (solo rol `admin`; sin rol → 403 con página propia, sin redirect):
+  listar paginado (25/pág con nº de vaults y última actividad), crear, deshabilitar/habilitar
+  (deshabilitar mata la sesión web al instante — y los tokens de API/WS mueren por el JOIN
+  nuevo en `autenticar_token`, la fuente única HTTP+WS), promover/degradar, reset y borrar
+  (confirmación por email EXACTO + purge de vaults con checkbox explícito, reusa
+  `purgar_vault`). Invariables: nunca el último admin activo, nunca la propia cuenta. Todo
+  auditado.
+- ✅ `/register` (solo con el registro abierto; freno por IP sobre el limitador del login) y
+  `/reset?token=…` (un solo uso: al cambiar la password mueren TODAS las sesiones web + los
+  tokens de devices, y el token queda quemado).
+- ✅ `/admin/ajustes`: toggle de registro (nace `off`, ADR-0011) + parámetros read-only del
+  server. El dashboard suma la sección «Administración» para admins.
+- ✅ Gate: workspace **182 passed / 0 failed** (7 tests de integración nuevos en
+  `tests/admin.rs`) + E2E vivo sobre el binario (`:8896`): bootstrap → login → crear →
+  deshabilitar/habilitar → reset (link una vez) → registro por toggle → borrado, con la
+  auditoría completa en la DB.
+- Commit `d1cf9d2` (pusheado).
 
 ### W2 — Vaults, devices y auditoría
 

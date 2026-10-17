@@ -4,6 +4,7 @@
 //! vendorizado en `assets/` (sin CDNs, sin build de Node). El panel funciona igual
 //! sin JavaScript: los formularios son POST clásicos.
 
+pub mod cuentas;
 pub mod panel;
 pub mod sesiones;
 

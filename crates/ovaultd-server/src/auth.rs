@@ -21,6 +21,7 @@ struct FilaCuenta {
 struct FilaCuentaLogin {
     id: i64,
     password_hash: String,
+    disabled_at: Option<String>,
 }
 
 #[derive(Debug, FromRow)]
@@ -199,7 +200,7 @@ pub async fn iniciar_sesion(
     let email = normalize_email(email);
 
     let fila = sqlx::query_as::<_, FilaCuentaLogin>(
-        "SELECT id, password_hash
+        "SELECT id, password_hash, disabled_at
          FROM accounts
          WHERE email = ?",
     )
@@ -208,7 +209,15 @@ pub async fn iniciar_sesion(
     .await?;
 
     let (account_id, password_hash) = match fila {
-        Some(fila) => (Some(fila.id), fila.password_hash),
+        Some(fila) => (
+            // Una cuenta deshabilitada no crea devices ni con la password correcta.
+            if fila.disabled_at.is_none() {
+                Some(fila.id)
+            } else {
+                None
+            },
+            fila.password_hash,
+        ),
         None => (None, hash_senuelo().to_owned()),
     };
 
@@ -239,6 +248,7 @@ struct FilaCuentaCompleta {
     email: String,
     password_hash: String,
     role: String,
+    disabled_at: Option<String>,
 }
 
 /// Autentica email + password de CUENTA sin tocar devices (el panel no emite un device
@@ -252,7 +262,7 @@ pub async fn autenticar_cuenta(
     let email = normalize_email(email);
 
     let fila = sqlx::query_as::<_, FilaCuentaCompleta>(
-        "SELECT id, email, password_hash, role
+        "SELECT id, email, password_hash, role, disabled_at
          FROM accounts
          WHERE email = ?",
     )
@@ -262,11 +272,16 @@ pub async fn autenticar_cuenta(
 
     let (autenticada, password_hash) = match fila {
         Some(fila) => (
-            Some(CuentaAutenticada {
-                id: fila.id,
-                email: fila.email,
-                role: fila.role,
-            }),
+            // Una cuenta deshabilitada no autentica ni con la password correcta.
+            if fila.disabled_at.is_none() {
+                Some(CuentaAutenticada {
+                    id: fila.id,
+                    email: fila.email,
+                    role: fila.role,
+                })
+            } else {
+                None
+            },
             fila.password_hash,
         ),
         None => (None, hash_senuelo().to_owned()),
