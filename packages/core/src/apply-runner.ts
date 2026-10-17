@@ -10,6 +10,10 @@
  *    la intención queda `blocked`, el archivo local intacto, y la resolución es explícita.
  *  - `recoverApplies()` decide desde las INTENCIONES + el estado real del filesystem:
  *    no adivina — compara hashes.
+ *
+ * Fase 3, paso 2: la ruta descifrada se VALIDA (portable a Windows/macOS/móvil) y el
+ * directorio destino se chequea por colisiones de case: el bloqueo es explícito, con
+ * motivo, nunca un skip silencioso.
  */
 
 import { cryptoProvider, decryptBlob, type SubKeys } from '@ovaultd/crypto';
@@ -18,6 +22,7 @@ import { toHex } from '@ovaultd/protocol';
 import { createIntent } from './apply.js';
 import type { FileSystemPort } from './file-port.js';
 import type { IntentEntry, StateStore } from './StateStore.js';
+import { colisionDeCase, nombreBase, validarRutaDeVault } from './vault-path.js';
 
 export interface ApplyRevision {
   /** `path_id` en hex. */
@@ -131,6 +136,17 @@ export async function applyRevision(
   });
   await store.putIntent(intent);
 
+  // 1b) La ruta DESCIFRADA se valida antes de tocar nada: traversal, absolutas, nombres
+  // que otra plataforma no puede representar (plan fase 3, paso 2). Bloqueada con motivo.
+  if (revision.path !== '') {
+    const validez = validarRutaDeVault(revision.path);
+    if (!validez.ok) {
+      intent = { ...intent, state: 'blocked', reason: `ruta rechazada: ${validez.motivo}` };
+      await store.putIntent(intent);
+      return { status: 'blocked', intentId: intent.intentId, reason: intent.reason };
+    }
+  }
+
   // 2) Descifrar (AEAD) y verificar el plaintext.
   let plaintext: Uint8Array | null = null;
   let hashVerificado: string | null = null;
@@ -151,6 +167,32 @@ export async function applyRevision(
     intent = { ...intent, state: 'blocked', reason: guard.reason };
     await store.putIntent(intent);
     return { status: 'blocked', intentId: intent.intentId, reason: guard.reason };
+  }
+
+  // 3b) Colisión de case/normalización en el directorio destino: en filesystems
+  // case-insensitive dos nombres que solo difieren en mayúsculas no pueden convivir.
+  // Solo importa cuando vamos a ESCRIBIR (verdict `safe`); si el directorio no existe
+  // todavía no hay nada con qué chocar.
+  if (!revision.deleted && revision.path !== '' && guard.verdict === 'safe') {
+    const dir = dirVault(revision.path);
+    try {
+      const entradas = await port.list(dir);
+      const choque = colisionDeCase(
+        entradas.map((entrada) => entrada.name),
+        nombreBase(revision.path),
+      );
+      if (choque !== null) {
+        intent = {
+          ...intent,
+          state: 'blocked',
+          reason: `colisión de case: «${choque}» ocupa el nombre`,
+        };
+        await store.putIntent(intent);
+        return { status: 'blocked', intentId: intent.intentId, reason: intent.reason };
+      }
+    } catch {
+      // Sin directorio legible no hay colisión que detectar: el mkdirp de abajo lo crea.
+    }
   }
 
   // 4) Publicar.
