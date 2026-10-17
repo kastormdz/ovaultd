@@ -55,8 +55,9 @@ pub fn router(estado: EstadoServidor) -> Router {
         .route("/api/v1/vaults", get(listar_vaults).post(crear_vault))
         .route(
             "/api/v1/vaults/{id}/material",
-            get(material_vault),
+            get(material_vault).put(actualizar_material),
         )
+        .route("/api/v1/vaults/{id}", delete(borrar_vault))
         .route(
             "/api/v1/vaults/{id}/challenge",
             get(challenge),
@@ -726,6 +727,121 @@ async fn material_vault(
         "wrapped_key_rc": STANDARD.encode(&material.wrapped_key_rc),
         "vault_pubkey": STANDARD.encode(&material.vault_pubkey),
     })))
+}
+
+/// Confirmación de borrado: el nombre EXACTO del vault (no un booleano — un DELETE
+/// accidental sin leer el prompt no lo pasa).
+#[derive(Debug, Deserialize)]
+struct ConfirmacionBorrado {
+    confirm: Option<String>,
+}
+
+/// `DELETE /api/v1/vaults/{id}?confirm=<nombre>` — borrado REAL de un vault de la cuenta.
+///
+/// La cascada de la DB (`ON DELETE CASCADE` + `foreign_keys(true)`) limpia devices, files,
+/// revisions, batches, blobs del índice, uploads y challenges; después se barren del CAS los
+/// blobs que no quedaron referenciados por NINGÚN otro vault. Queda auditado.
+async fn borrar_vault(
+    State(state): State<EstadoServidor>,
+    autenticado: Autenticado,
+    Path(vault_id): Path<i64>,
+    Query(consulta): Query<ConfirmacionBorrado>,
+) -> Result<StatusCode> {
+    resolve_vault(&state.pool, autenticado.account_id, vault_id).await?;
+
+    let nombre: String = sqlx::query_scalar("SELECT name FROM vaults WHERE id = ?")
+        .bind(vault_id)
+        .fetch_one(&state.pool)
+        .await?;
+
+    let confirmacion = consulta.confirm.unwrap_or_default();
+    if confirmacion != nombre {
+        return Err(ServerError::Invalid(
+            "confirmá el borrado con el nombre exacto del vault (parámetro `confirm`)".to_owned(),
+        ));
+    }
+
+    // Los hashes del vault ANTES del DELETE (la cascada se lleva la tabla `blobs`).
+    let hashes: Vec<Vec<u8>> = sqlx::query_scalar("SELECT hash FROM blobs WHERE vault_id = ?")
+        .bind(vault_id)
+        .fetch_all(&state.pool)
+        .await?;
+
+    sqlx::query("DELETE FROM vaults WHERE id = ?")
+        .bind(vault_id)
+        .execute(&state.pool)
+        .await?;
+
+    // Barrido del CAS: solo los blobs que ya no referencia ningún vault.
+    let mut barridos = 0usize;
+    for hash in hashes {
+        let referencias: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM blobs WHERE hash = ?")
+            .bind(&hash)
+            .fetch_one(&state.pool)
+            .await?;
+        if referencias == 0 {
+            if let Ok(bytes) = <[u8; 32]>::try_from(hash.as_slice()) {
+                state.cas.remove(&BlobId::new(bytes)).await?;
+                barridos += 1;
+            }
+        }
+    }
+
+    tracing::info!(vault = vault_id, %nombre, barridos, "vault borrado");
+    sqlx::query(
+        "INSERT INTO audit_log (actor_account_id, action, detail) VALUES (?, 'vault_delete', ?)",
+    )
+    .bind(autenticado.account_id)
+    .bind(format!("#{vault_id} «{nombre}» ({barridos} blobs del CAS)"))
+    .execute(&state.pool)
+    .await?;
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Debug, Deserialize)]
+struct ActualizarMaterialRequest {
+    /// `wrapped_key_pw` nuevo (base64): la `vault_key` re-envuelta con la password nueva.
+    wrapped_key_pw: String,
+}
+
+/// `PUT /api/v1/vaults/{id}/material` — re-sella la envuelta de la password: lo usan el
+/// cambio de password del vault y la recuperación con la recovery key. E2EE: el server solo
+/// guarda el ciphertext nuevo; no puede —ni necesita— verificar más allá del formato.
+async fn actualizar_material(
+    State(state): State<EstadoServidor>,
+    autenticado: Autenticado,
+    Path(vault_id): Path<i64>,
+    Json(cuerpo): Json<ActualizarMaterialRequest>,
+) -> Result<Json<Value>> {
+    resolve_vault(&state.pool, autenticado.account_id, vault_id).await?;
+
+    let wrapped = STANDARD
+        .decode(cuerpo.wrapped_key_pw.trim())
+        .map_err(|_| ServerError::Invalid("wrapped_key_pw no es base64 válido".to_owned()))?;
+    // nonce (24) + ciphertext mínimo de la vault_key (32): más corto que eso no es una envuelta.
+    if wrapped.len() < 24 + 32 {
+        return Err(ServerError::Invalid(
+            "wrapped_key_pw es demasiado corto para una envuelta válida".to_owned(),
+        ));
+    }
+
+    sqlx::query("UPDATE vaults SET wrapped_key_pw = ? WHERE id = ?")
+        .bind(&wrapped)
+        .bind(vault_id)
+        .execute(&state.pool)
+        .await?;
+
+    tracing::info!(vault = vault_id, "material: wrapped_key_pw actualizado");
+    sqlx::query(
+        "INSERT INTO audit_log (actor_account_id, action, detail) VALUES (?, 'vault_rekey', ?)",
+    )
+    .bind(autenticado.account_id)
+    .bind(format!("#{vault_id}: envuelta de password actualizada"))
+    .execute(&state.pool)
+    .await?;
+
+    Ok(Json(serde_json::json!({ "ok": true })))
 }
 
 pub(crate) async fn resolve_vault(

@@ -63,6 +63,19 @@ impl CasStore {
         self.blob_path(hash).is_file()
     }
 
+    /// Borra el blob del CAS (barrido tras borrar un vault). Idempotente: si ya no está, ok.
+    pub async fn remove(&self, hash: &BlobId) -> Result<()> {
+        let path = self.blob_path(hash);
+
+        task::spawn_blocking(move || match fs::remove_file(&path) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(ServerError::Io(error)),
+        })
+        .await
+        .map_err(|_| ServerError::Invalid("falló la tarea de almacenamiento".to_owned()))?
+    }
+
     fn blob_path(&self, hash: &BlobId) -> PathBuf {
         let hex = hash.to_string();
         self.root.join(&hex[..2]).join(hex)
