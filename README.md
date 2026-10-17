@@ -2,33 +2,22 @@
 
 Self-hosted, end-to-end encrypted file sync for Obsidian vaults. Your server, your keys: the server stores opaque, encrypted blobs and never sees what is inside them.
 
-Functional parity with Obsidian Sync on infrastructure you own, built around a frozen wire spec (`v2`) and a crypto protocol (`sync2`) that was verified byte-for-byte between Rust and JavaScript before either side shipped. Design notes, ADRs and code comments are in Spanish; this README is the English entry point.
-
-## Status
-
-Early-stage, but the risky parts are done and tested.
-
-| Phase | State |
-|---|---|
-| 0.1 — crypto spike (`sync1`) | historical, superseded |
-| 0.2 — crypto gateway `sync2` + build plan | **closed** — `INTEROP sync2 OK` (byte-exact Rust ⇄ JS) |
-| 1 — server MVP + CLI | functionally complete (arm64 image pending) |
-| 2 — durable offline core (state, outbox, apply journal) | in progress — state, save-first outbox, apply journal, a real Chromium runtime that pulls and pushes signed deltas, and verified backup/restore with crash tests |
-| 3 — Obsidian plugin | next, in its own repo |
-| 4 — full E2E, key rotation, recovery | planned |
-| 5 — conflicts, history, restore, preview | planned |
-
-The parts marked done are backed by real-execution gates, not mocks: Rust unit and integration suites, TypeScript suites, browser durability specs against a real Chromium, a full server smoke test with live crypto and WebSocket traffic, an encrypted-scan canary over raw storage, and a container E2E that builds the real image and runs the entire flow (HTTP + WebSocket, live crypto) against it, verifying persistence across a recreate.
+Functional parity with Obsidian Sync on infrastructure you own, built around a frozen wire spec (`v2`) and a crypto protocol (`sync2`) that was verified byte-for-byte between Rust and JavaScript before either side shipped. Design notes, ADRs and code comments are in Spanish; this README is the English entry point ([versión en español](README.es.md)).
 
 ## What it does
 
-- Encrypted sync of vault files (add / modify / delete / move) with revisions and compare-and-swap (`expected_rev`), so racing edits become conflicts instead of silent data loss.
-- Resumable uploads (a subset of tus) with per-account quotas; an interrupted transfer resumes from its last acknowledged offset.
-- HTTP control plane plus a WebSocket data plane for revision deltas.
-- A single hardened container: non-root uid, read-only rootfs, every capability dropped, SQLite WAL and a content-addressed blob store under `/data`.
-- Edge-ready: the server publishes on loopback and speaks plain HTTP; `docs/deploy.md` documents exactly what the edge (Nginx Proxy Manager, nginx, Caddy) must get right. The repository ships no proxy — the edge belongs to the operator (ADR-0019).
-- A web admin panel (ADR-0017, first cut): session login with CSRF, dashboard counters and self-service password change — server-rendered with embedded assets, no JS required.
-- No public registration. The first account is created from the web at `/setup` (first run only, ADR-0016); further accounts with the admin CLI inside the image (ADR-0011).
+- **Encrypted sync of vault files** (add / modify / delete / move) with revisions and compare-and-swap (`expected_rev`), so racing edits become conflicts instead of silent data loss.
+- **Resumable uploads** (a subset of tus) with per-account quotas; an interrupted transfer resumes from its last acknowledged offset.
+- **HTTP control plane plus a WebSocket data plane** for revision deltas.
+- **Encrypted paths and signed revision records** (Ed25519, chained by `expected_rev`): tampering is detectable by clients.
+- **A single hardened container**: non-root uid, read-only rootfs, every capability dropped, SQLite WAL and a content-addressed blob store under `/data`.
+- **Edge-ready**: the server publishes on loopback and speaks plain HTTP; `docs/deploy.md` documents exactly what the edge (Nginx Proxy Manager, nginx, Caddy) must get right. The repository ships no proxy — the edge belongs to the operator (ADR-0019).
+- **Web admin panel**: accounts with roles (create, disable, promote or demote, one-shot password-reset links, account deletion with vault purge), vaults with per-vault detail and deletion, devices with one-click revocation, a paginated and filterable audit log, server settings (open/close registration), and self-service password change. Server-rendered with embedded assets, CSRF on every POST, no JavaScript required, works over the LAN or behind the edge.
+- **No public registration.** The first account is created from the web at `/setup` (first run only, ADR-0016); further accounts are created by an admin from the panel or with the admin CLI inside the image (ADR-0011).
+- **A full client stack**: a durable offline core (versioned state store, save-first outbox, apply journal), a CLI (`login`, `create-remote`, `setup`, `sync --continuous`, …) and an Obsidian plugin that runs the same core inside the editor — event-driven sync, explicit conflict resolution, vault keys management (recover with the recovery key, change the vault password) and vault export/import.
+- **Operational tooling**: `backup.sh` / `restore.sh` with checksummed verification, crash tests with real process aborts, and an encrypted-scan canary that greps raw storage for plaintext.
+
+Every claim above is backed by executable gates, not mocks: Rust unit and integration suites, TypeScript suites, browser durability specs against a real Chromium, a full server smoke test with live crypto and WebSocket traffic, and a container E2E that builds the real image and verifies persistence across a recreate.
 
 ## How it works
 
@@ -36,7 +25,7 @@ The parts marked done are backed by real-execution gates, not mocks: Rust unit a
 flowchart LR
     subgraph devices [Your devices]
         CLI["CLI + durable runtime"]
-        P["Obsidian plugin (phase 3)"]
+        P["Obsidian plugin"]
     end
     CLI -- "HTTPS + WSS, sync2 encrypted" --> RP["Reverse proxy (TLS ends here)"]
     P --> RP
@@ -57,8 +46,10 @@ The server persists encrypted blobs, signed revision records and account metadat
 | `spikes/crypto-interop` | the Rust ⇄ JS interop spike and the golden-vector freeze tooling |
 | `tests/` | browser specs, frozen fixtures, smoke / canary / container-E2E scripts |
 | `scripts/` | operational tooling: `backup.sh`, `restore.sh`, the leak scanner used before every push |
-| `docs/` | protocol and crypto specs, ADRs, deploy guide, runbook, build plan |
+| `docs/` | protocol and crypto specs, ADRs, deploy guide, runbook |
 | `xtask/` | repo tasks (`cargo xtask protocol-check`, `cargo xtask backup-restore`) |
+
+The Obsidian plugin lives in its own repository: [github.com/kastormdz/ovaultd-plugin](https://github.com/kastormdz/ovaultd-plugin).
 
 ## Security model
 
@@ -92,7 +83,7 @@ To run a published image later, set `OVAULTD_IMAGE` to a real `repository@sha256
 
 The **first** account is created in the browser: open `http://127.0.0.1:8080/setup`. That page exists only while the server has zero accounts and disables itself the moment one exists — no public registration (ADR-0011/0016). Set `OVAULTD_SETUP_TOKEN` if the server may be exposed before you finish this step.
 
-For **further accounts** (another person — a second laptop is just another device, added with `login`), the admin tool ships inside the image:
+For **further accounts** (another person — a second laptop is just another device, added with `login`), an admin can create them from the panel, or use the admin tool inside the image:
 
 ```bash
 printf '%s\n' 'a-long-password' | docker compose exec -T ovaultd \
@@ -118,6 +109,10 @@ node packages/cli/dist/main.js status
 ```
 
 `create-remote` generates the vault material. `setup` links a local folder to an existing remote vault and checks your password against the material. `list-remote` shows what the account owns.
+
+### 4. Or from Obsidian
+
+Install the [plugin](https://github.com/kastormdz/ovaultd-plugin) and link it from its settings: server URL, account email and password (once), then pick your vault from the list — or create a new one right there. From then on sync is event-driven and needs no further input.
 
 ## Behind a reverse proxy
 
@@ -154,10 +149,9 @@ Rules worth knowing:
 - `docs/crypto.md` — the `sync2` crypto spec and golden vectors
 - `docs/server-interfaces.md` — the server contract
 - `docs/deploy.md` — Docker and reverse proxy, backups
-- `docs/decisions/` — ADRs 0001–0014
-- `docs/build-plan.md` — the construction plan, phase by phase
-- `docs/reviews/` — three independent external review rounds from phase 0
+- `docs/runbook.md` — operating a server: backups, restore, recovery
+- `docs/decisions/` — architecture decision records
 
 ## License
 
-The server and Rust crates are licensed under AGPL-3.0 (`LICENSE`). The TypeScript packages under `packages/` are MIT, and each one ships its own `LICENSE`. The Obsidian plugin will be MIT as well, in its own repository.
+The server and Rust crates are licensed under AGPL-3.0 (`LICENSE`). The TypeScript packages under `packages/` are MIT, and each one ships its own `LICENSE`. The Obsidian plugin is MIT as well, in its own repository.
