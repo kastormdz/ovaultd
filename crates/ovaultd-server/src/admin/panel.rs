@@ -2,10 +2,11 @@
 //!
 //! Server-rendered con askama (templates compilados dentro del binario) y htmx vendorizado
 //! (`assets/htmx.min.js`, sin CDNs). El panel funciona igual sin JS: los formularios son
-//! POST clásicos y htmx solo agrega comodidad.
+//! POST clásicos.
 //!
 //! Autorización: `/admin` exige sesión (cookie opaca). Cada POST exige además el token CSRF
 //! de la sesión (tiempo constante). Las páginas autenticadas van con `cache-control: no-store`.
+//! Los textos visibles salen de [`super::textos`] (i18n): acá no hay strings de UI sueltos.
 
 use askama::Template;
 use axum::extract::{FromRequestParts, State};
@@ -17,6 +18,7 @@ use axum::routing::{get, post};
 use axum::{Form, Router};
 use serde::Deserialize;
 
+use super::textos::{self, Textos};
 use crate::admin::sesiones::{self, CAMPO_CSRF, COOKIE_SESION, SESION_TTL_DIAS};
 use crate::auth;
 use crate::config::ModoSecureCookies;
@@ -138,7 +140,7 @@ pub(crate) fn error_interno(contexto: &str, error: impl std::fmt::Display) -> Re
     (
         StatusCode::INTERNAL_SERVER_ERROR,
         [(CACHE_CONTROL, "no-store")],
-        Html("<h1>500</h1><p>Error interno. Mirá los logs del server.</p>".to_owned()),
+        Html("<h1>500</h1><p>Error interno. Mirá los logs del servidor.</p>".to_owned()),
     )
         .into_response()
 }
@@ -153,40 +155,59 @@ where
     }
 }
 
+/// «hace N min» a partir de segundos (la query ya hizo la resta en SQLite).
+fn hace_texto(segundos: i64) -> String {
+    match segundos {
+        s if s < 90 => format!("{s} s"),
+        s if s < 3600 => format!("{} min", s / 60),
+        s if s < 86400 => format!("{} h", s / 3600),
+        s => format!("{} días", s / 86400),
+    }
+}
+
 // ------------------------------------------------------------------ plantillas
 
 #[derive(Template)]
 #[template(path = "admin/login.html")]
 struct PlantillaLogin {
-    version: String,
+    t: &'static Textos,
     error: Option<String>,
 }
 
 #[derive(Template)]
 #[template(path = "admin/dashboard.html")]
 struct PlantillaDashboard {
-    version: String,
+    t: &'static Textos,
+    seccion: &'static str,
+    seccion_titulo: &'static str,
+    version: &'static str,
     email: String,
     rol: String,
     csrf: String,
+    // hero de salud
+    uptime: String,
+    db_bytes: String,
+    fragmentos: i64,
+    espacio: String,
+    espacio_vaults: String,
+    hace: String,
+    ultimo_device: String,
+    ultima_sync: Option<String>,
+    // KPIs
     cuentas: i64,
     vaults: i64,
     notas: i64,
     revisiones: i64,
     devices: i64,
-    espacio: String,
+    lotes: i64,
+    // secciones
+    vaults_lista: Vec<VistaVault>,
+    dispositivos: Vec<VistaDeviceMini>,
+    actividad: Vec<VistaEventoMini>,
 }
 
-/// Vista de un vault para la tabla: SOLO lo que el server puede ver (es ciego a los
+/// Vista de un vault para las tablas: SOLO lo que el server puede ver (es ciego a los
 /// nombres de nota y al contenido — eso es de los clientes).
-#[derive(Template)]
-#[template(path = "admin/vaults.html")]
-struct PlantillaVaults {
-    version: String,
-    email: String,
-    vaults: Vec<VistaVault>,
-}
-
 struct VistaVault {
     id: i64,
     name: String,
@@ -196,10 +217,41 @@ struct VistaVault {
     ultima_revision: Option<String>,
 }
 
+struct VistaDeviceMini {
+    nombre: String,
+    cuenta: String,
+    ultima_actividad: Option<String>,
+}
+
+struct VistaEventoMini {
+    hora: String,
+    action: String,
+    detail: String,
+    ip: Option<String>,
+}
+
+#[derive(Template)]
+#[template(path = "admin/vaults.html")]
+struct PlantillaVaults {
+    t: &'static Textos,
+    seccion: &'static str,
+    seccion_titulo: &'static str,
+    version: &'static str,
+    email: String,
+    rol: String,
+    csrf: String,
+    vaults: Vec<VistaVault>,
+}
+
 #[derive(Template)]
 #[template(path = "admin/mi_cuenta.html")]
 struct PlantillaMiCuenta {
-    version: String,
+    t: &'static Textos,
+    seccion: &'static str,
+    seccion_titulo: &'static str,
+    version: &'static str,
+    email: String,
+    rol: String,
     csrf: String,
     error: Option<String>,
     ok: Option<String>,
@@ -218,7 +270,7 @@ async fn login_form(State(estado): State<EstadoServidor>, headers: HeaderMap) ->
     render(
         || {
             PlantillaLogin {
-                version: VERSION.to_owned(),
+                t: textos::t(),
                 error: None,
             }
             .render()
@@ -238,6 +290,7 @@ async fn login_post(
     headers: HeaderMap,
     Form(formulario): Form<FormLogin>,
 ) -> Response {
+    let t = textos::t();
     let ip = ip_del_cliente(&headers);
     let clave = format!(
         "{}|{}",
@@ -250,7 +303,7 @@ async fn login_post(
             &estado.pool,
             None,
             "login_frenado",
-            Some("demasiados intentos"),
+            Some(t.login_freno),
             ip.as_deref(),
         )
         .await;
@@ -261,9 +314,7 @@ async fn login_post(
                 (CACHE_CONTROL, "no-store"),
                 (axum::http::header::RETRY_AFTER, "60"),
             ],
-            Html(
-                "<h1>Demasiados intentos</h1><p>Probá de nuevo en un minuto.</p>".to_owned(),
-            ),
+            Html(format!("<h1>{}</h1>", t.login_freno)),
         )
             .into_response();
     }
@@ -307,8 +358,8 @@ async fn login_post(
             .await;
 
             match (PlantillaLogin {
-                version: VERSION.to_owned(),
-                error: Some("Email o password incorrectos.".to_owned()),
+                t,
+                error: Some(t.login_error.to_owned()),
             })
             .render()
             {
@@ -362,7 +413,16 @@ async fn logout(
 
 // ------------------------------------------------------------------ dashboard
 
+#[derive(Debug, sqlx::FromRow)]
+struct FilaHero {
+    ultima: String,
+    segundos: i64,
+    device: Option<String>,
+}
+
 async fn dashboard(State(estado): State<EstadoServidor>, Sesion(sesion): Sesion) -> Response {
+    let t = textos::t();
+
     let cuentas = contar(&estado.pool, "SELECT COUNT(*) FROM accounts").await;
     let vaults = contar(&estado.pool, "SELECT COUNT(*) FROM vaults").await;
     let notas = contar(
@@ -376,29 +436,146 @@ async fn dashboard(State(estado): State<EstadoServidor>, Sesion(sesion): Sesion)
         "SELECT COUNT(*) FROM devices WHERE revoked_at IS NULL",
     )
     .await;
+    let lotes = contar(&estado.pool, "SELECT COUNT(*) FROM batches").await;
+    let fragmentos = contar(&estado.pool, "SELECT COUNT(*) FROM blobs").await;
+
     let bytes: i64 = sqlx::query_scalar("SELECT COALESCE(SUM(size), 0) FROM blobs")
         .fetch_one(&estado.pool)
         .await
         .unwrap_or(0);
+    let bytes_vaults: i64 =
+        sqlx::query_scalar("SELECT COALESCE(SUM(b.size), 0) FROM blobs b JOIN vaults v ON v.id = b.vault_id")
+            .fetch_one(&estado.pool)
+            .await
+            .unwrap_or(0);
+    let db_bytes: i64 = sqlx::query_scalar(
+        "SELECT (SELECT page_count FROM pragma_page_count()) * (SELECT page_size FROM pragma_page_size())",
+    )
+    .fetch_one(&estado.pool)
+    .await
+    .unwrap_or(0);
+
+    // Último lote GLOBAL: cuándo, hace cuánto (resta en SQLite) y desde qué dispositivo.
+    let hero = sqlx::query_as::<_, FilaHero>(
+        "SELECT b.ts AS ultima,
+                CAST((julianday('now') - julianday(b.ts)) * 86400 AS INTEGER) AS segundos,
+                d.name AS device
+         FROM batches b
+         LEFT JOIN devices d ON d.id = b.device_id
+         ORDER BY b.ts DESC
+         LIMIT 1",
+    )
+    .fetch_optional(&estado.pool)
+    .await
+    .ok()
+    .flatten();
+
+    let (hace, ultimo_device, ultima_sync) = match hero {
+        Some(fila) => (
+            hace_texto(fila.segundos.max(0)),
+            fila.device.unwrap_or_else(|| t.sin_datos.to_owned()),
+            Some(fila.ultima),
+        ),
+        None => (t.salud_hace_nada.to_owned(), t.sin_datos.to_owned(), None),
+    };
+
+    let vaults_lista = sqlx::query_as::<_, FilaVault>(
+        "SELECT v.id, v.name,
+                (SELECT COUNT(*) FROM files f WHERE f.vault_id = v.id AND f.deleted = 0) AS notas,
+                (SELECT COUNT(*) FROM revisions r WHERE r.vault_id = v.id) AS revisiones,
+                (SELECT COALESCE(SUM(b.size), 0) FROM blobs b WHERE b.vault_id = v.id) AS bytes,
+                (SELECT MAX(r.ts) FROM revisions r WHERE r.vault_id = v.id) AS ultima_revision
+         FROM vaults v
+         ORDER BY v.id
+         LIMIT 6",
+    )
+    .fetch_all(&estado.pool)
+    .await
+    .unwrap_or_default()
+    .into_iter()
+    .map(vista_de_fila)
+    .collect();
+
+    let dispositivos = sqlx::query_as::<_, (String, String, Option<String>)>(
+        "SELECT d.name, a.email,
+                COALESCE(d.last_seen, (SELECT MAX(b.ts) FROM batches b WHERE b.device_id = d.id))
+         FROM devices d
+         JOIN accounts a ON a.id = d.account_id
+         WHERE d.revoked_at IS NULL
+         ORDER BY d.id DESC
+         LIMIT 5",
+    )
+    .fetch_all(&estado.pool)
+    .await
+    .unwrap_or_default()
+    .into_iter()
+    .map(|(nombre, cuenta, ultima_actividad)| VistaDeviceMini {
+        nombre,
+        cuenta,
+        ultima_actividad,
+    })
+    .collect();
+
+    let actividad = sqlx::query_as::<_, (String, String, String, Option<String>)>(
+        "SELECT substr(ts, 12, 5) AS hora, action, COALESCE(detail, '') AS detail, ip
+         FROM audit_log
+         ORDER BY id DESC
+         LIMIT 5",
+    )
+    .fetch_all(&estado.pool)
+    .await
+    .unwrap_or_default()
+    .into_iter()
+    .map(|(hora, action, detail, ip)| VistaEventoMini {
+        hora,
+        action,
+        detail,
+        ip,
+    })
+    .collect();
 
     render(
         || {
             PlantillaDashboard {
-                version: VERSION.to_owned(),
+                t,
+                seccion: "panel",
+                seccion_titulo: t.nav_panel,
+                version: VERSION,
                 email: sesion.email.clone(),
                 rol: sesion.role.clone(),
                 csrf: sesion.csrf_token.clone(),
+                uptime: uptime_texto(crate::routes::uptime_segundos()),
+                db_bytes: formato_bytes(db_bytes),
+                fragmentos,
+                espacio: formato_bytes(bytes),
+                espacio_vaults: formato_bytes(bytes_vaults),
+                hace,
+                ultimo_device,
+                ultima_sync,
                 cuentas,
                 vaults,
                 notas,
                 revisiones,
                 devices,
-                espacio: formato_bytes(bytes),
+                lotes,
+                vaults_lista,
+                dispositivos,
+                actividad,
             }
             .render()
         },
         "dashboard",
     )
+}
+
+/// «arriba 13 min» / «arriba 2 h» / «arriba 3 días» desde el arranque del proceso.
+fn uptime_texto(segundos: u64) -> String {
+    match segundos {
+        s if s < 90 => format!("{s} s"),
+        s if s < 3600 => format!("{} min", s / 60),
+        s if s < 86400 => format!("{} h", s / 3600),
+        s => format!("{} días", s / 86400),
+    }
 }
 
 // ------------------------------------------------------------------ vaults (stats)
@@ -413,9 +590,22 @@ struct FilaVault {
     ultima_revision: Option<String>,
 }
 
+fn vista_de_fila(fila: FilaVault) -> VistaVault {
+    VistaVault {
+        id: fila.id,
+        name: fila.name,
+        notas: fila.notas,
+        revisiones: fila.revisiones,
+        espacio: formato_bytes(fila.bytes),
+        ultima_revision: fila.ultima_revision,
+    }
+}
+
 /// Estadísticas por vault: notas vivas (`files` sin borrar), revisiones (histórico),
 /// espacio de los blobs cifrados y última actividad. El server NO tiene los nombres.
 async fn vaults(State(estado): State<EstadoServidor>, Sesion(sesion): Sesion) -> Response {
+    let t = textos::t();
+
     let filas = sqlx::query_as::<_, FilaVault>(
         "SELECT v.id, v.name,
                 (SELECT COUNT(*) FROM files f WHERE f.vault_id = v.id AND f.deleted = 0) AS notas,
@@ -433,23 +623,18 @@ async fn vaults(State(estado): State<EstadoServidor>, Sesion(sesion): Sesion) ->
         Err(error) => return error_interno("vaults", error),
     };
 
-    let vista = filas
-        .into_iter()
-        .map(|fila| VistaVault {
-            id: fila.id,
-            name: fila.name,
-            notas: fila.notas,
-            revisiones: fila.revisiones,
-            espacio: formato_bytes(fila.bytes),
-            ultima_revision: fila.ultima_revision,
-        })
-        .collect();
+    let vista = filas.into_iter().map(vista_de_fila).collect();
 
     render(
         || {
             PlantillaVaults {
-                version: VERSION.to_owned(),
+                t,
+                seccion: "vaults",
+                seccion_titulo: t.nav_vaults,
+                version: VERSION,
                 email: sesion.email.clone(),
+                rol: sesion.role.clone(),
+                csrf: sesion.csrf_token.clone(),
                 vaults: vista,
             }
             .render()
@@ -458,7 +643,7 @@ async fn vaults(State(estado): State<EstadoServidor>, Sesion(sesion): Sesion) ->
     )
 }
 
-/// Tamaño legible para humanos (los bytes del CAS: ciphertext — el server no ve más).
+/// Tamaño legible para humanos en formato español (coma decimal).
 pub(crate) fn formato_bytes(bytes: i64) -> String {
     const UNIDADES: [&str; 4] = ["B", "KB", "MB", "GB"];
     let mut valor = bytes as f64;
@@ -471,7 +656,7 @@ pub(crate) fn formato_bytes(bytes: i64) -> String {
     if unidad == 0 {
         format!("{bytes} B")
     } else {
-        format!("{valor:.1} {}", UNIDADES[unidad])
+        format!("{valor:.1} {}", UNIDADES[unidad]).replace('.', ",")
     }
 }
 
@@ -485,10 +670,16 @@ async fn contar(pool: &sqlx::SqlitePool, sql: &'static str) -> i64 {
 // ------------------------------------------------------------------ mi cuenta
 
 async fn mi_cuenta_form(Sesion(sesion): Sesion) -> Response {
+    let t = textos::t();
     render(
         || {
             PlantillaMiCuenta {
-                version: VERSION.to_owned(),
+                t,
+                seccion: "panel",
+                seccion_titulo: t.mi_cuenta_titulo,
+                version: VERSION,
+                email: sesion.email.clone(),
+                rol: sesion.role.clone(),
                 csrf: sesion.csrf_token.clone(),
                 error: None,
                 ok: None,
@@ -514,13 +705,19 @@ async fn mi_cuenta_post(
     Sesion(sesion): Sesion,
     Form(formulario): Form<FormMiCuenta>,
 ) -> Response {
+    let t = textos::t();
     let ip = ip_del_cliente(&headers);
 
     let pintar = |error: Option<String>, ok: Option<String>| {
         render(
             || {
                 PlantillaMiCuenta {
-                    version: VERSION.to_owned(),
+                    t,
+                    seccion: "panel",
+                    seccion_titulo: t.mi_cuenta_titulo,
+                    version: VERSION,
+                    email: sesion.email.clone(),
+                    rol: sesion.role.clone(),
                     csrf: sesion.csrf_token.clone(),
                     error,
                     ok,
@@ -536,16 +733,16 @@ async fn mi_cuenta_post(
     }
 
     if formulario.nueva != formulario.repetir {
-        return pintar(None, Some("La password nueva y su repetición no coinciden.".to_owned()));
+        return pintar(Some(t.msg_passwords_no_coinciden.to_owned()), None);
     }
     if formulario.nueva.chars().count() < 8 {
-        return pintar(None, Some("La password nueva tiene que tener al menos 8 caracteres.".to_owned()));
+        return pintar(Some(t.msg_password_corta.to_owned()), None);
     }
 
     // Verifica la actual contra la cuenta de ESTA sesión (sin tocar devices).
     match auth::autenticar_cuenta(&estado.pool, &sesion.email, &formulario.actual).await {
         Ok(Some(_)) => {}
-        Ok(None) => return pintar(Some("La password actual no es correcta.".to_owned()), None),
+        Ok(None) => return pintar(Some(t.mi_cuenta_actual_incorrecta.to_owned()), None),
         Err(error) => return error_interno("mi_cuenta_verificar", error),
     }
 
@@ -577,31 +774,51 @@ async fn mi_cuenta_post(
     )
     .await;
 
-    pintar(None, Some("Password actualizada. Las demás sesiones se cerraron.".to_owned()))
+    pintar(None, Some(t.mi_cuenta_ok.to_owned()))
 }
 
 // ------------------------------------------------------------------ assets
 
-async fn asset_css() -> Response {
-    (
-        [
-            (CONTENT_TYPE, "text/css; charset=utf-8"),
-            (CACHE_CONTROL, "public, max-age=86400"),
-        ],
-        ADMIN_CSS,
-    )
-        .into_response()
+/// ETag del asset embebido: con `no-cache` el browser revalida en cada carga y recibe
+/// 304 cuando no cambió — siempre fresco, sin el clásico «css viejo con html nuevo».
+fn etag_de(contenido: &'static str) -> String {
+    use sha2::{Digest, Sha256};
+    let hash = Sha256::digest(contenido.as_bytes());
+    let corto: String = hash[..8].iter().map(|byte| format!("{byte:02x}")).collect();
+    format!("\"{corto}\"")
 }
 
-async fn asset_htmx() -> Response {
-    (
-        [
-            (CONTENT_TYPE, "text/javascript; charset=utf-8"),
-            (CACHE_CONTROL, "public, max-age=86400"),
-        ],
-        HTMX_JS,
-    )
-        .into_response()
+fn responder_asset(contenido: &'static str, tipo: &'static str, headers: &HeaderMap) -> Response {
+    let etag = etag_de(contenido);
+
+    if headers
+        .get(axum::http::header::IF_NONE_MATCH)
+        .and_then(|valor| valor.to_str().ok())
+        == Some(etag.as_str())
+    {
+        let mut respuesta = StatusCode::NOT_MODIFIED.into_response();
+        if let Ok(valor) = HeaderValue::from_str(&etag) {
+            respuesta.headers_mut().insert(axum::http::header::ETAG, valor);
+        }
+        return respuesta;
+    }
+
+    let mut respuesta = (StatusCode::OK, contenido).into_response();
+    let cabeceras = respuesta.headers_mut();
+    cabeceras.insert(CONTENT_TYPE, HeaderValue::from_static(tipo));
+    cabeceras.insert(CACHE_CONTROL, HeaderValue::from_static("no-cache"));
+    if let Ok(valor) = HeaderValue::from_str(&etag) {
+        cabeceras.insert(axum::http::header::ETAG, valor);
+    }
+    respuesta
+}
+
+async fn asset_css(headers: HeaderMap) -> Response {
+    responder_asset(ADMIN_CSS, "text/css; charset=utf-8", &headers)
+}
+
+async fn asset_htmx(headers: HeaderMap) -> Response {
+    responder_asset(HTMX_JS, "text/javascript; charset=utf-8", &headers)
 }
 
 // `CAMPO_CSRF` vive en sesiones: es el nombre del campo oculto que las plantillas usan.

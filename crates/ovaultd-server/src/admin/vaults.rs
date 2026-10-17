@@ -15,9 +15,8 @@ use axum::{
 };
 use serde::Deserialize;
 
-use super::panel;
-use super::sesiones;
-use super::SesionAdmin;
+use super::{panel, sesiones, SesionAdmin};
+use super::textos::{self, Textos};
 use crate::routes::{purgar_vault, EstadoServidor};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -36,8 +35,13 @@ pub fn rutas() -> Router<EstadoServidor> {
 #[derive(Template)]
 #[template(path = "admin/vault_detalle.html")]
 struct PlantillaDetalle {
-    version: String,
+    t: &'static Textos,
+    seccion: &'static str,
+    seccion_titulo: &'static str,
+    version: &'static str,
     email: String,
+    rol: String,
+    csrf: String,
     vault_id: i64,
     nombre: String,
     dueno: String,
@@ -47,7 +51,7 @@ struct PlantillaDetalle {
     enc_version: i64,
     notas: i64,
     revisiones: i64,
-    batches: i64,
+    batch_count: i64,
     blob_count: i64,
     bytes: String,
     cuota: String,
@@ -72,7 +76,12 @@ struct VistaBatch {
 #[derive(Template)]
 #[template(path = "admin/vault_borrar.html")]
 struct PlantillaBorrar {
-    version: String,
+    t: &'static Textos,
+    seccion: &'static str,
+    seccion_titulo: &'static str,
+    version: &'static str,
+    email: String,
+    rol: String,
     csrf: String,
     vault_id: i64,
     nombre: String,
@@ -179,8 +188,13 @@ async fn detalle(
     panel::render(
         || {
             PlantillaDetalle {
-                version: VERSION.to_owned(),
+                t: textos::t(),
+                seccion: "vaults",
+                seccion_titulo: textos::t().nav_vaults,
+                version: VERSION,
                 email: sesion.email.clone(),
+                rol: sesion.role.clone(),
+                csrf: sesion.csrf_token.clone(),
                 vault_id: fila.id,
                 nombre: fila.name,
                 dueno: fila.dueno,
@@ -190,7 +204,7 @@ async fn detalle(
                 enc_version: fila.enc_version,
                 notas: fila.notas,
                 revisiones: fila.revisiones,
-                batches: fila.batches,
+                batch_count: fila.batches,
                 blob_count: fila.blob_count,
                 bytes: super::panel::formato_bytes(fila.bytes),
                 cuota: fila
@@ -251,7 +265,12 @@ async fn borrar_form(
     panel::render(
         || {
             PlantillaBorrar {
-                version: VERSION.to_owned(),
+                t: textos::t(),
+                seccion: "vaults",
+                seccion_titulo: textos::t().nav_vaults,
+                version: VERSION,
+                email: sesion.email.clone(),
+                rol: sesion.role.clone(),
                 csrf: sesion.csrf_token.clone(),
                 vault_id: id,
                 nombre,
@@ -313,7 +332,7 @@ async fn borrar_post(
     };
 
     if formulario.confirm.trim() != nombre {
-        return volver_error("El nombre no coincide exactamente.");
+        return volver_error(textos::t().msg_vault_nombre_no_coincide);
     }
 
     if let Err(error) = purgar_vault(&estado.pool, &estado.cas, formulario.id).await {
@@ -332,5 +351,9 @@ async fn borrar_post(
     )
     .await;
 
-    Redirect::to("/admin/vaults?ok=Vault+borrado.").into_response()
+    Redirect::to(&format!(
+        "/admin/vaults?ok={}",
+        crate::admin::flash(textos::t().msg_vault_borrado)
+    ))
+    .into_response()
 }

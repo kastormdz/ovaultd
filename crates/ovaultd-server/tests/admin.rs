@@ -453,7 +453,7 @@ async fn cambiar_password_valida_y_revoca_las_demas_sesiones() -> Result<()> {
         )?)
         .await?;
     assert_eq!(response.status(), StatusCode::OK);
-    assert!(cuerpo(response).await?.contains("actualizada"));
+    assert!(cuerpo(response).await?.contains("Password cambiada"));
 
     // La sesión 2 murió; la 1 (la que cambió) sigue viva.
     let response = contexto
@@ -944,7 +944,7 @@ async fn vault_detalle_muestra_los_numeros_de_la_db() -> Result<()> {
     assert_eq!(resp.status(), StatusCode::OK);
     let html = cuerpo(resp).await?;
     assert!(html.contains("vault-de-integracion"), "nombre del vault");
-    assert!(html.contains("notas vivas"), "las stats del vault están");
+    assert!(html.contains("Notas vivas"), "las stats del vault están");
     // El link de borrado vive en el detalle.
     assert!(html.contains(&format!("/admin/vaults/borrar?id={}", contexto.vault_id)));
 

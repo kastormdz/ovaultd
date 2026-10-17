@@ -1,30 +1,29 @@
 {% extends "admin/base.html" %}
-{% block titulo %}Auditoría — ovaultd{% endblock %}
-{% block nav %}<a class="boton fantasma" href="/admin">← Panel</a><a class="boton fantasma" href="/admin/devices">Devices</a>{% endblock %}
+{% block titulo %}{{ t.auditoria_titulo }} — {{ t.marca }}{% endblock %}
 {% block contenido %}
+
 <div class="cabecera-seccion">
-  <h1>Auditoría</h1>
-  <span class="chip">{{ email }}</span>
+  <h1>{{ t.auditoria_titulo }}</h1>
 </div>
 
 <section class="tarjeta">
-  <form method="get" action="/admin/auditoria" class="formulario">
+  <form method="get" action="/admin/auditoria" class="formulario" style="padding:12px 15px">
     <div class="campos-linea">
-      <label>Filtrar (acción o detalle)
+      <label>{{ t.auditoria_filtrar }}
         <input type="text" name="q" value="{{ q }}" autocomplete="off">
       </label>
-      <button class="boton primario" type="submit">Filtrar</button>
-      {% if q != "" %}<a class="boton fantasma" href="/admin/auditoria">Limpiar</a>{% endif %}
+      <button class="boton primario" type="submit">{{ t.btn_filtrar }}</button>
+      {% if q != "" %}<a class="boton fantasma" href="/admin/auditoria">{{ t.btn_limpiar }}</a>{% endif %}
     </div>
   </form>
-  <p class="ayuda">{{ total }} evento(s){% if q != "" %} con «{{ q }}»{% endif %}.</p>
+  <p class="ayuda" style="padding:0 15px 10px">{{ total }} {{ t.auditoria_eventos }}{% if q != "" %} {{ t.auditoria_con }} «{{ q }}»{% endif %}.</p>
 
   {% if eventos.len() == 0 %}
-  <p>No hay eventos que mostrar.</p>
+  <p class="empty">{{ t.msg_busqueda_sin_resultados }}</p>
   {% else %}
   <table class="tabla">
     <thead>
-      <tr><th>Cuándo</th><th>Actor</th><th>Acción</th><th>Detalle</th><th>IP</th></tr>
+      <tr><th>{{ t.th_cuando }}</th><th>{{ t.th_actor }}</th><th>{{ t.th_accion }}</th><th>{{ t.th_detalle }}</th><th>{{ t.th_ip }}</th></tr>
     </thead>
     <tbody>
       {% for e in eventos %}
@@ -32,16 +31,16 @@
         <td>{{ e.ts }}</td>
         <td>{{ e.actor }}</td>
         <td><code>{{ e.action }}</code></td>
-        <td>{% if let Some(d) = e.detail %}{{ d }}{% else %}—{% endif %}</td>
-        <td>{% if let Some(ip) = e.ip %}{{ ip }}{% else %}—{% endif %}</td>
+        <td class="wind sub">{% if let Some(d) = e.detail %}{{ d }}{% else %}{{ t.sin_datos }}{% endif %}</td>
+        <td class="sub">{% if let Some(ip) = e.ip %}{{ ip }}{% else %}{{ t.sin_datos }}{% endif %}</td>
       </tr>
       {% endfor %}
     </tbody>
   </table>
   <div class="paginacion">
-    <span>{% if pagina > 1 %}<a class="boton mini" href="/admin/auditoria?pagina={{ pagina - 1 }}{% if q != "" %}&q={{ q }}{% endif %}">← Anterior</a>{% endif %}</span>
-    <span class="ayuda">página {{ pagina }}</span>
-    <span>{% if hay_mas %}<a class="boton mini" href="/admin/auditoria?pagina={{ pagina + 1 }}{% if q != "" %}&q={{ q }}{% endif %}">Siguiente →</a>{% endif %}</span>
+    <span>{% if pagina > 1 %}<a class="boton mini" href="/admin/auditoria?pagina={{ pagina - 1 }}{% if q != "" %}&q={{ q }}{% endif %}">{{ t.btn_anterior }}</a>{% endif %}</span>
+    <span class="ayuda">{{ t.pagina }} {{ pagina }}</span>
+    <span>{% if hay_mas %}<a class="boton mini" href="/admin/auditoria?pagina={{ pagina + 1 }}{% if q != "" %}&q={{ q }}{% endif %}">{{ t.btn_siguiente }}</a>{% endif %}</span>
   </div>
   {% endif %}
 </section>

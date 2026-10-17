@@ -1,12 +1,9 @@
 {% extends "admin/base.html" %}
-{% block titulo %}Sin permiso — ovaultd{% endblock %}
-{% block nav %}<a class="boton fantasma" href="/admin">← Panel</a>{% endblock %}
+{% block titulo %}{{ t.sin_permiso_titulo }} — {{ t.marca }}{% endblock %}
 {% block contenido %}
 <section class="tarjeta estrecha">
-  <h1>Sin permiso</h1>
-  <p>Esta página es para <strong>administradores</strong> del server. Tu cuenta
-  ({{ email }}) no tiene ese rol.</p>
-  <p class="ayuda">Si necesitás administrar el server, pedile a un admin que te promueva
-  desde «Cuentas».</p>
+  <h1>{{ t.sin_permiso_titulo }}</h1>
+  <p style="margin-top:10px">{{ t.sin_permiso_texto }}</p>
+  <p class="ayuda">{{ t.sin_permiso_ayuda }}</p>
 </section>
 {% endblock %}

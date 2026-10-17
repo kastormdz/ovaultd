@@ -1,45 +1,42 @@
 {% extends "admin/base.html" %}
-{% block titulo %}Vaults — ovaultd{% endblock %}
-{% block nav %}<a class="boton fantasma" href="/admin">← Panel</a>{% endblock %}
+{% block titulo %}{{ t.vaults_titulo }} — {{ t.marca }}{% endblock %}
 {% block contenido %}
+
 <div class="cabecera-seccion">
-  <h1>Vaults</h1>
-  <span class="chip">{{ email }}</span>
+  <h1>{{ t.vaults_titulo }}</h1>
 </div>
 
 <section class="tarjeta">
-  <p class="ayuda">Lo que el server puede ver: <strong>notas</strong> (las vivas), <strong>revisiones</strong>
-  (el histórico completo) y el <strong>espacio</strong> de los blobs <strong>cifrados</strong>. Los nombres y el
-  contenido de tus notas no existen acá: viven descifrados solo en tus clientes (ese es el punto).</p>
+  <p class="ayuda" style="margin:0;padding:12px 15px">{{ t.vault_ciego_nota }}</p>
 
   {% if vaults.len() == 0 %}
-  <p>No hay vaults todavía. Creá uno con el CLI (<code>create-remote</code>) o vinculá el plugin de Obsidian.</p>
+  <p class="empty">{{ t.vaults_sin_vaults }}</p>
   {% else %}
   <table class="tabla">
     <thead>
       <tr>
-        <th>#</th>
-        <th>Nombre</th>
-        <th class="num">Notas</th>
-        <th class="num">Revisiones</th>
-        <th class="num">Espacio</th>
-        <th>Última revisión</th>
-        <th></th>
+        <th>{{ t.th_id }}</th>
+        <th>{{ t.th_vault }}</th>
+        <th class="num">{{ t.th_notas }}</th>
+        <th class="num">{{ t.th_rev }}</th>
+        <th class="num">{{ t.th_tamano }}</th>
+        <th>{{ t.th_ultima_act }}</th>
+        <th>{{ t.th_acciones }}</th>
       </tr>
     </thead>
     <tbody>
       {% for v in vaults %}
       <tr>
         <td>{{ v.id }}</td>
-        <td>{{ v.name }}</td>
+        <td><a href="/admin/vaults/detalle?id={{ v.id }}">{{ v.name }}</a></td>
         <td class="num">{{ v.notas }}</td>
         <td class="num">{{ v.revisiones }}</td>
         <td class="num">{{ v.espacio }}</td>
-        <td>{% if let Some(ts) = v.ultima_revision %}{{ ts }}{% else %}—{% endif %}</td>
+        <td>{% if let Some(ts) = v.ultima_revision %}{{ ts }}{% else %}{{ t.est_sin_actividad }}{% endif %}</td>
         <td>
           <div class="acciones">
-            <a class="boton mini" href="/admin/vaults/detalle?id={{ v.id }}">Detalle</a>
-            <a class="boton mini peligro" href="/admin/vaults/borrar?id={{ v.id }}">Borrar…</a>
+            <a class="boton mini" href="/admin/vaults/detalle?id={{ v.id }}">{{ t.btn_detalle }}</a>
+            <a class="boton mini peligro" href="/admin/vaults/borrar?id={{ v.id }}">{{ t.btn_borrar }}</a>
           </div>
         </td>
       </tr>

@@ -20,6 +20,7 @@ use axum::{
 use serde::Deserialize;
 
 use super::{flash, panel, sesiones, SesionAdmin};
+use super::textos::{self, Textos};
 use crate::auth;
 use crate::routes::{purgar_vault, EstadoServidor};
 
@@ -46,8 +47,12 @@ pub fn rutas() -> Router<EstadoServidor> {
 #[derive(Template)]
 #[template(path = "admin/cuentas.html")]
 struct PlantillaCuentas {
-    version: String,
+    t: &'static Textos,
+    seccion: &'static str,
+    seccion_titulo: &'static str,
+    version: &'static str,
     email: String,
+    rol: String,
     csrf: String,
     cuentas: Vec<VistaCuenta>,
     pagina: i64,
@@ -72,7 +77,12 @@ struct VistaCuenta {
 #[derive(Template)]
 #[template(path = "admin/cuenta_borrar.html")]
 struct PlantillaCuentaBorrar {
-    version: String,
+    t: &'static Textos,
+    seccion: &'static str,
+    seccion_titulo: &'static str,
+    version: &'static str,
+    email: String,
+    rol: String,
     csrf: String,
     cuenta_id: i64,
     cuenta_email: String,
@@ -89,18 +99,21 @@ struct VistaVaultDeCuenta {
 #[derive(Template)]
 #[template(path = "admin/ajustes.html")]
 struct PlantillaAjustes {
-    version: String,
+    t: &'static Textos,
+    seccion: &'static str,
+    seccion_titulo: &'static str,
+    version: &'static str,
     email: String,
+    rol: String,
     csrf: String,
     registro_abierto: bool,
-    parametros: Vec<(String, String)>,
     ok: Option<String>,
 }
 
 #[derive(Template)]
 #[template(path = "admin/register.html")]
 struct PlantillaRegister {
-    version: String,
+    t: &'static Textos,
     abierto: bool,
     error: Option<String>,
     hecho: bool,
@@ -109,7 +122,7 @@ struct PlantillaRegister {
 #[derive(Template)]
 #[template(path = "admin/reset.html")]
 struct PlantillaReset {
-    version: String,
+    t: &'static Textos,
     /// Token válido que viaja en el form (la autorización).
     token: String,
     email: String,
@@ -205,11 +218,16 @@ async fn pintar_cuentas(
         })
         .collect();
 
+    let t = textos::t();
     panel::render(
         || {
             PlantillaCuentas {
-                version: VERSION.to_owned(),
+                t,
+                seccion: "cuentas",
+                seccion_titulo: t.nav_cuentas,
+                version: VERSION,
                 email: sesion.email.clone(),
+                rol: sesion.role.clone(),
                 csrf: sesion.csrf_token.clone(),
                 cuentas,
                 pagina,
@@ -240,6 +258,7 @@ async fn cuentas_crear(
     Form(formulario): Form<FormCrearCuenta>,
 ) -> Response {
     let ip = panel::ip_del_cliente(&headers);
+    let t = textos::t();
 
     let volver = |mensaje: &str, es_error: bool| {
         let clave = if es_error { "error" } else { "ok" };
@@ -254,15 +273,15 @@ async fn cuentas_crear(
     let rol = if formulario.rol == "admin" { "admin" } else { "user" };
 
     if !email.contains('@') || email.len() > 254 {
-        return volver("Ese email no parece válido.", true);
+        return volver(t.msg_email_invalido, true);
     }
     if formulario.password.chars().count() < 8 {
-        return volver("La password necesita 8+ caracteres.", true);
+        return volver(t.msg_password_corta, true);
     }
 
     let creada = match auth::crear_cuenta(&estado.pool, &email, &formulario.password).await {
         Ok(cuenta) => cuenta,
-        Err(_) => return volver("Ya existe una cuenta con ese email.", true),
+        Err(_) => return volver(t.msg_cuenta_ya_existe, true),
     };
 
     if rol == "admin" {
@@ -281,7 +300,7 @@ async fn cuentas_crear(
     )
     .await;
 
-    volver("Cuenta creada.", false)
+    volver(t.msg_cuenta_creada, false)
 }
 
 // ------------------------------------------------------------------ acciones por fila
@@ -301,6 +320,7 @@ async fn cuentas_accion(
     Form(formulario): Form<FormAccion>,
 ) -> Response {
     let ip = panel::ip_del_cliente(&headers);
+    let t = textos::t();
 
     let volver = |mensaje: String, es_error: bool| {
         let clave = if es_error { "error" } else { "ok" };
@@ -319,7 +339,7 @@ async fn cuentas_accion(
     .await
     {
         Ok(Some(fila)) => fila,
-        Ok(None) => return volver("Esa cuenta no existe.".to_owned(), true),
+        Ok(None) => return volver(t.msg_cuenta_no_existe.to_owned(), true),
         Err(error) => return panel::error_interno("cuentas_accion_target", error),
     };
 
@@ -336,19 +356,19 @@ async fn cuentas_accion(
     let resultado: std::result::Result<&str, String> = match formulario.accion.as_str() {
         "deshabilitar" => {
             if soy_yo {
-                Err("No podés deshabilitar tu propia cuenta.".to_owned())
+                Err(t.msg_no_podes_deshabilitarte.to_owned())
             } else if es_ultimo_admin {
-                Err("Es el último admin activo: promové a otra cuenta primero.".to_owned())
+                Err(t.msg_ultimo_admin.to_owned())
             } else {
                 sqlx::query("UPDATE accounts SET disabled_at = datetime('now') WHERE id = ?")
                     .bind(target.0)
                     .execute(&estado.pool)
                     .await
-                    .map(|_| "Cuenta deshabilitada.")
+                    .map(|_| t.msg_cuenta_deshabilitada)
                     .map_err(|error| error.to_string())
                     .map_err(|error| {
                         let _ = error;
-                        "No se pudo deshabilitar.".to_owned()
+                        t.msg_error_deshabilitar.to_owned()
                     })
             }
         }
@@ -356,24 +376,24 @@ async fn cuentas_accion(
             .bind(target.0)
             .execute(&estado.pool)
             .await
-            .map(|_| "Cuenta habilitada.")
-            .map_err(|_| "No se pudo habilitar.".to_owned()),
+            .map(|_| t.msg_cuenta_habilitada)
+            .map_err(|_| t.msg_error_habilitar.to_owned()),
         "promover" => sqlx::query("UPDATE accounts SET role = 'admin' WHERE id = ?")
             .bind(target.0)
             .execute(&estado.pool)
             .await
-            .map(|_| "Rol: admin.")
-            .map_err(|_| "No se pudo promover.".to_owned()),
+            .map(|_| t.msg_rol_admin)
+            .map_err(|_| t.msg_error_promover.to_owned()),
         "degradar" => {
             if es_ultimo_admin {
-                Err("Es el último admin activo: promové a otra cuenta primero.".to_owned())
+                Err(t.msg_ultimo_admin.to_owned())
             } else {
                 sqlx::query("UPDATE accounts SET role = 'user' WHERE id = ?")
                     .bind(target.0)
                     .execute(&estado.pool)
                     .await
-                    .map(|_| "Rol: user.")
-                    .map_err(|_| "No se pudo degradar.".to_owned())
+                    .map(|_| t.msg_rol_user)
+                    .map_err(|_| t.msg_error_degradar.to_owned())
             }
         }
         "reset" => {
@@ -423,7 +443,7 @@ async fn cuentas_accion(
             )
             .await;
         }
-        _ => Err("Acción desconocida.".to_owned()),
+        _ => Err(t.msg_accion_desconocida.to_owned()),
     };
 
     match resultado {
@@ -491,7 +511,12 @@ async fn cuenta_borrar_form(
     panel::render(
         || {
             PlantillaCuentaBorrar {
-                version: VERSION.to_owned(),
+                t: textos::t(),
+                seccion: "cuentas",
+                seccion_titulo: textos::t().nav_cuentas,
+                version: VERSION,
+                email: sesion.email.clone(),
+                rol: sesion.role.clone(),
                 csrf: sesion.csrf_token.clone(),
                 cuenta_id: id,
                 cuenta_email: email_cuenta,
@@ -522,6 +547,7 @@ async fn cuenta_borrar_post(
     Form(formulario): Form<FormBorrarCuenta>,
 ) -> Response {
     let ip = panel::ip_del_cliente(&headers);
+    let t = textos::t();
 
     let volver_error = |mensaje: &str| {
         Redirect::to(&format!(
@@ -549,10 +575,10 @@ async fn cuenta_borrar_post(
     };
 
     if target.0 == sesion.account_id {
-        return volver_error("No+podés+borrar+tu+propia+cuenta.");
+        return volver_error(t.msg_no_podes_borrarte);
     }
     if formulario.confirm.trim().to_lowercase() != target.1.to_lowercase() {
-        return volver_error("El+email+no+coincide+exactamente.");
+        return volver_error(t.msg_email_no_coincide);
     }
 
     let admins_activos: i64 = sqlx::query_scalar(
@@ -562,7 +588,7 @@ async fn cuenta_borrar_post(
     .await
     .unwrap_or(0);
     if target.2 == "admin" && target.3.is_none() && admins_activos <= 1 {
-        return volver_error("Es+el+último+admin+activo:+promové+a+otra+cuenta+primero.");
+        return volver_error(t.msg_ultimo_admin);
     }
 
     let vaults: Vec<(i64, String)> =
@@ -573,7 +599,7 @@ async fn cuenta_borrar_post(
             .unwrap_or_default();
 
     if !vaults.is_empty() && formulario.borrar_vaults.as_deref() != Some("si") {
-        return volver_error("La+cuenta+tiene+vaults:+marcá+«borrar+también+sus+vaults».");
+        return volver_error(t.msg_vaults_sin_confirmar);
     }
 
     // Con la confirmación explícita, se purgan sus vaults (cascada + barrido del CAS).
@@ -608,7 +634,7 @@ async fn cuenta_borrar_post(
     )
     .await;
 
-    Redirect::to("/admin/cuentas?ok=Cuenta+borrada.").into_response()
+    Redirect::to(&format!("/admin/cuentas?ok={}", flash(t.msg_cuenta_borrada))).into_response()
 }
 
 // ------------------------------------------------------------------ ajustes
@@ -643,45 +669,18 @@ async fn pintar_ajustes(
     ok: Option<String>,
 ) -> Response {
     let abierto = registro_abierto(&estado.pool).await;
-    let config = &estado.config;
-
-    let parametros = vec![
-        ("Versión".to_owned(), VERSION.to_owned()),
-        ("Escucha".to_owned(), config.bind_addr.clone()),
-        (
-            "TTL de tokens de device".to_owned(),
-            format!("{} h", config.token_ttl_hours),
-        ),
-        (
-            "TTL de challenges".to_owned(),
-            format!("{} s", config.challenge_ttl_seconds),
-        ),
-        (
-            "TTL de uploads".to_owned(),
-            format!("{} h", config.upload_ttl_hours),
-        ),
-        (
-            "Cookies seguras".to_owned(),
-            format!("{:?}", config.secure_cookies),
-        ),
-        (
-            "Token de instalación".to_owned(),
-            if config.setup_token.is_some() {
-                "configurado".to_owned()
-            } else {
-                "sin configurar".to_owned()
-            },
-        ),
-    ];
 
     panel::render(
         || {
             PlantillaAjustes {
-                version: VERSION.to_owned(),
+                t: textos::t(),
+                seccion: "ajustes",
+                seccion_titulo: textos::t().nav_ajustes,
+                version: VERSION,
                 email: sesion.email.clone(),
+                rol: sesion.role.clone(),
                 csrf: sesion.csrf_token.clone(),
                 registro_abierto: abierto,
-                parametros,
                 ok,
             }
             .render()
@@ -726,7 +725,11 @@ async fn ajustes_post(
     )
     .await;
 
-    Redirect::to("/admin/ajustes?ok=Ajustes+guardados.").into_response()
+    Redirect::to(&format!(
+        "/admin/ajustes?ok={}",
+        flash(textos::t().msg_ajustes_guardados)
+    ))
+    .into_response()
 }
 
 // ------------------------------------------------------------------ registro público
@@ -736,7 +739,7 @@ async fn register_form(State(estado): State<EstadoServidor>) -> Response {
     panel::render(
         || {
             PlantillaRegister {
-                version: VERSION.to_owned(),
+                t: textos::t(),
                 abierto,
                 error: None,
                 hecho: false,
@@ -760,12 +763,13 @@ async fn register_post(
     Form(formulario): Form<FormRegister>,
 ) -> Response {
     let abierto = registro_abierto(&estado.pool).await;
+    let t = textos::t();
 
     let pintar = |error: Option<String>, hecho: bool| {
         panel::render(
             || {
                 PlantillaRegister {
-                    version: VERSION.to_owned(),
+                    t: textos::t(),
                     abierto,
                     error,
                     hecho,
@@ -777,33 +781,30 @@ async fn register_post(
     };
 
     if !abierto {
-        return pintar(Some("El registro está cerrado en este server.".to_owned()), false);
+        return pintar(Some(t.msg_registro_cerrado.to_owned()), false);
     }
 
     // Freno simple por IP (mismo limitador que el login): 5 altas por minuto.
     let clave = format!("registro:{}", panel::ip_del_cliente(&headers).unwrap_or_default());
     if !estado.limitador_login.permitir(&clave) {
-        return pintar(
-            Some("Demasiados intentos: esperá un minuto y volvé a probar.".to_owned()),
-            false,
-        );
+        return pintar(Some(t.msg_demasiados_intentos.to_owned()), false);
     }
     estado.limitador_login.registrar(&clave);
 
     let email = formulario.email.trim().to_lowercase();
     if !email.contains('@') || email.len() > 254 {
-        return pintar(Some("Ese email no parece válido.".to_owned()), false);
+        return pintar(Some(t.msg_email_invalido.to_owned()), false);
     }
     if formulario.password != formulario.repetir {
-        return pintar(Some("Las passwords no coinciden.".to_owned()), false);
+        return pintar(Some(t.msg_passwords_no_coinciden.to_owned()), false);
     }
     if formulario.password.chars().count() < 8 {
-        return pintar(Some("La password necesita 8+ caracteres.".to_owned()), false);
+        return pintar(Some(t.msg_password_corta.to_owned()), false);
     }
 
     let creada = match auth::crear_cuenta(&estado.pool, &email, &formulario.password).await {
         Ok(cuenta) => cuenta,
-        Err(_) => return pintar(Some("Ya existe una cuenta con ese email.".to_owned()), false),
+        Err(_) => return pintar(Some(t.msg_cuenta_ya_existe.to_owned()), false),
     };
 
     sesiones::auditar(
@@ -857,7 +858,7 @@ async fn reset_form(State(estado): State<EstadoServidor>, Query(params): Query<P
         Some(fila) => panel::render(
             || {
                 PlantillaReset {
-                    version: VERSION.to_owned(),
+                    t: textos::t(),
                     token: token.clone(),
                     email: fila.email.clone(),
                     error: None,
@@ -871,7 +872,7 @@ async fn reset_form(State(estado): State<EstadoServidor>, Query(params): Query<P
         None => panel::render(
             || {
                 PlantillaReset {
-                    version: VERSION.to_owned(),
+                    t: textos::t(),
                     token: String::new(),
                     email: String::new(),
                     error: None,
@@ -897,11 +898,13 @@ async fn reset_post(
     headers: HeaderMap,
     Form(formulario): Form<FormReset>,
 ) -> Response {
+    let t = textos::t();
+
     let pintar = |error: Option<String>, hecho: bool, valido: bool, email: String| {
         panel::render(
             || {
                 PlantillaReset {
-                    version: VERSION.to_owned(),
+                    t: textos::t(),
                     token: formulario.token.clone(),
                     email,
                     error,
@@ -919,15 +922,15 @@ async fn reset_post(
     };
 
     if formulario.nueva != formulario.repetir {
-        return pintar(Some("Las passwords no coinciden.".to_owned()), false, true, fila.email);
-    }
-    if formulario.nueva.chars().count() < 8 {
         return pintar(
-            Some("La password necesita 8+ caracteres.".to_owned()),
+            Some(t.msg_passwords_no_coinciden.to_owned()),
             false,
             true,
             fila.email,
         );
+    }
+    if formulario.nueva.chars().count() < 8 {
+        return pintar(Some(t.msg_password_corta.to_owned()), false, true, fila.email);
     }
 
     let hash = match auth::hash_password(&formulario.nueva) {

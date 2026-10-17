@@ -1,33 +1,31 @@
 {% extends "admin/base.html" %}
-{% block titulo %}Devices — ovaultd{% endblock %}
-{% block nav %}<a class="boton fantasma" href="/admin">← Panel</a><a class="boton fantasma" href="/admin/cuentas">Cuentas</a>{% endblock %}
+{% block titulo %}{{ t.dispositivos_titulo }} — {{ t.marca }}{% endblock %}
 {% block contenido %}
+
 <div class="cabecera-seccion">
-  <h1>Devices</h1>
-  <span class="chip">{{ email }}</span>
+  <h1>{{ t.dispositivos_titulo }}</h1>
 </div>
 
 {% if let Some(texto) = error %}<div class="alerta error">{{ texto }}</div>{% endif %}
 {% if let Some(texto) = ok %}<div class="alerta bien">{{ texto }}</div>{% endif %}
 
 <section class="tarjeta">
-  <p class="ayuda">Cada device agrupa los tokens de los clientes (plugin, CLI). Revocar corta
-  TODOS sus tokens al instante: el cliente vuelve a loguear y obtiene un device nuevo.</p>
+  <p class="ayuda" style="margin:0;padding:12px 15px">{{ t.dispositivos_ayuda }}</p>
 
   {% if devices.len() == 0 %}
-  <p>No hay devices todavía.</p>
+  <p class="empty">{{ t.dispositivos_sin }}</p>
   {% else %}
   <table class="tabla">
     <thead>
       <tr>
-        <th>#</th>
-        <th>Cuenta</th>
-        <th>Device</th>
-        <th>Plataforma</th>
-        <th>Estado</th>
-        <th class="num">Tokens vivos</th>
-        <th>Creado</th>
-        <th>Última actividad</th>
+        <th>{{ t.th_id }}</th>
+        <th>{{ t.th_cuenta }}</th>
+        <th>{{ t.th_dispositivo }}</th>
+        <th>{{ t.th_plataforma }}</th>
+        <th>{{ t.th_estado }}</th>
+        <th class="num">{{ t.th_tokens }}</th>
+        <th>{{ t.th_creado }}</th>
+        <th>{{ t.th_ultima_act }}</th>
         <th></th>
       </tr>
     </thead>
@@ -37,20 +35,17 @@
         <td>{{ d.id }}</td>
         <td>{{ d.cuenta }}</td>
         <td>{{ d.nombre }}</td>
-        <td>{{ d.plataforma }}</td>
-        <td>
-          {% if d.revocado %}<span class="estado-malo">revocado</span>
-          {% else %}<span class="estado-bien">activo</span>{% endif %}
-        </td>
+        <td class="sub">{{ d.plataforma }}</td>
+        <td>{% if d.revocado %}<span class="est mal">{{ t.est_revocado }}</span>{% else %}<span class="est ok">{{ t.est_activo }}</span>{% endif %}</td>
         <td class="num">{{ d.tokens_vivos }}</td>
         <td>{{ d.creado }}</td>
-        <td>{% if let Some(ts) = d.ultima_actividad %}{{ ts }}{% else %}—{% endif %}</td>
+        <td>{% if let Some(ts) = d.ultima_actividad %}{{ ts }}{% else %}{{ t.est_sin_actividad }}{% endif %}</td>
         <td>
           {% if !d.revocado %}
           <form method="post" action="/admin/devices/revocar" class="en-linea">
             <input type="hidden" name="csrf" value="{{ csrf }}">
             <input type="hidden" name="id" value="{{ d.id }}">
-            <button class="boton mini peligro" type="submit">Revocar</button>
+            <button class="boton mini peligro" type="submit">{{ t.btn_revocar }}</button>
           </form>
           {% endif %}
         </td>
@@ -59,9 +54,9 @@
     </tbody>
   </table>
   <div class="paginacion">
-    <span>{% if pagina > 1 %}<a class="boton mini" href="/admin/devices?pagina={{ pagina - 1 }}">← Anterior</a>{% endif %}</span>
-    <span class="ayuda">página {{ pagina }}</span>
-    <span>{% if hay_mas %}<a class="boton mini" href="/admin/devices?pagina={{ pagina + 1 }}">Siguiente →</a>{% endif %}</span>
+    <span>{% if pagina > 1 %}<a class="boton mini" href="/admin/devices?pagina={{ pagina - 1 }}">{{ t.btn_anterior }}</a>{% endif %}</span>
+    <span class="ayuda">{{ t.pagina }} {{ pagina }}</span>
+    <span>{% if hay_mas %}<a class="boton mini" href="/admin/devices?pagina={{ pagina + 1 }}">{{ t.btn_siguiente }}</a>{% endif %}</span>
   </div>
   {% endif %}
 </section>

@@ -15,6 +15,7 @@ use axum::{
 use serde::Deserialize;
 
 use super::{flash, panel, sesiones, SesionAdmin};
+use super::textos::{self, Textos};
 use crate::auth;
 use crate::routes::EstadoServidor;
 
@@ -30,8 +31,12 @@ pub fn rutas() -> Router<EstadoServidor> {
 #[derive(Template)]
 #[template(path = "admin/devices.html")]
 struct PlantillaDevices {
-    version: String,
+    t: &'static Textos,
+    seccion: &'static str,
+    seccion_titulo: &'static str,
+    version: &'static str,
     email: String,
+    rol: String,
     csrf: String,
     devices: Vec<VistaDevice>,
     pagina: i64,
@@ -139,8 +144,12 @@ async fn pintar(
     panel::render(
         || {
             PlantillaDevices {
-                version: VERSION.to_owned(),
+                t: textos::t(),
+                seccion: "dispositivos",
+                seccion_titulo: textos::t().nav_dispositivos,
+                version: VERSION,
                 email: sesion.email.clone(),
+                rol: sesion.role.clone(),
                 csrf: sesion.csrf_token.clone(),
                 devices,
                 pagina,
@@ -187,7 +196,7 @@ async fn revocar(
         Ok(None) => {
             return Redirect::to(&format!(
                 "/admin/devices?error={}",
-                flash("Ese device no existe.")
+                flash(textos::t().msg_device_no_existe)
             ))
             .into_response();
         }
@@ -197,7 +206,7 @@ async fn revocar(
     if device.2.is_some() {
         return Redirect::to(&format!(
             "/admin/devices?error={}",
-            flash("Ese device ya estaba revocado.")
+            flash(textos::t().msg_device_ya_revocado)
         ))
         .into_response();
     }
@@ -215,5 +224,9 @@ async fn revocar(
     )
     .await;
 
-    Redirect::to("/admin/devices?ok=Device+revocado.").into_response()
+    Redirect::to(&format!(
+        "/admin/devices?ok={}",
+        flash(textos::t().msg_device_revocado)
+    ))
+    .into_response()
 }

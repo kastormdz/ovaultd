@@ -1,41 +1,23 @@
 {% extends "admin/base.html" %}
-{% block titulo %}Ajustes — ovaultd{% endblock %}
-{% block nav %}<a class="boton fantasma" href="/admin">← Panel</a><a class="boton fantasma" href="/admin/cuentas">Cuentas</a>{% endblock %}
+{% block titulo %}{{ t.ajustes_titulo }} — {{ t.marca }}{% endblock %}
 {% block contenido %}
+
 <div class="cabecera-seccion">
-  <h1>Ajustes del server</h1>
-  <span class="chip">{{ email }}</span>
+  <h1>{{ t.ajustes_titulo }}</h1>
 </div>
 
 {% if let Some(texto) = ok %}<div class="alerta bien">{{ texto }}</div>{% endif %}
 
 <section class="tarjeta">
-  <h2>Registro de cuentas</h2>
+  <h2>{{ t.ajustes_registro_titulo }}</h2>
   <form method="post" action="/admin/ajustes" class="formulario">
     <input type="hidden" name="csrf" value="{{ csrf }}">
     <label class="check">
       <input type="checkbox" name="registro" value="on" {% if registro_abierto %}checked{% endif %}>
-      Permitir que cualquiera se cree una cuenta desde <code>/register</code>
+      {{ t.ajustes_registro_check }}
     </label>
-    <p class="ayuda">Nace cerrado (ADR-0011): abrirlo es una decisión explícita. Con el registro
-    cerrado, las cuentas las creás vos desde «Cuentas».</p>
-    <button class="boton primario" type="submit">Guardar</button>
+    <p class="ayuda">{{ t.ajustes_registro_ayuda }}</p>
+    <button class="boton primario" type="submit">{{ t.btn_guardar }}</button>
   </form>
-</section>
-
-<section class="tarjeta">
-  <h2>Parámetros del server</h2>
-  <table class="tabla">
-    <tbody>
-      {% for (nombre, valor) in parametros %}
-      <tr>
-        <td>{{ nombre }}</td>
-        <td><code>{{ valor }}</code></td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
-  <p class="ayuda">Estos se configuran por variables de entorno al arrancar el server
-  (<code>OVAULTD_*</code>): ver <code>docs/deploy.md</code>.</p>
 </section>
 {% endblock %}

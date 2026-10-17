@@ -108,6 +108,14 @@ pub fn router(estado: EstadoServidor) -> Router {
 /// Marca de arranque del proceso para `/metrics` (la fija el primer router montado).
 static ARRANQUE: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
 
+/// Segundos desde el arranque del proceso (lo comparten `/metrics` y el hero del panel).
+pub(crate) fn uptime_segundos() -> u64 {
+    ARRANQUE
+        .get()
+        .map(|inicio| inicio.elapsed().as_secs())
+        .unwrap_or(0)
+}
+
 /// `GET /healthz` — liveness/readiness para el healthcheck del compose y los balanceadores.
 ///
 /// Sin auth y sin datos de ningún vault: responde si la base contesta (`SELECT 1`). Lo usan el

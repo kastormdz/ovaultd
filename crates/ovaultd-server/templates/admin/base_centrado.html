@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block titulo %}{{ t.marca }}{% endblock %}</title>
+  <link rel="stylesheet" href="/admin/assets/admin.css?v=2">
+</head>
+<body class="centrado">
+  <div class="logo-grande" aria-hidden="true"></div>
+  {% block contenido %}{% endblock %}
+  <p class="ayuda" style="margin-top:18px">{{ t.footer }}</p>
+</body>
+</html>

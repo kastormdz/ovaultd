@@ -30,8 +30,11 @@ cd "$REPO" || exit 2
 
 # Credenciales literales. Los falsos de los tests y el vector NFKC (público por
 # diseño) están vetados abajo; cualquier OTRO match se revisa a mano.
-SECRETS='(password|passwd|secret|token|api[_-]?key)["'"'"']?[[:space:]]*[:=][[:space:]]*["'"'"'][^"'"'"']{8,}'
-SECRETS_VETADOS='password-de-prueba|token-de-prueba|contrase|\{PASSWORD\}|reset\?token='
+# El valor no puede tener espacios: un valor con espacios es una frase de UI
+# («Cambiar password»), no un secreto. Las etiquetas sueltas del glosario se
+# vetan por nombre, igual que los falsos de los tests.
+SECRETS='(password|passwd|secret|token|api[_-]?key)["'"'"']?[[:space:]]*[:=][[:space:]]*["'"'"'][^"'"'"'[:space:]]{8,}'
+SECRETS_VETADOS='password-de-prueba|token-de-prueba|contrase|\{PASSWORD\}|reset\?token=|"Password"|"Contraseña"'
 # `X="$(cmd)"` es una sustitución de shell, no un secreto literal.
 # `X="${VAR}"` / `X: "${VAR:-default}"` es una expansión de variable, tampoco.
 SECRETS_EXPANSION='[:=][[:space:]]*"\$\{'

@@ -1,43 +1,103 @@
 {% extends "admin/base.html" %}
-{% block titulo %}Panel — ovaultd{% endblock %}
-{% block nav %}
-<form method="post" action="/admin/logout" class="en-linea">
-  <input type="hidden" name="csrf" value="{{ csrf }}">
-  <button class="boton fantasma" type="submit">Salir</button>
-</form>
-{% endblock %}
+{% block titulo %}{{ t.panel_titulo }} — {{ t.marca }}{% endblock %}
 {% block contenido %}
-<div class="cabecera-seccion">
-  <h1>Panel</h1>
-  <span class="chip">{{ email }} · {{ rol }}</span>
+
+<div class="hero">
+  <div class="veredicto">
+    <div class="gran"><span class="pt"></span>{{ t.salud_ok }}</div>
+    <div class="detalle">
+      {% if let Some(ts) = ultima_sync %}{{ t.salud_ultima_sync }}: <b>hace {{ hace }}</b> · {{ t.salud_desde }} «{{ ultimo_device }}»
+      {% else %}{{ t.salud_sin_sync }}{% endif %}
+    </div>
+  </div>
+  <div class="componentes">
+    <div><div class="k">{{ t.comp_servidor }}</div><div class="v">{{ t.comp_servidor_arriba }} {{ uptime }}</div></div>
+    <div><div class="k">{{ t.comp_base }}</div><div class="v">{{ db_bytes }}</div></div>
+    <div><div class="k">{{ t.comp_almacen }}</div><div class="v">{{ fragmentos }} {{ t.comp_fragmentos }} · {{ espacio }}</div></div>
+    <div><div class="k">{{ t.kpi_almacenado }}</div><div class="v">{{ espacio_vaults }}</div></div>
+  </div>
 </div>
 
-<section class="grilla">
-  <div class="tarjeta stat"><span class="numero">{{ cuentas }}</span><span class="rotulo">Cuentas</span></div>
-  <div class="tarjeta stat"><span class="numero">{{ vaults }}</span><span class="rotulo">Vaults</span></div>
-  <div class="tarjeta stat"><span class="numero">{{ notas }}</span><span class="rotulo">Notas</span></div>
-  <div class="tarjeta stat"><span class="numero">{{ revisiones }}</span><span class="rotulo">Revisiones</span></div>
-  <div class="tarjeta stat"><span class="numero">{{ devices }}</span><span class="rotulo">Devices activos</span></div>
-  <div class="tarjeta stat"><span class="numero">{{ espacio }}</span><span class="rotulo">Almacenado</span></div>
-</section>
+<div class="stats">
+  <div class="stat"><span class="numero">{{ cuentas }}</span><span class="rotulo">{{ t.kpi_cuentas }}</span></div>
+  <div class="stat"><span class="numero">{{ vaults }}</span><span class="rotulo">{{ t.kpi_vaults }}</span></div>
+  <div class="stat"><span class="numero">{{ notas }}</span><span class="rotulo">{{ t.kpi_notas }}</span></div>
+  <div class="stat"><span class="numero">{{ revisiones }}</span><span class="rotulo">{{ t.kpi_revisiones }}</span></div>
+  <div class="stat"><span class="numero">{{ devices }}</span><span class="rotulo">{{ t.kpi_dispositivos }}</span></div>
+  <div class="stat"><span class="numero">{{ lotes }}</span><span class="rotulo">{{ t.kpi_lotes }}</span></div>
+</div>
+
+<div class="grilla dos-desigual">
+  <section class="tarjeta">
+    <h2>{{ t.seccion_vaults }} <a href="/admin/vaults">{{ t.ver_todos }}</a></h2>
+    {% if vaults_lista.len() == 0 %}
+    <p class="empty">{{ t.vaults_sin_vaults }}</p>
+    {% else %}
+    <table class="tabla">
+      <thead><tr><th>{{ t.th_vault }}</th><th class="num">{{ t.th_notas }}</th><th class="num">{{ t.th_rev }}</th><th class="num">{{ t.th_tamano }}</th><th>{{ t.th_ultima_act }}</th><th>{{ t.th_estado }}</th></tr></thead>
+      <tbody>
+        {% for v in vaults_lista %}
+        <tr>
+          <td><a href="/admin/vaults/detalle?id={{ v.id }}">{{ v.name }}</a> <span class="sub">#{{ v.id }}</span></td>
+          <td class="num">{{ v.notas }}</td>
+          <td class="num">{{ v.revisiones }}</td>
+          <td class="num">{{ v.espacio }}</td>
+          <td>{% if let Some(ts) = v.ultima_revision %}{{ ts }}{% else %}{{ t.est_sin_actividad }}{% endif %}</td>
+          <td><span class="est ok">{{ t.est_al_dia }}</span></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+  </section>
+
+  <section class="tarjeta">
+    <h2>{{ t.seccion_dispositivos }} <a href="/admin/devices">{{ t.gestionar }}</a></h2>
+    {% if dispositivos.len() == 0 %}
+    <p class="empty">{{ t.dispositivos_sin }}</p>
+    {% else %}
+    <table class="tabla">
+      <thead><tr><th>{{ t.th_dispositivo }}</th><th>{{ t.th_cuenta }}</th><th>{{ t.th_ultima_act }}</th></tr></thead>
+      <tbody>
+        {% for d in dispositivos %}
+        <tr>
+          <td>{{ d.nombre }}</td>
+          <td class="sub">{{ d.cuenta }}</td>
+          <td>{% if let Some(ts) = d.ultima_actividad %}{{ ts }}{% else %}{{ t.est_sin_actividad }}{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+  </section>
+</div>
 
 <section class="tarjeta">
-  <h2>Vaults</h2>
-  <p><a href="/admin/vaults">Ver estadísticas por vault</a> — notas, revisiones y espacio.
-  Los nombres y el contenido de las notas viven cifrados en tus clientes: acá se ve lo que
-  el server puede ver.</p>
-</section>
-
-<section class="tarjeta">
-  <h2>Tu cuenta</h2>
-  <p><a href="/admin/mi-cuenta">Cambiar tu password</a> — al cambiarla, las demás sesiones del panel se cierran.</p>
+  <h2>{{ t.seccion_actividad }} <a href="/admin/auditoria">{{ t.auditoria_completa }}</a></h2>
+  {% if actividad.len() == 0 %}
+  <p class="empty">{{ t.cero_eventos }}</p>
+  {% else %}
+  <div class="log">
+    {% for e in actividad %}
+    <div class="l">
+      <span class="h">{{ e.hora }}</span>
+      <span class="a">{{ e.action }}</span>
+      <span class="d">{{ e.detail }}</span>
+      <span class="ip">{% if let Some(ip) = e.ip %}{{ ip }}{% endif %}</span>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
 </section>
 
 {% if rol == "admin" %}
 <section class="tarjeta">
-  <h2>Administración</h2>
-  <p><a href="/admin/cuentas">Cuentas</a> — crear, roles, deshabilitar, reset de passwords y borrado.
-  <a href="/admin/ajustes">Ajustes</a> — registro de cuentas y parámetros del server.</p>
+  <h2>{{ t.nav_cuentas }}</h2>
+  <p class="ayuda" style="margin:0">
+    <a href="/admin/cuentas">{{ t.nav_cuentas }}</a> — {{ t.admin_cuentas_desc }} ·
+    <a href="/admin/ajustes">{{ t.nav_ajustes }}</a> — {{ t.admin_ajustes_desc }}
+  </p>
 </section>
 {% endif %}
+
 {% endblock %}

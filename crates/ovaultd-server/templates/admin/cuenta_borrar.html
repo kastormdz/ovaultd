@@ -1,39 +1,35 @@
 {% extends "admin/base.html" %}
-{% block titulo %}Borrar cuenta — ovaultd{% endblock %}
-{% block nav %}<a class="boton fantasma" href="/admin/cuentas">← Cuentas</a>{% endblock %}
+{% block titulo %}{{ t.cuenta_borrar_titulo }} — {{ t.marca }}{% endblock %}
 {% block contenido %}
 <section class="tarjeta estrecha">
-  <h1>Borrar «{{ cuenta_email }}» (#{{ cuenta_id }})</h1>
-  <p class="ayuda">Rol actual: <strong>{{ cuenta_rol }}</strong>.</p>
+  <h1>{{ t.cuenta_borrar_titulo }}: «{{ cuenta_email }}» <span class="chip">#{{ cuenta_id }}</span></h1>
+  <p class="ayuda">{{ t.cuenta_borrar_rol_actual }}: <strong>{{ cuenta_rol }}</strong>.</p>
   {% if let Some(texto) = error %}<div class="alerta error">{{ texto }}</div>{% endif %}
 
-  <p class="ayuda">Esto borra la cuenta, sus sesiones y sus devices. Es <strong>irreversible</strong>:
-  para rehacerla hay que volver a crearla desde cero.</p>
+  <p class="ayuda">{{ t.cuenta_borrar_aviso }}</p>
 
   {% if vaults.len() > 0 %}
   <div class="alerta error">
-    <p>Esta cuenta tiene <strong>{{ vaults.len() }} vault(s)</strong>:</p>
+    <p>{{ t.cuenta_borrar_tiene_vaults }}:</p>
     <ul>
       {% for v in vaults %}<li>#{{ v.id }} «{{ v.name }}»</li>{% endfor %}
     </ul>
-    <p>Sus datos cifrados se borran del server (los blobs del CAS incluidos). Las copias locales
-    de los dispositivos no se tocan, pero sin la password del vault no se pueden re-subir.</p>
   </div>
   {% endif %}
 
   <form method="post" action="/admin/cuentas/borrar" class="formulario">
     <input type="hidden" name="csrf" value="{{ csrf }}">
     <input type="hidden" name="id" value="{{ cuenta_id }}">
-    <label>Escribí el email exacto (<code>{{ cuenta_email }}</code>) para confirmar
+    <label>{{ t.cuenta_borrar_confirmar }} (<code>{{ cuenta_email }}</code>)
       <input type="text" name="confirm" required autocomplete="off">
     </label>
     {% if vaults.len() > 0 %}
     <label class="check">
       <input type="checkbox" name="borrar_vaults" value="si">
-      Borrar también sus vaults y sus blobs cifrados
+      {{ t.cuenta_borrar_check_vaults }}
     </label>
     {% endif %}
-    <button class="boton peligro" type="submit">Borrar definitivamente</button>
+    <button class="boton peligro" type="submit">{{ t.btn_borrar_definitivo }}</button>
   </form>
 </section>
 {% endblock %}

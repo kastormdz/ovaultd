@@ -12,6 +12,7 @@ use axum::{
 use serde::Deserialize;
 
 use super::{panel, SesionAdmin};
+use super::textos::{self, Textos};
 use crate::routes::EstadoServidor;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -24,8 +25,13 @@ pub fn rutas() -> axum::Router<EstadoServidor> {
 #[derive(Template)]
 #[template(path = "admin/auditoria.html")]
 struct PlantillaAuditoria {
-    version: String,
+    t: &'static Textos,
+    seccion: &'static str,
+    seccion_titulo: &'static str,
+    version: &'static str,
     email: String,
+    rol: String,
+    csrf: String,
     eventos: Vec<VistaEvento>,
     pagina: i64,
     hay_mas: bool,
@@ -141,8 +147,13 @@ async fn lista(
     panel::render(
         || {
             PlantillaAuditoria {
-                version: VERSION.to_owned(),
+                t: textos::t(),
+                seccion: "auditoria",
+                seccion_titulo: textos::t().nav_auditoria,
+                version: VERSION,
                 email: sesion.email.clone(),
+                rol: sesion.role.clone(),
+                csrf: sesion.csrf_token.clone(),
                 eventos,
                 pagina,
                 hay_mas,

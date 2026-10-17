@@ -1,90 +1,88 @@
 {% extends "admin/base.html" %}
-{% block titulo %}Cuentas — ovaultd{% endblock %}
-{% block nav %}<a class="boton fantasma" href="/admin">← Panel</a><a class="boton fantasma" href="/admin/ajustes">Ajustes</a>{% endblock %}
+{% block titulo %}{{ t.cuentas_titulo }} — {{ t.marca }}{% endblock %}
 {% block contenido %}
+
 <div class="cabecera-seccion">
-  <h1>Cuentas</h1>
-  <span class="chip">{{ email }}</span>
+  <h1>{{ t.cuentas_titulo }}</h1>
 </div>
 
 {% if let Some(texto) = error %}<div class="alerta error">{{ texto }}</div>{% endif %}
 {% if let Some(texto) = ok %}<div class="alerta bien">{{ texto }}</div>{% endif %}
 {% if let Some(link) = reset_link %}
 <div class="alerta bien">
-  <p>Link de reset (se muestra <strong>UNA vez</strong>):</p>
+  <p>{{ t.msg_link_reset }}</p>
   <pre class="codigo">{{ link }}</pre>
 </div>
 {% endif %}
 
 <section class="tarjeta">
-  <h2>Crear cuenta</h2>
+  <h2>{{ t.cuentas_crear_titulo }}</h2>
   <form method="post" action="/admin/cuentas/crear" class="formulario">
     <input type="hidden" name="csrf" value="{{ csrf }}">
     <div class="campos-linea">
-      <label>Email
+      <label>{{ t.login_email }}
         <input type="email" name="email" required autocomplete="off">
       </label>
-      <label>Password inicial
+      <label>{{ t.cuentas_password_inicial }}
         <input type="password" name="password" required minlength="8" autocomplete="new-password">
       </label>
-      <label>Rol
+      <label>{{ t.th_rol }}
         <select name="rol">
           <option value="user">user</option>
           <option value="admin">admin</option>
         </select>
       </label>
-      <button class="boton primario" type="submit">Crear</button>
+      <button class="boton primario" type="submit">{{ t.btn_crear }}</button>
     </div>
   </form>
-  <p class="ayuda">La password inicial la definís vos y se la pasás a la persona (no hay SMTP acá).
-  Puede cambiarla sola desde «Mi cuenta» o con un link de reset.</p>
+  <p class="ayuda" style="padding:0 15px 12px">{{ t.cuentas_ayuda_crear }}</p>
 </section>
 
 <section class="tarjeta">
   {% if cuentas.len() == 0 %}
-  <p>No hay cuentas todavía.</p>
+  <p class="empty">{{ t.cuentas_sin_cuentas }}</p>
   {% else %}
   <table class="tabla">
     <thead>
       <tr>
-        <th>#</th>
-        <th>Email</th>
-        <th>Rol</th>
-        <th>Estado</th>
-        <th class="num">Vaults</th>
-        <th>Creada</th>
-        <th>Última actividad</th>
-        <th>Acciones</th>
+        <th>{{ t.th_id }}</th>
+        <th>{{ t.th_email }}</th>
+        <th>{{ t.th_rol }}</th>
+        <th>{{ t.th_estado }}</th>
+        <th class="num">{{ t.th_vaults }}</th>
+        <th>{{ t.th_creada }}</th>
+        <th>{{ t.th_ultima_act }}</th>
+        <th>{{ t.th_acciones }}</th>
       </tr>
     </thead>
     <tbody>
       {% for c in cuentas %}
       <tr>
         <td>{{ c.id }}</td>
-        <td>{{ c.email }}{% if c.es_yo %} <span class="chip">vos</span>{% endif %}</td>
+        <td>{{ c.email }}{% if c.es_yo %} <span class="chip vos">{{ t.cuentas_badge_vos }}</span>{% endif %}</td>
         <td>{{ c.role }}</td>
-        <td>{% if c.deshabilitada %}<span class="estado-malo">deshabilitada</span>{% else %}<span class="estado-bien">activa</span>{% endif %}</td>
+        <td>{% if c.deshabilitada %}<span class="est mal">{{ t.est_deshabilitada }}</span>{% else %}<span class="est ok">{{ t.est_activa }}</span>{% endif %}</td>
         <td class="num">{{ c.vaults }}</td>
         <td>{{ c.creada }}</td>
-        <td>{% if let Some(ts) = c.ultima %}{{ ts }}{% else %}—{% endif %}</td>
+        <td>{% if let Some(ts) = c.ultima %}{{ ts }}{% else %}{{ t.sin_datos }}{% endif %}</td>
         <td>
           <div class="acciones">
             <form method="post" action="/admin/cuentas/accion" class="en-linea">
               <input type="hidden" name="csrf" value="{{ csrf }}">
               <input type="hidden" name="id" value="{{ c.id }}">
               {% if c.deshabilitada %}
-              <button class="boton mini" name="accion" value="habilitar">Habilitar</button>
+              <button class="boton mini" name="accion" value="habilitar">{{ t.btn_habilitar }}</button>
               {% else %}
-              <button class="boton mini" name="accion" value="deshabilitar">Deshabilitar</button>
+              <button class="boton mini" name="accion" value="deshabilitar">{{ t.btn_deshabilitar }}</button>
               {% endif %}
               {% if c.role == "admin" %}
-              <button class="boton mini" name="accion" value="degradar" title="Pasar a user">→ user</button>
+              <button class="boton mini" name="accion" value="degradar">{{ t.cuentas_degradar }}</button>
               {% else %}
-              <button class="boton mini" name="accion" value="promover" title="Pasar a admin">→ admin</button>
+              <button class="boton mini" name="accion" value="promover">{{ t.cuentas_promover }}</button>
               {% endif %}
-              <button class="boton mini" name="accion" value="reset">Reset</button>
+              <button class="boton mini" name="accion" value="reset">{{ t.btn_restablecer }}</button>
             </form>
-            <a class="boton mini peligro" href="/admin/cuentas/borrar?id={{ c.id }}">Borrar…</a>
+            <a class="boton mini peligro" href="/admin/cuentas/borrar?id={{ c.id }}">{{ t.btn_borrar }}</a>
           </div>
         </td>
       </tr>
@@ -92,9 +90,9 @@
     </tbody>
   </table>
   <div class="paginacion">
-    <span>{% if pagina > 1 %}<a class="boton mini" href="/admin/cuentas?pagina={{ pagina - 1 }}">← Anterior</a>{% endif %}</span>
-    <span class="ayuda">página {{ pagina }}</span>
-    <span>{% if hay_mas %}<a class="boton mini" href="/admin/cuentas?pagina={{ pagina + 1 }}">Siguiente →</a>{% endif %}</span>
+    <span>{% if pagina > 1 %}<a class="boton mini" href="/admin/cuentas?pagina={{ pagina - 1 }}">{{ t.btn_anterior }}</a>{% endif %}</span>
+    <span class="ayuda">{{ t.pagina }} {{ pagina }}</span>
+    <span>{% if hay_mas %}<a class="boton mini" href="/admin/cuentas?pagina={{ pagina + 1 }}">{{ t.btn_siguiente }}</a>{% endif %}</span>
   </div>
   {% endif %}
 </section>

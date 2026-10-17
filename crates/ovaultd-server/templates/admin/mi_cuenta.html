@@ -1,25 +1,23 @@
 {% extends "admin/base.html" %}
-{% block titulo %}Mi cuenta — ovaultd{% endblock %}
-{% block nav %}<a class="boton fantasma" href="/admin">← Panel</a>{% endblock %}
+{% block titulo %}{{ t.mi_cuenta_titulo }} — {{ t.marca }}{% endblock %}
 {% block contenido %}
 <section class="tarjeta estrecha">
-  <h1>Cambiar tu password</h1>
+  <h1>{{ t.mi_cuenta_titulo }}</h1>
   {% if let Some(texto) = error %}<div class="alerta error">{{ texto }}</div>{% endif %}
   {% if let Some(texto) = ok %}<div class="alerta bien">{{ texto }}</div>{% endif %}
   <form method="post" action="/admin/mi-cuenta" class="formulario">
     <input type="hidden" name="csrf" value="{{ csrf }}">
-    <label>Password actual
+    <label>{{ t.mi_cuenta_password_actual }}
       <input type="password" name="actual" required autocomplete="current-password">
     </label>
-    <label>Password nueva
+    <label>{{ t.mi_cuenta_password_nueva }}
       <input type="password" name="nueva" required minlength="8" autocomplete="new-password">
     </label>
-    <label>Repetir la nueva
+    <label>{{ t.register_repetir }}
       <input type="password" name="repetir" required minlength="8" autocomplete="new-password">
     </label>
-    <button class="boton primario" type="submit">Guardar</button>
+    <button class="boton primario" type="submit">{{ t.btn_guardar }}</button>
   </form>
-  <p class="ayuda">Es la password de tu <strong>cuenta</strong> (login del panel y de tus devices). La password de tus
-  vaults es aparte y vive solo en tus clientes: el server nunca la ve.</p>
+  <p class="ayuda">{{ t.register_ayuda }}</p>
 </section>
 {% endblock %}

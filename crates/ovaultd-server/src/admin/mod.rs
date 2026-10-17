@@ -13,6 +13,7 @@ pub mod cuentas;
 pub mod devices;
 pub mod panel;
 pub mod sesiones;
+pub mod textos;
 pub mod vaults;
 
 pub use panel::rutas;
@@ -23,6 +24,7 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 
 use crate::routes::EstadoServidor;
+use textos::Textos;
 
 pub(crate) const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -47,8 +49,13 @@ impl FromRequestParts<EstadoServidor> for SesionAdmin {
             let pagina = panel::render(
                 || {
                     PlantillaSinPermiso {
-                        version: VERSION.to_owned(),
+                        t: textos::t(),
+                        seccion: "permiso",
+                        seccion_titulo: textos::t().sin_permiso_titulo,
+                        version: VERSION,
                         email: sesion.0.email.clone(),
+                        rol: sesion.0.role.clone(),
+                        csrf: sesion.0.csrf_token.clone(),
                     }
                     .render()
                 },
@@ -64,8 +71,13 @@ impl FromRequestParts<EstadoServidor> for SesionAdmin {
 #[derive(Template)]
 #[template(path = "admin/sin_permiso.html")]
 struct PlantillaSinPermiso {
-    version: String,
+    t: &'static Textos,
+    seccion: &'static str,
+    seccion_titulo: &'static str,
+    version: &'static str,
     email: String,
+    rol: String,
+    csrf: String,
 }
 
 /// Percent-encoding mínimo para mandar un mensaje humano en un querystring
