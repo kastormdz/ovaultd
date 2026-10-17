@@ -1,0 +1,6 @@
+# Overlay SOLO para el E2E de contenedor (tests/scripts/container-e2e.sh):
+#   - `user`: el uid/gid del host, para que el bind mount de datos sea escribible
+#     (el image corre como 10001; el smoke-cliente del host escribe la MISMA base).
+services:
+  ovaultd:
+    user: "${E2E_UID:-1000}:${E2E_GID:-1000}"

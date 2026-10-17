@@ -1,0 +1,16 @@
+{
+  "name": "js-spike",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "type": "commonjs",
+  "dependencies": {
+    "@noble/ciphers": "^2.4.0",
+    "@noble/curves": "2.4.0",
+    "@noble/hashes": "^2.4.0"
+  }
+}

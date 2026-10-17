@@ -1,0 +1,15 @@
+[package]
+name = "ovaultd-spike"
+version = "0.0.1"
+edition = "2021"
+
+[dependencies]
+scrypt = { version = "0.11", default-features = false }
+hkdf = "0.12"
+sha2 = "0.10"
+hmac = "0.12"
+chacha20poly1305 = "0.10"
+unicode-normalization = "0.1"
+hex = "0.4"
+argon2 = "0.6.0"
+ed25519-dalek = "3.0.0"

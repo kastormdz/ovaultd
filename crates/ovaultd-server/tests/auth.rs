@@ -1,0 +1,149 @@
+//! Integración de `auth.rs`: challenges (uso único, vencimiento, ligados a device y vault) y
+//! revocación de devices contra la base real y el router completo.
+
+mod common;
+
+use axum::{
+    body::Body,
+    http::{Method, StatusCode},
+};
+use common::{hex_lower, response_json, TestContext, EMAIL, PASSWORD};
+use ovaultd_server::{auth, ServerError};
+use sha2::{Digest, Sha256};
+
+#[tokio::test]
+async fn challenge_replay_is_rejected() -> Result<(), Box<dyn std::error::Error>> {
+    let ctx = TestContext::new().await?;
+
+    let challenge = auth::emitir_challenge(&ctx.pool, ctx.device_id, ctx.vault_id).await?;
+
+    auth::consumir_challenge(&ctx.pool, ctx.device_id, ctx.vault_id, &challenge).await?;
+
+    let replay = auth::consumir_challenge(&ctx.pool, ctx.device_id, ctx.vault_id, &challenge).await;
+    match replay {
+        Err(ServerError::Unauthorized) => {}
+        otro => panic!("el replay debía dar Unauthorized, vino {otro:?}"),
+    }
+
+    assert!(
+        auth::challenge_pendiente(&ctx.pool, ctx.device_id, ctx.vault_id)
+            .await?
+            .is_none(),
+        "un challenge consumido no queda pendiente"
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn challenge_vencido_no_se_puede_consumir() -> Result<(), Box<dyn std::error::Error>> {
+    let ctx = TestContext::new().await?;
+
+    let challenge = auth::emitir_challenge(&ctx.pool, ctx.device_id, ctx.vault_id).await?;
+
+    // Vencer por reloj, determinista: sin sleeps.
+    sqlx::query(
+        "UPDATE auth_challenges
+         SET expires_at = datetime('now', '-1 minute')
+         WHERE challenge = ?",
+    )
+    .bind(&challenge)
+    .execute(&ctx.pool)
+    .await?;
+
+    assert!(
+        auth::challenge_pendiente(&ctx.pool, ctx.device_id, ctx.vault_id)
+            .await?
+            .is_none(),
+        "un challenge vencido no está pendiente"
+    );
+
+    assert!(
+        auth::consumir_challenge(&ctx.pool, ctx.device_id, ctx.vault_id, &challenge)
+            .await
+            .is_err(),
+        "un challenge vencido no se consume"
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn challenge_ligado_al_device_y_al_vault() -> Result<(), Box<dyn std::error::Error>> {
+    let ctx = TestContext::new().await?;
+
+    let challenge = auth::emitir_challenge(&ctx.pool, ctx.device_id, ctx.vault_id).await?;
+
+    // Otro device de la MISMA cuenta no puede consumir el challenge ajeno.
+    let (_, otro_device) =
+        auth::iniciar_sesion(&ctx.pool, EMAIL, PASSWORD, "otro-device", None).await?;
+    assert!(
+        auth::consumir_challenge(&ctx.pool, otro_device, ctx.vault_id, &challenge)
+            .await
+            .is_err(),
+        "el challenge está ligado al device que lo pidió"
+    );
+
+    // Y el device correcto, contra OTRO vault, tampoco.
+    assert!(
+        auth::consumir_challenge(&ctx.pool, ctx.device_id, ctx.vault_id + 1_000, &challenge)
+            .await
+            .is_err(),
+        "el challenge está ligado al vault para el que se emitió"
+    );
+
+    // El dueño legítimo sigue pudiendo usarlo: los intentos inválidos no lo quemaron.
+    auth::consumir_challenge(&ctx.pool, ctx.device_id, ctx.vault_id, &challenge).await?;
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn revoked_device_cannot_download() -> Result<(), Box<dyn std::error::Error>> {
+    let ctx = TestContext::new().await?;
+
+    // Con el token vigente, sube un blob legítimo.
+    let bytes = b"contenido que no se debe poder bajar tras revocar";
+    let digest: [u8; 32] = Sha256::digest(bytes).into();
+    let uri = format!(
+        "/api/v1/vaults/{}/blobs/{}",
+        ctx.vault_id,
+        hex_lower(&digest)
+    );
+
+    let put = ctx
+        .authenticated_request(Method::PUT, &uri, Body::from(bytes.to_vec()))
+        .await?;
+    assert_eq!(put.status(), StatusCode::CREATED);
+
+    // Revocar el device: el token deja de verificar.
+    auth::revocar_device(&ctx.pool, ctx.device_id).await?;
+    assert!(
+        auth::verificar_token(&ctx.pool, &ctx.token).await.is_err(),
+        "un token revocado no verifica"
+    );
+
+    // Y la descarga rebota con 401 (el device ya no es nadie).
+    let get = ctx.authenticated_request(Method::GET, &uri, Body::empty()).await?;
+    assert_eq!(get.status(), StatusCode::UNAUTHORIZED);
+
+    let cuerpo = response_json(get).await?;
+    assert_eq!(cuerpo["t"], "error");
+    assert_eq!(cuerpo["code"], "unauthorized");
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn token_basura_no_verifica() -> Result<(), Box<dyn std::error::Error>> {
+    let ctx = TestContext::new().await?;
+
+    assert!(auth::verificar_token(&ctx.pool, "no-es-un-token").await.is_err());
+
+    let response = ctx
+        .request_con_token("no-es-un-token", Method::GET, "/api/v1/me", Body::empty())
+        .await?;
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+    Ok(())
+}

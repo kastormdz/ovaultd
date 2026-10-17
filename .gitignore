@@ -1,0 +1,43 @@
+# Rust
+target/
+**/*.rs.bk
+Cargo.lock.orig
+
+# Node (plugin / spike)
+node_modules/
+dist/
+main.js
+*.map
+__pycache__/
+
+# Playwright (specs de browser)
+test-results/
+playwright-report/
+
+# salidas del spike
+spikes/crypto-interop/.out_*.txt
+
+# secretos
+.env
+*.env
+.secrets/
+*.pem
+token*
+
+# patrones personales del escáner de fugas (no versionado)
+scripts/leaks.local
+
+# ruido
+*.log
+.DS_Store
+
+# datos de prueba (server-smoke/scan-canary, config por defecto)
+.tmp/
+
+# transitorios del spike
+.err_*.txt
+
+# Backups y respuestas crudas NO viven en el repo: en migrations/ un .bak.sql lo lee sqlx::migrate! y rompe el build.
+*.bak.rs
+*.bak.*
+*.respfragmento.md

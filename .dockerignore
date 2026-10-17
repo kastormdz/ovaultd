@@ -1,0 +1,19 @@
+# Lo que NO entra a la imagen: se compila adentro (target) o no hace falta para el binario.
+# OJO: `migrations/` SÍ entra — `sqlx::migrate!("../../migrations")` las embebe en el binario.
+# `xtask/` SÍ entra: es miembro del workspace y cargo lo necesita para parsearlo.
+target/
+.git/
+.tmp/
+docs/
+spikes/
+*.md
+.env
+*.env
+
+# Workspace TS (solo corre en el cliente; nada de esto entra al binario)
+node_modules/
+packages/
+tests/
+package.json
+package-lock.json
+tsconfig.base.json

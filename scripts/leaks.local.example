@@ -1,0 +1,17 @@
+# Ejemplo para scripts/leaks.local (ver scripts/scan-leaks.sh).
+#
+# scan-leaks.sh NO lleva hardcodeados los patrones de tu infraestructura, porque
+# publicar el escáner publicaría los nombres de tu propia topología. En su lugar,
+# si existe `scripts/leaks.local` (no versionado), se cargan los patrones de ahí.
+#
+# Copiá este archivo a `scripts/leaks.local` y poné los patrones de TU entorno:
+# hostnames, usuarios, dominios internos, IPs y rutas que no deben filtrarse.
+# Una expresión regular por línea; `#` comenta.
+#
+# Ejemplo:
+#   mi-servidor
+#   mi-laptop
+#   mi-usuario
+#   \bmi-dominio\.internal\b
+#   10\.20\.
+#   /home/mi-usuario

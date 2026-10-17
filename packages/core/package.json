@@ -1,0 +1,30 @@
+{
+  "name": "@ovaultd/core",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "description": "Núcleo durable de ovaultd: estado (IndexedDB), outbox, apply, reconciliación. Corre en el runtime Chromium.",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -b && npm run build:runtime",
+    "build:runtime": "esbuild src/runtime.ts --bundle --format=iife --platform=browser --target=es2022 --outfile=dist/runtime.js",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@ovaultd/crypto": "*",
+    "@ovaultd/protocol": "*",
+    "idb": "8.0.4"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2"
+  }
+}

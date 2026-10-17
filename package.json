@@ -1,0 +1,26 @@
+{
+  "name": "ovaultd-workspace",
+  "version": "0.1.0",
+  "private": true,
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "description": "ovaultd — clientes TS del protocolo sync2 (protocol, crypto, cli)",
+  "engines": {
+    "node": ">=22"
+  },
+  "workspaces": [
+    "packages/*",
+    "tests"
+  ],
+  "scripts": {
+    "build": "tsc -b packages/protocol packages/crypto packages/core packages/cli && npm run build:runtime -w @ovaultd/core",
+    "test": "npm run test --workspaces --if-present",
+    "test:browser": "npm run test:browser -w @ovaultd/tests",
+    "clean": "rm -rf packages/*/dist"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.5",
+    "typescript": "7.0.2",
+    "vitest": "5.0.5"
+  }
+}

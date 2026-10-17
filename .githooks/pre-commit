@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# pre-commit — gate de fugas del repo (ver scripts/scan-leaks.sh).
+#
+# Activar una vez por clon:
+#   git config core.hooksPath .githooks
+#
+# Bypass deliberado (no recomendado):  git commit --no-verify
+set -euo pipefail
+
+REPO="$(git rev-parse --show-toplevel)"
+exec "$REPO/scripts/scan-leaks.sh" --worktree

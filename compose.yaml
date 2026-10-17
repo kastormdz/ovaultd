@@ -1,0 +1,61 @@
+# ovaultd — stack base (fase 1).
+#
+# Pensado para vivir DETRÁS de un proxy reverso: publica en loopback por defecto
+# (OVAULTD_ADDR) y el proxy habla con ese puerto. Guía + conf de ejemplo:
+# `docs/deploy.md` y `docker/proxy/nginx.conf.example`.
+#
+# Desarrollo (construye la imagen local + nginx de ejemplo):
+#   cp .env.example .env && chmod 600 .env
+#   docker compose -f compose.yaml -f docker/compose.dev.yaml up -d --build
+#   curl --fail http://127.0.0.1:8080/healthz
+#
+# Distribución: OVAULTD_IMAGE=repositorio@sha256:<digest REAL de una imagen publicada>
+# (nunca un digest inventado) y este archivo solo.
+
+name: ovaultd
+
+services:
+  ovaultd:
+    image: ${OVAULTD_IMAGE:-ovaultd:local}
+    restart: unless-stopped
+    ports:
+      # 127.0.0.1 => solo el proxy local. Para un proxy en OTRA máquina: OVAULTD_ADDR=0.0.0.0
+      # (y firewall: el server NO trae TLS, el TLS lo termina el proxy).
+      - "${OVAULTD_ADDR:-127.0.0.1}:${OVAULTD_PORT:-8080}:8080"
+    environment:
+      # Dentro del contenedor escucha en todas las interfaces; el puerto del host decide quién entra.
+      OVAULTD_BIND: "0.0.0.0:8080"
+      OVAULTD_DB: /data/metadata.db
+      OVAULTD_CAS: /data/cas
+      OVAULTD_TOKEN_TTL_HOURS: "${OVAULTD_TOKEN_TTL_HOURS:-720}"
+      OVAULTD_CHALLENGE_TTL: "${OVAULTD_CHALLENGE_TTL:-300}"
+      OVAULTD_UPLOAD_TTL_HOURS: "${OVAULTD_UPLOAD_TTL_HOURS:-24}"
+      OVAULTD_LOG_JSON: "${OVAULTD_LOG_JSON:-1}"
+    volumes:
+      # Default: volumen nombrado. Para un bind mount (backups con rsync, NFS, etc.):
+      # OVAULTD_DATA=/ruta/absoluta/en/el/host
+      - "${OVAULTD_DATA:-datos}:/data"
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: ${OVAULTD_MEM_LIMIT:-512m}
+    cpus: ${OVAULTD_CPUS:-2}
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  datos:
+    name: ovaultd-datos

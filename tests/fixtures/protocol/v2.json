@@ -1,0 +1,191 @@
+{
+  "_meta": {
+    "spec": "v2",
+    "source": "crates/ovaultd-protocol — comportamiento verificado del wire",
+    "frozen": "2026-10-16",
+    "note": "Conformidad de serialización compartida Rust/TS. La CI nunca lo regenera: un cambio requiere ADR. Los campos binarios van en base64 estándar; el operation_id del batch, en hex con guiones tolerados."
+  },
+  "op_wire": [
+    { "wire": "add", "code": 1 },
+    { "wire": "mod", "code": 2 },
+    { "wire": "del", "code": 3 },
+    { "wire": "move", "code": 4 },
+    { "wire_numeric": 2, "code": 2 }
+  ],
+  "op_wire_invalid": ["nope", "ADD", "add ", 0, 5, 1.5, true, null],
+  "error_codes": [
+    "unauthorized",
+    "not_found",
+    "bad_request",
+    "max_file_exceeded",
+    "quota_exceeded",
+    "resync_required",
+    "internal"
+  ],
+  "content_size": [
+    { "size": 0, "ok": true },
+    { "size": 33554432, "ok": true },
+    { "size": 33554433, "ok": false }
+  ],
+  "operation_id_from_wire": [
+    { "wire": "9493f4fc-84e2-4466-a4e3-02942abffde1", "bytes_hex": "9493f4fc84e24466a4e302942abffde1" },
+    { "wire": "9493f4fc84e24466a4e302942abffde1", "bytes_hex": "9493f4fc84e24466a4e302942abffde1" },
+    { "wire": "9493F4FC-84E2-4466-A4E3-02942ABFFDE1", "bytes_hex": "9493f4fc84e24466a4e302942abffde1" },
+    { "wire": "-94-93f4fc84e24466a4e302942abffde1", "bytes_hex": "9493f4fc84e24466a4e302942abffde1" },
+    { "wire": "00112233-4455-6677-8899-aabbccddeeff", "bytes_hex": "00112233445566778899aabbccddeeff" },
+    { "wire": "9493f4fc-84e2-4466-a4e3-02942abffde", "invalid": true },
+    { "wire": "9493f4fc-84e2-4466-a4e3-02942abffde1f", "invalid": true },
+    { "wire": "no-es-un-operation-id", "invalid": true },
+    { "wire": "9493f4fc-84e2-4466-a4e3-0294zabffde1", "invalid": true }
+  ],
+  "id_b64": [
+    {
+      "name": "vault_id",
+      "bytes_hex": "0102030405060708090a0b0c0d0e0f10",
+      "b64": "AQIDBAUGBwgJCgsMDQ4PEA=="
+    },
+    {
+      "name": "path_id",
+      "bytes_hex": "2222222222222222222222222222222222222222222222222222222222222222",
+      "b64": "IiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiI="
+    },
+    {
+      "name": "blob_id",
+      "bytes_hex": "3333333333333333333333333333333333333333333333333333333333333333",
+      "b64": "MzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzM="
+    },
+    {
+      "name": "operation_id",
+      "bytes_hex": "00112233445566778899aabbccddeeff",
+      "b64": "ABEiM0RVZneImaq7zN3u/w=="
+    }
+  ],
+  "batch_examples": [
+    {
+      "name": "mod_ok",
+      "result": "ok",
+      "batch": {
+        "t": "batch",
+        "batch_id": "b7e7c0a1-1b2c-4d3e-8f90-001122334455",
+        "operation_id": "00112233-4455-6677-8899-aabbccddeeff",
+        "expected_rev": 1834,
+        "ops": [
+          {
+            "op": "mod",
+            "path_id": "88tVpm1t30WaCyQAsoHPwyy320NMzWmCdqmGpTTwyyk=",
+            "path_enc": "FxgZIA==",
+            "folder": false,
+            "blob_id": "585MHyPde1pHFJwsb9Bv0NY1ojwyxfNmMVTt3S6uj8A=",
+            "t_mac": "9XbnrEulZEwMZiXOjWKKsTfcUokR/LcwG6MmnCakgzKQDevEvjLdg4uwfqueJkeNKYLwIV1jWgCp+SbqBFhtBg==",
+            "sig": "1QotyvqiXNfUmOCfHFRfzsSNyskigl2rcRlaUNpx0vwAfRFz/ikIm0C6FmueqvmPZ4L0ul2dZT82bu9x4PxIAw==",
+            "size": 39,
+            "mtime": 1758831000000,
+            "ctime": 1758831000000,
+            "prev_path_id": null
+          }
+        ]
+      }
+    },
+    {
+      "name": "del_with_blob",
+      "result": "bad_request",
+      "batch": {
+        "batch_id": "b7e7c0a1-1b2c-4d3e-8f90-001122334455",
+        "operation_id": "00112233-4455-6677-8899-aabbccddeeff",
+        "expected_rev": 1834,
+        "ops": [
+          {
+            "op": "del",
+            "path_id": "88tVpm1t30WaCyQAsoHPwyy320NMzWmCdqmGpTTwyyk=",
+            "folder": false,
+            "blob_id": "585MHyPde1pHFJwsb9Bv0NY1ojwyxfNmMVTt3S6uj8A=",
+            "t_mac": "9XbnrEulZEwMZiXOjWKKsTfcUokR/LcwG6MmnCakgzKQDevEvjLdg4uwfqueJkeNKYLwIV1jWgCp+SbqBFhtBg==",
+            "sig": "1QotyvqiXNfUmOCfHFRfzsSNyskigl2rcRlaUNpx0vwAfRFz/ikIm0C6FmueqvmPZ4L0ul2dZT82bu9x4PxIAw==",
+            "size": 39,
+            "mtime": 1758831000000,
+            "prev_path_id": null
+          }
+        ]
+      }
+    },
+    {
+      "name": "add_folder_with_size",
+      "result": "bad_request",
+      "batch": {
+        "batch_id": "b7e7c0a1-1b2c-4d3e-8f90-001122334455",
+        "operation_id": "00112233-4455-6677-8899-aabbccddeeff",
+        "expected_rev": 1834,
+        "ops": [
+          {
+            "op": "add",
+            "path_id": "88tVpm1t30WaCyQAsoHPwyy320NMzWmCdqmGpTTwyyk=",
+            "path_enc": "FxgZIA==",
+            "folder": true,
+            "blob_id": null,
+            "t_mac": null,
+            "sig": "1QotyvqiXNfUmOCfHFRfzsSNyskigl2rcRlaUNpx0vwAfRFz/ikIm0C6FmueqvmPZ4L0ul2dZT82bu9x4PxIAw==",
+            "size": 39,
+            "mtime": 1758831000000,
+            "prev_path_id": null
+          }
+        ]
+      }
+    },
+    {
+      "name": "move_without_prev",
+      "result": "bad_request",
+      "batch": {
+        "batch_id": "b7e7c0a1-1b2c-4d3e-8f90-001122334455",
+        "operation_id": "00112233-4455-6677-8899-aabbccddeeff",
+        "expected_rev": 1834,
+        "ops": [
+          {
+            "op": "move",
+            "path_id": "88tVpm1t30WaCyQAsoHPwyy320NMzWmCdqmGpTTwyyk=",
+            "path_enc": "FxgZIA==",
+            "folder": false,
+            "blob_id": "585MHyPde1pHFJwsb9Bv0NY1ojwyxfNmMVTt3S6uj8A=",
+            "t_mac": "9XbnrEulZEwMZiXOjWKKsTfcUokR/LcwG6MmnCakgzKQDevEvjLdg4uwfqueJkeNKYLwIV1jWgCp+SbqBFhtBg==",
+            "sig": "1QotyvqiXNfUmOCfHFRfzsSNyskigl2rcRlaUNpx0vwAfRFz/ikIm0C6FmueqvmPZ4L0ul2dZT82bu9x4PxIAw==",
+            "size": 39,
+            "mtime": 1758831000000,
+            "prev_path_id": null
+          }
+        ]
+      }
+    },
+    {
+      "name": "empty_sig",
+      "result": "bad_request",
+      "batch": {
+        "batch_id": "b7e7c0a1-1b2c-4d3e-8f90-001122334455",
+        "operation_id": "00112233-4455-6677-8899-aabbccddeeff",
+        "expected_rev": 1834,
+        "ops": [
+          {
+            "op": "mod",
+            "path_id": "88tVpm1t30WaCyQAsoHPwyy320NMzWmCdqmGpTTwyyk=",
+            "path_enc": "FxgZIA==",
+            "folder": false,
+            "blob_id": "585MHyPde1pHFJwsb9Bv0NY1ojwyxfNmMVTt3S6uj8A=",
+            "t_mac": "9XbnrEulZEwMZiXOjWKKsTfcUokR/LcwG6MmnCakgzKQDevEvjLdg4uwfqueJkeNKYLwIV1jWgCp+SbqBFhtBg==",
+            "sig": "",
+            "size": 39,
+            "mtime": 1758831000000,
+            "prev_path_id": null
+          }
+        ]
+      }
+    },
+    {
+      "name": "empty_ops",
+      "result": "bad_request",
+      "batch": {
+        "batch_id": "b7e7c0a1-1b2c-4d3e-8f90-001122334455",
+        "operation_id": "00112233-4455-6677-8899-aabbccddeeff",
+        "expected_rev": 1834,
+        "ops": []
+      }
+    }
+  ]
+}

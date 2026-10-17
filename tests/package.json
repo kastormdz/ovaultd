@@ -1,0 +1,13 @@
+{
+  "name": "@ovaultd/tests",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Specs de browser y E2E de ovaultd (Playwright Test).",
+  "scripts": {
+    "test:browser": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.64.1"
+  }
+}
