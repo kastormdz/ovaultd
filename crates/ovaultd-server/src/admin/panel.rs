@@ -29,6 +29,7 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub fn rutas() -> Router<EstadoServidor> {
     Router::new()
         .route("/admin", get(dashboard))
+        .route("/admin/vaults", get(vaults))
         .route("/admin/login", get(login_form).post(login_post))
         .route("/admin/logout", post(logout))
         .route("/admin/mi-cuenta", get(mi_cuenta_form).post(mi_cuenta_post))
@@ -166,8 +167,30 @@ struct PlantillaDashboard {
     csrf: String,
     cuentas: i64,
     vaults: i64,
+    notas: i64,
     revisiones: i64,
     devices: i64,
+    espacio: String,
+}
+
+/// Vista de un vault para la tabla: SOLO lo que el server puede ver (es ciego a los
+/// nombres de nota y al contenido — eso es de los clientes).
+#[derive(Template)]
+#[template(path = "admin/vaults.html")]
+struct PlantillaVaults {
+    version: String,
+    email: String,
+    csrf: String,
+    vaults: Vec<VistaVault>,
+}
+
+struct VistaVault {
+    id: i64,
+    name: String,
+    notas: i64,
+    revisiones: i64,
+    espacio: String,
+    ultima_revision: Option<String>,
 }
 
 #[derive(Template)]
@@ -340,12 +363,21 @@ async fn logout(
 async fn dashboard(State(estado): State<EstadoServidor>, Sesion(sesion): Sesion) -> Response {
     let cuentas = contar(&estado.pool, "SELECT COUNT(*) FROM accounts").await;
     let vaults = contar(&estado.pool, "SELECT COUNT(*) FROM vaults").await;
+    let notas = contar(
+        &estado.pool,
+        "SELECT COUNT(*) FROM files WHERE deleted = 0",
+    )
+    .await;
     let revisiones = contar(&estado.pool, "SELECT COUNT(*) FROM revisions").await;
     let devices = contar(
         &estado.pool,
         "SELECT COUNT(*) FROM devices WHERE revoked_at IS NULL",
     )
     .await;
+    let bytes: i64 = sqlx::query_scalar("SELECT COALESCE(SUM(size), 0) FROM blobs")
+        .fetch_one(&estado.pool)
+        .await
+        .unwrap_or(0);
 
     render(
         || {
@@ -356,13 +388,90 @@ async fn dashboard(State(estado): State<EstadoServidor>, Sesion(sesion): Sesion)
                 csrf: sesion.csrf_token.clone(),
                 cuentas,
                 vaults,
+                notas,
                 revisiones,
                 devices,
+                espacio: formato_bytes(bytes),
             }
             .render()
         },
         "dashboard",
     )
+}
+
+// ------------------------------------------------------------------ vaults (stats)
+
+#[derive(Debug, sqlx::FromRow)]
+struct FilaVault {
+    id: i64,
+    name: String,
+    notas: i64,
+    revisiones: i64,
+    bytes: i64,
+    ultima_revision: Option<String>,
+}
+
+/// Estadísticas por vault: notas vivas (`files` sin borrar), revisiones (histórico),
+/// espacio de los blobs cifrados y última actividad. El server NO tiene los nombres.
+async fn vaults(State(estado): State<EstadoServidor>, Sesion(sesion): Sesion) -> Response {
+    let filas = sqlx::query_as::<_, FilaVault>(
+        "SELECT v.id, v.name,
+                (SELECT COUNT(*) FROM files f WHERE f.vault_id = v.id AND f.deleted = 0) AS notas,
+                (SELECT COUNT(*) FROM revisions r WHERE r.vault_id = v.id) AS revisiones,
+                (SELECT COALESCE(SUM(b.size), 0) FROM blobs b WHERE b.vault_id = v.id) AS bytes,
+                (SELECT MAX(r.ts) FROM revisions r WHERE r.vault_id = v.id) AS ultima_revision
+         FROM vaults v
+         ORDER BY v.id",
+    )
+    .fetch_all(&estado.pool)
+    .await;
+
+    let filas = match filas {
+        Ok(filas) => filas,
+        Err(error) => return error_interno("vaults", error),
+    };
+
+    let vista = filas
+        .into_iter()
+        .map(|fila| VistaVault {
+            id: fila.id,
+            name: fila.name,
+            notas: fila.notas,
+            revisiones: fila.revisiones,
+            espacio: formato_bytes(fila.bytes),
+            ultima_revision: fila.ultima_revision,
+        })
+        .collect();
+
+    render(
+        || {
+            PlantillaVaults {
+                version: VERSION.to_owned(),
+                email: sesion.email.clone(),
+                csrf: sesion.csrf_token.clone(),
+                vaults: vista,
+            }
+            .render()
+        },
+        "vaults",
+    )
+}
+
+/// Tamaño legible para humanos (los bytes del CAS: ciphertext — el server no ve más).
+fn formato_bytes(bytes: i64) -> String {
+    const UNIDADES: [&str; 4] = ["B", "KB", "MB", "GB"];
+    let mut valor = bytes as f64;
+    let mut unidad = 0;
+    while valor >= 1024.0 && unidad < UNIDADES.len() - 1 {
+        valor /= 1024.0;
+        unidad += 1;
+    }
+
+    if unidad == 0 {
+        format!("{bytes} B")
+    } else {
+        format!("{valor:.1} {}", UNIDADES[unidad])
+    }
 }
 
 /// Contador suelto: si falla, cero (el dashboard nunca tumba el panel por un número).

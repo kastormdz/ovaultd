@@ -362,7 +362,54 @@ async fn los_post_con_sesion_exigen_csrf() -> Result<()> {
     Ok(())
 }
 
-// ------------------------------------------------------------------ mi cuenta
+// ------------------------------------------------------------------ stats
+
+#[tokio::test]
+async fn las_estadisticas_muestran_las_notas_reales() -> Result<()> {
+    let contexto = common::TestContext::new().await?;
+
+    // Una nota REAL como la sube un cliente: blob registrado + batch firmado.
+    contexto.registrar_blob(7, 91).await?;
+    let commit = contexto.commit(vec![common::add_op(1, 7, 91)], 0).await;
+    assert!(commit.is_ok());
+
+    let cookie = login(&contexto).await?;
+
+    // Dashboard global: aparecen los contadores nuevos.
+    let html = cuerpo(contexto.request(get_con_cookie("/admin", &cookie)?).await?).await?;
+    assert!(html.contains(">Notas<"));
+    assert!(html.contains(">Almacenado<"));
+
+    // /admin/vaults: el vault real con sus notas y el espacio (91 B del blob).
+    let response = contexto
+        .request(get_con_cookie("/admin/vaults", &cookie)?)
+        .await?;
+    assert_eq!(response.status(), StatusCode::OK);
+    let html = cuerpo(response).await?;
+    assert!(html.contains("vault-de-integracion"));
+    assert!(html.contains(">91 B</td>"));
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn vaults_sin_sesion_redirige_al_login() -> Result<()> {
+    let contexto = common::TestContext::new().await?;
+
+    let response = contexto
+        .request(Request::get("/admin/vaults").body(Body::empty())?)
+        .await?;
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    assert_eq!(
+        response
+            .headers()
+            .get(header::LOCATION)
+            .and_then(|valor| valor.to_str().ok()),
+        Some("/admin/login")
+    );
+
+    Ok(())
+}
 
 #[tokio::test]
 async fn cambiar_password_valida_y_revoca_las_demas_sesiones() -> Result<()> {

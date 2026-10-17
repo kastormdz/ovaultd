@@ -1,0 +1,44 @@
+{% extends "admin/base.html" %}
+{% block titulo %}Vaults — ovaultd{% endblock %}
+{% block nav %}<a class="boton fantasma" href="/admin">← Panel</a>{% endblock %}
+{% block contenido %}
+<div class="cabecera-seccion">
+  <h1>Vaults</h1>
+  <span class="chip">{{ email }}</span>
+</div>
+
+<section class="tarjeta">
+  <p class="ayuda">Lo que el server puede ver: <strong>notas</strong> (las vivas), <strong>revisiones</strong>
+  (el histórico completo) y el <strong>espacio</strong> de los blobs <strong>cifrados</strong>. Los nombres y el
+  contenido de tus notas no existen acá: viven descifrados solo en tus clientes (ese es el punto).</p>
+
+  {% if vaults.len() == 0 %}
+  <p>No hay vaults todavía. Creá uno con el CLI (<code>create-remote</code>) o vinculá el plugin de Obsidian.</p>
+  {% else %}
+  <table class="tabla">
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>Nombre</th>
+        <th class="num">Notas</th>
+        <th class="num">Revisiones</th>
+        <th class="num">Espacio</th>
+        <th>Última revisión</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for v in vaults %}
+      <tr>
+        <td>{{ v.id }}</td>
+        <td>{{ v.name }}</td>
+        <td class="num">{{ v.notas }}</td>
+        <td class="num">{{ v.revisiones }}</td>
+        <td class="num">{{ v.espacio }}</td>
+        <td>{% if let Some(ts) = v.ultima_revision %}{{ ts }}{% else %}—{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</section>
+{% endblock %}

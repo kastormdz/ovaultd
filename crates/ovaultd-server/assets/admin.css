@@ -157,6 +157,13 @@ input:focus { outline: 2px solid var(--acento); outline-offset: 1px; border-colo
 
 .ayuda { color: var(--texto-suave); font-size: 0.85rem; }
 
+/* tabla */
+.tabla { width: 100%; border-collapse: collapse; margin-top: 1rem; font-size: 0.92rem; }
+.tabla th, .tabla td { text-align: left; padding: 0.6rem 0.7rem; border-bottom: 1px solid var(--borde); }
+.tabla th { color: var(--texto-suave); font-weight: 600; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.4px; }
+.tabla tr:hover td { background: rgb(124 140 255 / 6%); }
+.tabla .num { text-align: right; font-variant-numeric: tabular-nums; }
+
 /* pie */
 .pie {
   text-align: center;
