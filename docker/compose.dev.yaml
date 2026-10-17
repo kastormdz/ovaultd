@@ -1,9 +1,11 @@
-# Overlay de DESARROLLO: construye la imagen local y suma el nginx de ejemplo
-# (el MISMO `docker/proxy/nginx.conf.example` que documenta docs/deploy.md, montado tal cual).
+# Overlay de DESARROLLO: construye la imagen local.
 #
 #   docker compose -f compose.yaml -f docker/compose.dev.yaml up -d --build
-#   curl --fail http://127.0.0.1:8888/healthz      # por el proxy
 #   curl --fail http://127.0.0.1:8080/healthz      # directo al server
+#
+# No trae proxy: el borde (TLS, WS, subidas grandes) es del operador (ADR-0019) —
+# en producción lo pone NPM Plus / nginx / Caddy, y `docs/deploy.md` documenta los tres
+# puntos que cualquier borde tiene que respetar.
 #
 # Los paths relativos se resuelven contra el PROJECT DIR (la carpeta de compose.yaml, o sea
 # la raíz del repo): invocá siempre desde acá, con compose.yaml primero.
@@ -13,37 +15,3 @@ services:
       context: .
       dockerfile: docker/Dockerfile
     image: ovaultd:dev
-
-  proxy:
-    image: nginx:1.27-alpine
-    depends_on:
-      ovaultd:
-        condition: service_healthy
-    ports:
-      - "127.0.0.1:${OVAULTD_PROXY_PORT:-8888}:80"
-    volumes:
-      - ./docker/proxy/nginx.conf.example:/etc/nginx/conf.d/default.conf:ro
-    healthcheck:
-      # A través del proxy: healthy = nginx arriba Y upstream alcanzable.
-      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/healthz"]
-      interval: 10s
-      timeout: 3s
-      retries: 5
-      start_period: 5s
-    read_only: true
-    tmpfs:
-      - /var/cache/nginx
-      - /var/run
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
-    # nginx necesita SOLO esto y nada más: CHOWN de su cache/tmp a los workers,
-    # SETUID/SETGID para bajar a `nginx`, NET_BIND_SERVICE por el :80 y DAC_OVERRIDE
-    # para escribir el pid/error log siendo root con el resto de caps fuera.
-    cap_add:
-      - CHOWN
-      - DAC_OVERRIDE
-      - NET_BIND_SERVICE
-      - SETGID
-      - SETUID

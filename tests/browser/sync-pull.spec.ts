@@ -1,5 +1,6 @@
 /**
- * Corte 4 — sync E2E contra el stack REAL (contenedor + proxy reverso).
+ * Corte 4 — sync E2E contra el stack REAL (contenedor; el borde del deploy es del operador,
+ * ADR-0019 — el E2E ya no monta un proxy del repo).
  *
  * GUARDADO: corre solo dentro de `tests/scripts/container-e2e.sh` (OVAULTD_SYNC_E2E=1),
  * después del smoke — que dejó dos revisiones firmadas por el smoke-cliente (el cliente

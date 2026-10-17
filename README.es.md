@@ -20,7 +20,7 @@ Etapa temprana, pero las partes riesgosas están hechas y probadas.
 | 4 — E2E completo, rotación de claves, recovery | planificada |
 | 5 — conflictos, historial, restore, preview | planificada |
 
-Lo que figura como hecho está respaldado por gates de ejecución real, no mocks: suites de unidad e integración en Rust, suites de TypeScript, specs de durabilidad de browser contra un Chromium real, un smoke completo del server con cripto viva y tráfico WebSocket, una canaria que escanea el almacenamiento crudo buscando plaintext, y un E2E de contenedor que corre el flujo entero a través de un nginx real.
+Lo que figura como hecho está respaldado por gates de ejecución real, no mocks: suites de unidad e integración en Rust, suites de TypeScript, specs de durabilidad de browser contra un Chromium real, un smoke completo del server con cripto viva y tráfico WebSocket, una canaria que escanea el almacenamiento crudo buscando plaintext, y un E2E de contenedor que construye la imagen real y corre el flujo entero (HTTP + WebSocket, cripto viva) contra ella, con la persistencia verificada tras un recreate.
 
 ## Qué hace
 
@@ -28,7 +28,7 @@ Lo que figura como hecho está respaldado por gates de ejecución real, no mocks
 - Subidas reanudables (un subconjunto de tus) con cuotas por cuenta; una transferencia cortada resume desde el último offset confirmado.
 - Plano de control HTTP y plano de datos por WebSocket para las deltas de revisión.
 - Un solo contenedor endurecido: uid non-root, rootfs de solo lectura, sin capabilities, SQLite WAL y almacén de blobs content-addressed bajo `/data`.
-- Proxy reverso de primera clase: el E2E de contenedor corre por la misma config de nginx que viene en `docker/proxy/nginx.conf.example`.
+- Listo para detrás de un borde: el server publica en loopback y habla HTTP plano; `docs/deploy.md` documenta exactamente qué tiene que respetar el borde (Nginx Proxy Manager, nginx, Caddy). El repo no trae proxy — el borde es del operador (ADR-0019).
 - Sin registro público. La primera cuenta se crea por la web en `/setup` (solo el primer arranque, ADR-0016); las siguientes, con el CLI de administración que viene dentro de la imagen (ADR-0011).
 
 ## Cómo funciona
@@ -81,18 +81,17 @@ Qué puede ver el server: el email de la cuenta, los nombres de los devices, los
 git clone https://github.com/kastormdz/ovaultd && cd ovaultd
 cp .env.example .env
 
-# construye la imagen local y pone un nginx de ejemplo adelante
+# construye la imagen local
 docker compose -f compose.yaml -f docker/compose.dev.yaml up -d --build
 
-curl --fail http://127.0.0.1:8080/healthz   # server, directo
-curl --fail http://127.0.0.1:8888/healthz   # a través del proxy de ejemplo
+curl --fail http://127.0.0.1:8080/healthz   # directo al server
 ```
 
 Para correr una imagen ya publicada, seteá `OVAULTD_IMAGE` con un digest real `repositorio@sha256:...` y sacá el overlay de desarrollo: `docker compose -f compose.yaml up -d`.
 
 ### 2. Crear tu cuenta
 
-La **primera** cuenta se crea desde el navegador: abrí `http://127.0.0.1:8080/setup` (por el proxy: `http://127.0.0.1:8888/setup`). Esa página existe solo mientras el servidor no tenga ninguna cuenta y se desactiva al crearla — no hay registro público (ADR-0011/0016). Si el server puede quedar expuesto antes de completarla, seteá `OVAULTD_SETUP_TOKEN`.
+La **primera** cuenta se crea desde el navegador: abrí `http://127.0.0.1:8080/setup`. Esa página existe solo mientras el servidor no tenga ninguna cuenta y se desactiva al crearla — no hay registro público (ADR-0011/0016). Si el server puede quedar expuesto antes de completarla, seteá `OVAULTD_SETUP_TOKEN`.
 
 Para las cuentas **siguientes** (otra persona — una segunda laptop es solo otro dispositivo, y se suma con `login`), el CLI de administración viene dentro de la imagen:
 
@@ -140,7 +139,7 @@ cargo test --workspace   # suites Rust
 cargo xtask protocol-check          # el MISMO fixture de conformidad, en ambos lados
 bash tests/scripts/server-smoke.sh  # flujo completo del server, cripto viva + WebSocket
 bash tests/scripts/scan-canary.sh   # nada de plaintext en el almacenamiento del server
-bash tests/scripts/container-e2e.sh # todo, a través de un nginx real
+bash tests/scripts/container-e2e.sh # todo: build real + smoke + persistencia
 (cd spikes/crypto-interop && ./run.sh --check)   # interop contra los vectores congelados
 ```
 

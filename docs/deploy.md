@@ -1,8 +1,9 @@
-# Despliegue — Docker y proxy reverso
+# Despliegue — Docker y borde reverso
 
 > Guía operativa del empaquetado (fase 1). El contrato del server está en
-> `docs/server-interfaces.md`; esto es cómo se lo pone a andar, y qué tiene que cumplir un proxy
-> reverso que se ponga delante.
+> `docs/server-interfaces.md`; esto es cómo se lo pone a andar, y qué tiene que cumplir el
+> borde que se ponga delante. **El repositorio no trae proxy**: el TLS y la terminación HTTP
+> son del operador (ADR-0019) — Nginx Proxy Manager, nginx o Caddy.
 
 ## Arranque (desarrollo / self-hosted)
 
@@ -12,11 +13,10 @@ chmod 600 .env
 
 docker compose -f compose.yaml -f docker/compose.dev.yaml up -d --build
 curl --fail http://127.0.0.1:8080/healthz      # directo al server
-curl --fail http://127.0.0.1:8888/healthz      # por el nginx de ejemplo
 ```
 
-El overlay de desarrollo trae un **nginx con el mismo `docker/proxy/nginx.conf.example`** que
-documenta esta guía: sirve para probar el stack completo detrás de un proxy sin montar nada.
+El overlay de desarrollo solo construye la imagen local: el server publica en loopback por
+defecto y no necesita proxy para funcionar.
 
 Distribución: `OVAULTD_IMAGE=repositorio@sha256:<digest>` de una imagen **publicada real** (nunca
 un digest inventado) y `docker compose -f compose.yaml up -d`, sin el overlay de desarrollo.
@@ -54,33 +54,81 @@ dispositivo.
 - **Logs JSON** (`OVAULTD_LOG_JSON=1`), nivel por `OVAULTD_LOG`. Ni tokens ni payloads se
   loguean jamás (regla del contrato).
 - Superficie de operación: **`/healthz`** (200/503) y **`/metrics`** (Prometheus mínimo, sin
-  secretos). Si no querés `/metrics` público, restringilo en el proxy (abajo).
+  secretos). Si no querés `/metrics` público, restringilo en el borde (abajo).
 
-## Proxy reverso — los tres puntos que no se pueden perder
+## El borde (TLS + proxy reverso)
 
-El ejemplo completo y comentado está en **`docker/proxy/nginx.conf.example`**. Resumen:
+El server habla **HTTP plano** y no tiene TLS propio: el TLS lo termina el borde. No lo
+expongas directo a internet.
 
-1. **Host**: `POST /access` devuelve el `Host` que **ve el server** (`{host, rev}`), sin campo de
-   URL pública en la config. El proxy **tiene que preservarlo** (`proxy_set_header Host $host;`
-   en nginx; en Caddy/traefik/NPM es el comportamiento por default). Si el proxy lo reescribe,
-   los clientes guardan una URL interna que después no resuelve.
+### Cómo hace el borde para VER al server
+
+Dos formas, ambas válidas:
+
+- **Misma red Docker (recomendado cuando el borde es un contenedor, como NPM Plus)**: poné el
+  contenedor de ovaultd y el del borde en la misma red y usá **`ovaultd:8080`** como upstream.
+  El puerto no hace falta publicarlo al host:
+
+  ```bash
+  # red compartida (ej.): cualquiera de las dos puntas puede crearla
+  docker network create ovaultd-borde 2>/dev/null || true
+  docker network connect ovaultd-borde ovaultd
+  docker network connect ovaultd-borde <contenedor-del-borde>
+  ```
+
+  (En NPM Plus: *Forward Hostname* `ovaultd`, *Forward Port* `8080`.)
+
+- **Puerto en la LAN del host**: `OVAULTD_ADDR=192.168.x.x docker compose up -d` y el borde
+  apunta a `192.168.x.x:8080`. Solo con firewall: el server no tiene TLS. (Ojo: un borde en
+  OTRO contenedor NO ve el `127.0.0.1` del host — este modo es para borde en otra máquina.)
+
+### Nginx Proxy Manager (NPM / NPM Plus)
+
+1. *Proxy Host* → **Forward Hostname** / IP: `ovaultd` (misma red) o la IP del host;
+   **Forward Port**: `8080`; *Scheme*: `http`.
+2. *Details*: **Websockets Support → ON** (el WS de `/api/v1/ws` es la mitad del protocolo).
+3. *Advanced* (custom config):
+
+   ```nginx
+   client_max_body_size 40m;        # subidas reanudables hasta 32 MiB (el default 1m corta con 413)
+   proxy_request_buffering off;     # los PATCH de subida hacen streaming
+   ```
+
+4. *SSL*: el certificado de la pestaña SSL (Let's Encrypt o propio). NPM ya preserva el
+   `Host` y setea `X-Forwarded-Proto` por default.
+
+### Los tres puntos que cualquier borde tiene que respetar
+
+1. **Preservar el `Host`**: `POST /access` devuelve el `Host` que **ve el server** (`{host, rev}`)
+   y los clientes lo usan para subir. Si el proxy lo reescribe (`proxy_set_header Host $host;`
+   en nginx; default en NPM/Caddy/traefik), las URLs que guardan los clientes no resuelven.
 2. **WebSocket** (`GET /api/v1/ws`): passthrough de `Upgrade`/`Connection` y timeouts de vida
    larga (`proxy_read_timeout 1h`): la conexión queda abierta escuchando revisiones.
-3. **Tamaño y streaming**: `client_max_body_size 40m` (los bloques de la subida reanudable
-   llegan hasta `MAX_FILE_BYTES` = 32 MiB; el default de nginx, 1 MB, los corta con 413) y
-   `proxy_request_buffering off` para que los `PATCH` hagan streaming.
+3. **Tamaño y streaming**: `client_max_body_size 40m` y `proxy_request_buffering off` (los
+   bloques llegan hasta `MAX_FILE_BYTES` = 32 MiB; el default de nginx, 1 MB, los corta con 413).
 
-Extras que conviene setear: `X-Real-IP`/`X-Forwarded-For` (para la auditoría del proxy),
-`X-Forwarded-Proto $scheme` (informativo; el server no lo consume), y **TLS terminado en el
-proxy** — el server habla HTTP plano y no tiene TLS propio; no lo expongas directo a internet.
+nginx mínimo de referencia:
 
-Con NPM (Nginx Proxy Manager): activar **Websockets Support**, subir *Client Max Body Size* en
-Advanced (`client_max_body_size 40m;`) y desactivar el buffering (`proxy_request_buffering off;`).
-Con Caddy: `reverse_proxy ovaultd:8080` ya preserva Host y hace WebSocket; agregar
-`request_body { max_size 40MB }` no es necesario (Caddy no limita por defecto).
+```nginx
+location / {
+    proxy_pass http://ovaultd:8080;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_read_timeout 1h;
+    client_max_body_size 40m;
+    proxy_request_buffering off;
+}
+```
 
-Aviso de seguridad: `/metrics` no lleva auth. En el ejemplo va restringido a redes privadas;
-si tu proxy está en internet, dejalo para la red interna (o borralo del proxy).
+Con Caddy: `reverse_proxy ovaultd:8080` ya preserva Host y hace WebSocket; Caddy no limita el
+body por defecto (no hace falta `request_body`).
+
+Aviso de seguridad: `/metrics` no lleva auth. Dejalo en red interna o restringilo en el borde.
 
 ## Backups
 
@@ -112,6 +160,7 @@ que la base y los blobs están consistentes).
 bash tests/scripts/container-e2e.sh
 ```
 
-Levanta el stack (dev overlay + nginx), espera el healthcheck de Docker, corre el **smoke
-completo a través del proxy** (HTTP + WebSocket, cripto real) y verifica persistencia con un
-recreate. Los artefactos quedan en `.tmp/container-e2e/`.
+Construye la imagen real, espera el healthcheck de Docker, corre el **smoke completo contra el
+server** (HTTP + WebSocket, cripto real) más el sync E2E del runtime (Chromium) y verifica
+persistencia con un recreate. Los artefactos quedan en `.tmp/container-e2e/`. La validación a
+través del borde es un smoke manual contra NPM Plus (los tres puntos de arriba).

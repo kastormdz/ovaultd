@@ -18,7 +18,7 @@ Early-stage, but the risky parts are done and tested.
 | 4 — full E2E, key rotation, recovery | planned |
 | 5 — conflicts, history, restore, preview | planned |
 
-The parts marked done are backed by real-execution gates, not mocks: Rust unit and integration suites, TypeScript suites, browser durability specs against a real Chromium, a full server smoke test with live crypto and WebSocket traffic, an encrypted-scan canary over raw storage, and a container E2E that runs the entire flow through a real nginx.
+The parts marked done are backed by real-execution gates, not mocks: Rust unit and integration suites, TypeScript suites, browser durability specs against a real Chromium, a full server smoke test with live crypto and WebSocket traffic, an encrypted-scan canary over raw storage, and a container E2E that builds the real image and runs the entire flow (HTTP + WebSocket, live crypto) against it, verifying persistence across a recreate.
 
 ## What it does
 
@@ -26,7 +26,7 @@ The parts marked done are backed by real-execution gates, not mocks: Rust unit a
 - Resumable uploads (a subset of tus) with per-account quotas; an interrupted transfer resumes from its last acknowledged offset.
 - HTTP control plane plus a WebSocket data plane for revision deltas.
 - A single hardened container: non-root uid, read-only rootfs, every capability dropped, SQLite WAL and a content-addressed blob store under `/data`.
-- Reverse proxy first-class: the container E2E runs through the same nginx config that ships in `docker/proxy/nginx.conf.example`.
+- Edge-ready: the server publishes on loopback and speaks plain HTTP; `docs/deploy.md` documents exactly what the edge (Nginx Proxy Manager, nginx, Caddy) must get right. The repository ships no proxy — the edge belongs to the operator (ADR-0019).
 - No public registration. The first account is created from the web at `/setup` (first run only, ADR-0016); further accounts with the admin CLI inside the image (ADR-0011).
 
 ## How it works
@@ -79,18 +79,17 @@ What the server can see: account email, device names, revision numbers, blob siz
 git clone https://github.com/kastormdz/ovaultd && cd ovaultd
 cp .env.example .env
 
-# builds the image locally and puts an example nginx in front
+# builds the image locally
 docker compose -f compose.yaml -f docker/compose.dev.yaml up -d --build
 
-curl --fail http://127.0.0.1:8080/healthz   # server, direct
-curl --fail http://127.0.0.1:8888/healthz   # through the example proxy
+curl --fail http://127.0.0.1:8080/healthz   # direct to the server
 ```
 
 To run a published image later, set `OVAULTD_IMAGE` to a real `repository@sha256:...` digest and drop the dev overlay: `docker compose -f compose.yaml up -d`.
 
 ### 2. Create your account
 
-The **first** account is created in the browser: open `http://127.0.0.1:8080/setup` (through the proxy: `http://127.0.0.1:8888/setup`). That page exists only while the server has zero accounts and disables itself the moment one exists — no public registration (ADR-0011/0016). Set `OVAULTD_SETUP_TOKEN` if the server may be exposed before you finish this step.
+The **first** account is created in the browser: open `http://127.0.0.1:8080/setup`. That page exists only while the server has zero accounts and disables itself the moment one exists — no public registration (ADR-0011/0016). Set `OVAULTD_SETUP_TOKEN` if the server may be exposed before you finish this step.
 
 For **further accounts** (another person — a second laptop is just another device, added with `login`), the admin tool ships inside the image:
 
@@ -138,7 +137,7 @@ cargo test --workspace   # Rust suites
 cargo xtask protocol-check          # the SAME conformance fixture, both sides
 bash tests/scripts/server-smoke.sh  # full server flow, live crypto + WebSocket
 bash tests/scripts/scan-canary.sh   # no plaintext anywhere in server storage
-bash tests/scripts/container-e2e.sh # everything, through a real nginx
+bash tests/scripts/container-e2e.sh # everything: real build + smoke + persistence
 (cd spikes/crypto-interop && ./run.sh --check)   # interop against frozen vectors
 ```
 

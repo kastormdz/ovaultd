@@ -1,10 +1,10 @@
 # ovaultd — stack base (fase 1).
 #
-# Pensado para vivir DETRÁS de un proxy reverso: publica en loopback por defecto
-# (OVAULTD_ADDR) y el proxy habla con ese puerto. Guía + conf de ejemplo:
-# `docs/deploy.md` y `docker/proxy/nginx.conf.example`.
+# Pensado para vivir DETRÁS de un borde reverso: publica en loopback por defecto
+# (OVAULTD_ADDR) y el borde habla con ese puerto. Guía (NPM Plus, nginx, Caddy):
+# `docs/deploy.md` — el repositorio no trae proxy (ADR-0019).
 #
-# Desarrollo (construye la imagen local + nginx de ejemplo):
+# Desarrollo (construye la imagen local):
 #   cp .env.example .env && chmod 600 .env
 #   docker compose -f compose.yaml -f docker/compose.dev.yaml up -d --build
 #   curl --fail http://127.0.0.1:8080/healthz
