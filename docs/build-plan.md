@@ -908,6 +908,17 @@ Tests críticos:
 
 **Commits sugeridos:** API historia; preview; restore; snapshots/papelera; corpus fino; retención/GC; cierre de documentación.
 
+### Fase 6 (adelantada a pedido del operador) — Panel web, versiones y borde
+
+Plan detallado en [`plan-admin.md`](plan-admin.md) (cortes PD · W0–W3 · V1–V2, con gate por
+corte). ADRs: [`0017`](decisions/0017-panel-web-de-administracion.md) (panel web de
+administración), [`0018`](decisions/0018-versionado-y-compatibilidad.md) (versionado,
+compatibilidad server↔plugin y releases), [`0019`](decisions/0019-el-borde-es-del-operador.md)
+(el borde es del operador: fuera el proxy del repo; NPM Plus documentado). Resumen:
+administración por web (login con sesión + CSRF, cuentas, devices, vaults con stats, registro
+on/off, auditoría, reset por token de un uso), `GET /api/v1/meta` con checks de compatibilidad
+en el plugin, y releases tagueados con assets (binario/imagen + zip del plugin).
+
 ---
 
 ## 2. Ruta crítica y dependencias
