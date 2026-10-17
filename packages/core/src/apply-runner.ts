@@ -22,6 +22,7 @@ import { toHex } from '@ovaultd/protocol';
 import { createIntent } from './apply.js';
 import type { FileSystemPort } from './file-port.js';
 import type { IntentEntry, StateStore } from './StateStore.js';
+import type { SyncConnection } from './SyncConnection.js';
 import { colisionDeCase, nombreBase, validarRutaDeVault } from './vault-path.js';
 
 export interface ApplyRevision {
@@ -73,7 +74,12 @@ type Guard =
   | { verdict: 'blocked'; reason: string };
 
 /** Guard de tercera versión: ¿publicar esta revisión pisa algo que no debería? */
-async function evaluarGuard(deps: ApplyDeps, revision: ApplyRevision): Promise<Guard> {
+async function evaluarGuard(
+  deps: ApplyDeps,
+  revision: ApplyRevision,
+  /** sha256 hex del PLAINTEXT descifrado que se va a escribir (null en deletes/carpetas). */
+  hashRemoto: string | null,
+): Promise<Guard> {
   const { store, port } = deps;
   // Un borrado sin path (tombstone de algo que nunca vimos) no toca el vault.
   if (revision.deleted && revision.path === '') return { verdict: 'already-gone' };
@@ -100,7 +106,13 @@ async function evaluarGuard(deps: ApplyDeps, revision: ApplyRevision): Promise<G
     return { verdict: 'safe' }; // creación fresca
   }
   if (actual.isDirectory) return { verdict: 'blocked', reason: 'un directorio local ocupa el camino' };
-  if (revision.contentHash && hashActual === revision.contentHash) return { verdict: 'identical' };
+
+  // El "esperado" es el hash del registro (si viniera) o — como la delta no manda
+  // content_hash (ADR-0014) — el del PLAINTEXT DESCIFRADO que estamos por escribir:
+  // un local que YA coincide con el remoto converge, no es un conflicto.
+  const hashEsperado = revision.contentHash ?? hashRemoto;
+  if (hashEsperado !== null && hashActual === hashEsperado) return { verdict: 'identical' };
+
   if (!base) return { verdict: 'blocked', reason: 'existe localmente y no hay base (dos creaciones)' };
   if (!base.contentHash) return { verdict: 'blocked', reason: 'sin hash en la base: no puedo descartar una edición local' };
   if (hashActual === base.contentHash) return { verdict: 'safe' };
@@ -112,6 +124,9 @@ export async function applyRevision(
   deps: ApplyDeps,
   revision: ApplyRevision,
   stored: Uint8Array | null,
+  /** `forzar`: la resolución explícita del usuario pisa un bloqueo de tercera versión
+   *  (la elección "usar la del server"). Los chequeos estructurales no se saltean. */
+  opciones: { forzar?: boolean } = {},
 ): Promise<ApplyOutcome> {
   const { store, port } = deps;
 
@@ -161,19 +176,24 @@ export async function applyRevision(
     }
   }
 
-  // 3) Guard de tercera versión ANTES de publicar.
-  const guard = await evaluarGuard(deps, revision);
+  // 3) Guard de tercera versión ANTES de publicar. Con `forzar`, un bloqueo de tercera
+  // versión se convierte en una escritura DELIBERADA (la resolución explícita del usuario).
+  const guard = await evaluarGuard(deps, revision, hashVerificado);
+  let verdict = guard.verdict;
   if (guard.verdict === 'blocked') {
-    intent = { ...intent, state: 'blocked', reason: guard.reason };
-    await store.putIntent(intent);
-    return { status: 'blocked', intentId: intent.intentId, reason: guard.reason };
+    if (opciones.forzar !== true) {
+      intent = { ...intent, state: 'blocked', reason: guard.reason };
+      await store.putIntent(intent);
+      return { status: 'blocked', intentId: intent.intentId, reason: guard.reason };
+    }
+    verdict = 'safe';
   }
 
   // 3b) Colisión de case/normalización en el directorio destino: en filesystems
   // case-insensitive dos nombres que solo difieren en mayúsculas no pueden convivir.
   // Solo importa cuando vamos a ESCRIBIR (verdict `safe`); si el directorio no existe
   // todavía no hay nada con qué chocar.
-  if (!revision.deleted && revision.path !== '' && guard.verdict === 'safe') {
+  if (!revision.deleted && revision.path !== '' && verdict === 'safe') {
     const dir = dirVault(revision.path);
     try {
       const entradas = await port.list(dir);
@@ -198,8 +218,8 @@ export async function applyRevision(
   // 4) Publicar.
   if (revision.kind === 'file') {
     if (revision.deleted) {
-      if (guard.verdict !== 'already-gone') await port.unlink(revision.path);
-    } else if (guard.verdict !== 'identical') {
+      if (verdict !== 'already-gone') await port.unlink(revision.path);
+    } else if (verdict !== 'identical') {
       const dir = dirVault(revision.path);
       if (dir !== '.') await port.mkdirp(dir);
       const { tempName } = await port.writeTemp(dir, plaintext!);
@@ -332,4 +352,83 @@ export async function recoverApplies(deps: ApplyDeps): Promise<RecoveryReport> {
   }
 
   return reporte;
+}
+
+// ------------------------------------------------------------------ resolución de conflictos
+
+export type EleccionDeResolucion = 'local' | 'remoto';
+
+/**
+ * Resuelve una intención BLOQUEADA con la elección EXPLÍCITA del usuario (resolución
+ * mínima de conflictos). Dos caminos:
+ *
+ *  - `'remoto'`: baja el contenido del server y PISA el local (apply forzado). Quien
+ *    elige esto pierde su edición local a propósito.
+ *  - `'local'`: el archivo local queda INTACTO; la base avanza al remoto (con el hash
+ *    del plaintext remoto) y el próximo push sube la edición local como revisión nueva.
+ *
+ * Ambas cierran la intención y avanzan el checkpoint hasta la revisión bloqueada: el
+ * pull puede seguir. Los bloqueos ESTRUCTURALES (ruta inválida, colisión de case) no se
+ * resuelven por acá — son datos que no pueden materializarse, no una tercera versión.
+ */
+export async function resolverBloqueado(
+  deps: ApplyDeps,
+  intent: IntentEntry,
+  eleccion: EleccionDeResolucion,
+  conn: SyncConnection,
+): Promise<ApplyOutcome> {
+  if (intent.state !== 'blocked') {
+    throw new Error('resolver: la intención no está bloqueada');
+  }
+
+  if (eleccion === 'remoto') {
+    const stored = await conn.getBlob(intent.blobId);
+    return applyRevision(
+      deps,
+      {
+        pathId: intent.pathId,
+        path: intent.path ?? '',
+        kind: intent.kind ?? 'file',
+        deleted: intent.deleted === true,
+        rev: intent.rev,
+        blobId: intent.blobId === '' ? null : intent.blobId,
+        contentHash: intent.contentHash ?? null,
+      },
+      stored,
+      { forzar: true },
+    );
+  }
+
+  // 'local': la base avanza al remoto SIN tocar el archivo local.
+  if (intent.deleted === true) {
+    throw new Error('resolver: mantener la versión local de un borrado remoto todavía no está soportado');
+  }
+
+  const stored = await conn.getBlob(intent.blobId);
+  const hashRemoto = sha256Hex(decryptBlob(deps.keys, stored));
+  const stat = intent.path ? await deps.port.stat(intent.path).catch(() => null) : null;
+
+  await deps.store.completeApply({
+    intentId: intent.intentId,
+    base: {
+      pathId: intent.pathId,
+      rev: intent.rev,
+      blobId: intent.blobId === '' ? null : intent.blobId,
+      contentHash: hashRemoto,
+    },
+    index: {
+      pathId: intent.pathId,
+      path: intent.path ?? '',
+      kind: intent.kind ?? 'file',
+      deleted: false,
+      rev: intent.rev,
+      blobId: null,
+      contentHash: hashRemoto,
+      size: stat?.size ?? null,
+      mtime: null,
+    },
+    checkpoint: { since: intent.rev, minRev: null },
+  });
+
+  return { status: 'applied', intentId: intent.intentId };
 }
