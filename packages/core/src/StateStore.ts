@@ -82,9 +82,20 @@ export interface IntentEntry {
   pathId: string;
   rev: number;
   blobId: string;
-  state: 'pending' | 'verified' | 'published';
+  /** pending → verified → (commit) | blocked (tercera versión: espera resolución). */
+  state: 'pending' | 'verified' | 'blocked';
+  /** Ruta relativa del destino en el vault (texto en claro, para la recuperación). */
+  path?: string;
+  /** La operación era un borrado. */
+  deleted?: boolean;
+  /** Tipo de entrada. */
+  kind?: 'file' | 'folder';
+  /** sha256 hex del PLAINTEXT esperado: permite recuperar sin el server. */
+  contentHash?: string | null;
   /** Nombre del archivo temporal en el vault (relativo). */
   tempName?: string;
+  /** Por qué quedó bloqueada (si state === 'blocked'). */
+  reason?: string;
   createdAt: number;
 }
 

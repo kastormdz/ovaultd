@@ -9,3 +9,5 @@
 export * from './StateStore.js';
 export * from './outbox.js';
 export * from './apply.js';
+export * from './apply-runner.js';
+export * from './file-port.js';

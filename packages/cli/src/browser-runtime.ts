@@ -7,17 +7,32 @@
  *  - **Origen local estable**: el IndexedDB queda atado al origen; el puerto se persiste y
  *    si cambia con datos ya escritos, se FALLA en vez de crear un universo nuevo en silencio.
  *  - **Perfil privado**: `~/.local/share/ovaultd/runtime` en 0700 (override: `OVAULTD_RUNTIME_DIR`).
+ *  - **Puente de archivos**: si se pasa `vaultRoot`, el servidor local expone `/fs/<op>`
+ *    contra un `NodeFileAdapter` **confinado al vault** (sin travesía, sin symlinks, solo
+ *    en 127.0.0.1). El runtime nunca toca archivos por su cuenta.
+ *  - **Failpoint real**: `crash()` mata el proceso de Chromium con SIGKILL (sin shutdown
+ *    limpio) para probar que lo confirmado sobrevive y lo a medias se recupera.
  *
  * El puente con la página es JSON puro: `call(method, params)` → `dispatch` del runtime.
  */
 
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { createServer, type Server } from 'node:http';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  readlinkSync,
+  writeFileSync,
+} from 'node:fs';
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { chromium, type BrowserContext, type Page } from 'playwright';
+
+import { NodeFileAdapter, VaultBoundaryError } from './NodeFileAdapter.js';
 
 export const RUNTIME_PORT_DEFAULT = 18_931;
 
@@ -29,6 +44,8 @@ export interface BrowserRuntimeOptions {
   /** Ruta al bundle del núcleo (default: `packages/core/dist/runtime.js`). */
   coreBundlePath?: string;
   headless?: boolean;
+  /** Si se define, habilita el puente `/fs/*` confinado a esta raíz (el vault). */
+  vaultRoot?: string;
 }
 
 export interface RuntimeInfo {
@@ -51,6 +68,77 @@ const PAGINA = `<!doctype html>
 const bundlePorDefecto = (): string =>
   fileURLToPath(new URL('../../core/dist/runtime.js', import.meta.url));
 
+// --------------------------------------------------------------------- puente /fs
+
+const LIMITE_CUERPO = 64 * 1024 * 1024; // 32 MiB de contenido + base64 + sobre, con aire
+
+function responder(res: ServerResponse, cuerpo: unknown): void {
+  const texto = JSON.stringify(cuerpo);
+  res.writeHead(200, {
+    'content-type': 'application/json; charset=utf-8',
+    'content-length': Buffer.byteLength(texto),
+  });
+  res.end(texto);
+}
+
+function ejecutarOp(vault: NodeFileAdapter, op: string, p: Record<string, unknown>): unknown {
+  switch (op) {
+    case 'stat':
+      return vault.stat(String(p.path));
+    case 'read':
+      return { b64: Buffer.from(vault.read(String(p.path))).toString('base64') };
+    case 'writeTemp':
+      return vault.writeTemp(String(p.dir), new Uint8Array(Buffer.from(String(p.b64), 'base64')));
+    case 'rename':
+      return (vault.rename(String(p.from), String(p.to)), { ok: true });
+    case 'unlink':
+      return (vault.unlink(String(p.path)), { ok: true });
+    case 'mkdirp':
+      return (vault.mkdirp(String(p.path)), { ok: true });
+    case 'list':
+      return vault.list(String(p.path));
+    default:
+      throw new VaultBoundaryError(`operación desconocida: ${op}`);
+  }
+}
+
+function manejarFs(req: IncomingMessage, res: ServerResponse, vault: NodeFileAdapter): void {
+  const op = req.url!.slice('/fs/'.length);
+  const partes: Buffer[] = [];
+  let total = 0;
+  let excedido = false;
+  req.on('data', (c: Buffer) => {
+    total += c.length;
+    if (total > LIMITE_CUERPO) {
+      excedido = true;
+      req.destroy();
+      return;
+    }
+    partes.push(c);
+  });
+  req.on('end', () => {
+    if (excedido) {
+      responder(res, { ok: false, error: { message: 'cuerpo demasiado grande' } });
+      return;
+    }
+    let params: Record<string, unknown>;
+    try {
+      params = JSON.parse(Buffer.concat(partes).toString('utf8') || '{}') as Record<string, unknown>;
+    } catch {
+      responder(res, { ok: false, error: { message: 'JSON inválido' } });
+      return;
+    }
+    try {
+      responder(res, { ok: true, result: ejecutarOp(vault, op, params) });
+    } catch (error) {
+      const err = error as Error;
+      responder(res, { ok: false, error: { message: err.message, name: err.name } });
+    }
+  });
+}
+
+// --------------------------------------------------------------------- runtime
+
 export class BrowserRuntime {
   private secuencia = 0;
 
@@ -61,6 +149,8 @@ export class BrowserRuntime {
     readonly origin: string,
     readonly dataDir: string,
     readonly port: number,
+    /** Puente de archivos confinado al vault (si se abrió con `vaultRoot`). */
+    readonly vault: NodeFileAdapter | null,
   ) {}
 
   static async open(opciones: BrowserRuntimeOptions = {}): Promise<BrowserRuntime> {
@@ -73,6 +163,7 @@ export class BrowserRuntime {
       (process.env.OVAULTD_RUNTIME_PORT ? Number(process.env.OVAULTD_RUNTIME_PORT) : undefined) ??
       RUNTIME_PORT_DEFAULT;
     const bundle = opciones.coreBundlePath ?? bundlePorDefecto();
+    const vault = opciones.vaultRoot ? new NodeFileAdapter(opciones.vaultRoot) : null;
 
     if (!existsSync(bundle)) {
       throw new Error(
@@ -109,6 +200,10 @@ export class BrowserRuntime {
         res.end(PAGINA);
         return;
       }
+      if (vault && req.method === 'POST' && req.url?.startsWith('/fs/')) {
+        manejarFs(req, res, vault);
+        return;
+      }
       res.writeHead(404).end();
     });
 
@@ -138,7 +233,7 @@ export class BrowserRuntime {
       writeFileSync(archivoOrigen, `${origin}\n`, { mode: 0o600 });
       chmodSync(archivoOrigen, 0o600);
 
-      return new BrowserRuntime(contexto, pagina, servidor, origin, dataDir, port);
+      return new BrowserRuntime(contexto, pagina, servidor, origin, dataDir, port, vault);
     } catch (error) {
       await contexto.close().catch(() => undefined);
       servidor.close();
@@ -169,6 +264,52 @@ export class BrowserRuntime {
   /** Info del runtime (versión, esquema, origen). */
   async info(): Promise<RuntimeInfo> {
     return this.call<RuntimeInfo>('runtime.info');
+  }
+
+  /**
+   * Failpoint REAL: mata el proceso de Chromium con SIGKILL (sin flush ni cierre limpio)
+   * y libera el puerto para poder reabrir el mismo perfil. Lo que estaba confirmado
+   * sobrevive; lo a medias queda para la recuperación.
+   */
+  async crash(): Promise<number> {
+    const pid = this.pidChromium();
+    process.kill(pid, 'SIGKILL');
+    await new Promise<void>((resolve) => this.servidor.close(() => resolve()));
+    return pid;
+  }
+
+  private pidChromium(): number {
+    // 1) Chrome completo deja `SingletonLock` como symlink `<hostname>-<pid>`.
+    try {
+      const destino = readlinkSync(join(this.dataDir, 'chromium-profile', 'SingletonLock'));
+      const pid = Number(destino.slice(destino.lastIndexOf('-') + 1));
+      if (Number.isInteger(pid) && pid > 0) return pid;
+    } catch {
+      /* el headless shell no crea SingletonLock: se busca por /proc */
+    }
+    // 2) Proceso principal de Chromium por `--user-data-dir` en /proc (Linux).
+    const perfil = join(this.dataDir, 'chromium-profile');
+    try {
+      for (const entrada of readdirSync('/proc')) {
+        if (!/^\d+$/.test(entrada)) continue;
+        try {
+          const cmdline = readFileSync(`/proc/${entrada}/cmdline`, 'utf8');
+          if (cmdline.includes(`--user-data-dir=${perfil}`) && !cmdline.includes('--type=')) {
+            return Number(entrada);
+          }
+        } catch {
+          /* proceso murió o sin permiso: siguiente */
+        }
+      }
+    } catch {
+      /* sin /proc */
+    }
+    // 3) Último recurso: la vía de playwright (null en contextos persistentes).
+    const proceso = (
+      this.contexto as unknown as { browser?: () => { process?: () => { pid?: number } | null } | null }
+    ).browser?.()?.process?.();
+    if (proceso?.pid && proceso.pid > 0) return proceso.pid;
+    throw new Error('no pude determinar el PID de Chromium para el failpoint');
   }
 
   /** Cierra todo: contexto (flush de IndexedDB) y servidor. */

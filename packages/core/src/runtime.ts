@@ -8,13 +8,17 @@
  *   response: { id, ok: true, result } | { id, ok: false, error: { message, name? } }
  *
  * Corte 1: runtime + StateStore. Corte 2: outbox save-first (enqueue determinista con
- * snapshot verificado) y journal de aplicación (begin/verify/complete atómico). Los
- * métodos de sync se agregan encima, no al lado.
+ * snapshot verificado) y journal de aplicación (begin/verify/complete atómico). Corte 3:
+ * orquestación real de `apply` contra el filesystem (puente confinado al vault) y
+ * recuperación de intenciones al reiniciar. Los métodos de sync se agregan encima.
  */
 
-import { b64Encode } from '@ovaultd/protocol';
+import type { SubKeys } from '@ovaultd/crypto';
+import { b64Decode, b64Encode, fromHex } from '@ovaultd/protocol';
 
+import { applyRevision, recoverApplies, type ApplyRevision } from './apply-runner.js';
 import { createIntent, type ApplyCandidate } from './apply.js';
+import { HttpFileSystemPort } from './file-port.js';
 import { prepareOutboxEntry, type EnqueueRequest } from './outbox.js';
 import {
   SCHEMA_VERSION,
@@ -24,7 +28,7 @@ import {
   type OutboxEntry,
 } from './StateStore.js';
 
-export const RUNTIME_VERSION = '0.2.0';
+export const RUNTIME_VERSION = '0.3.0';
 
 interface RuntimeRequest {
   id: number;
@@ -44,6 +48,14 @@ let store: StateStore | null = null;
 const exigirStore = (): StateStore => {
   if (!store) throw new Error('el StateStore no está abierto (llamá a store.open primero)');
   return store;
+};
+
+/** Subclaves del vault configuradas para aplicar (apply.configure). */
+let applyKeys: SubKeys | null = null;
+
+const exigirApply = (): { store: StateStore; keys: SubKeys } => {
+  if (!applyKeys) throw new Error('apply: falta apply.configure (subclaves del vault)');
+  return { store: exigirStore(), keys: applyKeys };
 };
 
 /** Serializa una entrada de outbox para el wire JSON (los Blob no viajan por el puente). */
@@ -169,7 +181,15 @@ const handlers: Record<string, Handler> = {
     return { created: true, intent };
   },
 
-  'apply.verify': async (params) => exigirStore().markIntentVerified(String(params.intentId)),
+  'apply.verify': async (params) => {
+    const intentId = String(params.intentId);
+    const intent = await exigirStore().getIntent(intentId);
+    if (!intent) throw new Error(`apply: no existe la intención ${intentId}`);
+    const tempName = typeof params.tempName === 'string' ? params.tempName : intent.tempName;
+    const updated = { ...intent, tempName, state: 'verified' as const };
+    await exigirStore().putIntent(updated);
+    return updated;
+  },
 
   'apply.pending': () => exigirStore().listIntents(),
 
@@ -183,6 +203,44 @@ const handlers: Record<string, Handler> = {
     if (!input || typeof input.intentId !== 'string') throw new Error('apply.complete: falta input.intentId');
     await exigirStore().completeApply(input);
     return { ok: true };
+  },
+
+  // ------------------------------------------------------------------ apply (orquestación real)
+
+  'apply.configure': (params) => {
+    const raw = params.keys as Record<string, unknown> | undefined;
+    const subclaves = ['content', 'nonce', 'path', 'meta', 'bind', 'sign'] as const;
+    const keys = {} as Record<(typeof subclaves)[number], Uint8Array>;
+    for (const nombre of subclaves) {
+      const valor = raw?.[nombre];
+      if (typeof valor !== 'string' || !/^[0-9a-fA-F]{64}$/.test(valor)) {
+        throw new Error(`apply.configure: falta la subclave ${nombre} (hex de 32 B)`);
+      }
+      keys[nombre] = fromHex(valor);
+    }
+    applyKeys = keys as unknown as SubKeys;
+    return { configured: true, subclaves: subclaves.length };
+  },
+
+  'apply.run': async (params) => {
+    const { store, keys } = exigirApply();
+    const revision = params.revision as ApplyRevision;
+    if (!revision || typeof revision !== 'object') throw new Error('apply.run: falta revision');
+    const stored = typeof params.storedB64 === 'string' ? b64Decode(params.storedB64) : null;
+    return applyRevision(
+      { store, port: new HttpFileSystemPort(globalThis.location.origin), keys },
+      revision,
+      stored,
+    );
+  },
+
+  'apply.recover': async () => {
+    const { store, keys } = exigirApply();
+    return recoverApplies({
+      store,
+      port: new HttpFileSystemPort(globalThis.location.origin),
+      keys,
+    });
   },
 };
 

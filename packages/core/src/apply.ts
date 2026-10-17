@@ -25,6 +25,11 @@ export interface ApplyCandidate {
   rev: number;
   /** `blob_id` en hex del contenido a publicar. */
   blobId: string;
+  /** Ruta relativa del destino (para la recuperación). */
+  path?: string;
+  kind?: 'file' | 'folder';
+  deleted?: boolean;
+  contentHash?: string | null;
   /** Nombre del archivo temporal en el vault (relativo), si ya se eligió. */
   tempName?: string;
 }
@@ -51,6 +56,10 @@ export function createIntent(candidate: ApplyCandidate): IntentEntry {
     rev: candidate.rev,
     blobId: candidate.blobId,
     state: 'pending',
+    path: candidate.path,
+    kind: candidate.kind,
+    deleted: candidate.deleted ?? false,
+    contentHash: candidate.contentHash ?? null,
     tempName: candidate.tempName,
     createdAt: Date.now(),
   };
