@@ -70,7 +70,7 @@
   `tests/admin.rs`) + E2E vivo sobre el binario (`:8896`): bootstrap → login → crear →
   deshabilitar/habilitar → reset (link una vez) → registro por toggle → borrado, con la
   auditoría completa en la DB.
-- Commit `d1cf9d2` (pusheado).
+- Commit `964bd29` (pusheado).
 
 ### W2 — Vaults, devices y auditoría
 
