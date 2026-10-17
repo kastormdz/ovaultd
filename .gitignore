@@ -41,3 +41,4 @@ scripts/leaks.local
 *.bak.rs
 *.bak.*
 *.respfragmento.md
+notas-release.md

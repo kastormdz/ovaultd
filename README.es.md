@@ -134,6 +134,25 @@ Server y plugin viajan en un **release train**: el mismo `MAJOR.MINOR` de los do
 
 `GET /api/v1/meta` es el contrato detrás de esa tabla, y es público a propósito: cada cliente lo lee **antes** de vincular cualquier cosa y recibe la versión del server, la del wire, el plugin mínimo que acepta y la lista de features. Un plugin más viejo que `min_plugin_version` se niega a vincular (con un mensaje que apunta al plugin, no al server), y una versión de wire distinta también — en ningún caso queda algo a medio escribir.
 
+## Releases
+
+Las releases se cortan con un tag. `server-vX.Y.Z` corre los gates completos — suites TypeScript, suites Rust, el smoke del server (cripto viva y WebSocket) y la canaria de cifrado — después construye un binario estático `x86_64-unknown-linux-musl` más `ovaultd-admin`, publica la imagen del contenedor en GHCR (`X.Y.Z` y `latest`) y adjunta el tar.gz con su `SHA256SUMS` a la GitHub Release. El tag **es** la versión declarada: si `Cargo.toml` no coincide, el workflow falla antes de publicar nada.
+
+```bash
+tar xzf ovaultd-0.2.0-x86_64-unknown-linux-musl.tar.gz
+sha256sum -c SHA256SUMS
+OVAULTD_BIND=127.0.0.1:8080 OVAULTD_DB=./datos/metadata.db OVAULTD_CAS=./datos/cas ./ovaultd
+```
+
+O la imagen, que es la vía de despliegue que el proyecto apunta:
+
+```bash
+docker run -d --name ovaultd -p 127.0.0.1:8080:8080 -v ovaultd-data:/data \
+  ghcr.io/kastormdz/ovaultd:0.2.0
+```
+
+Lo que cambió en cada versión vive en [CHANGELOG.md](CHANGELOG.md), y las notas de la release salen de ahí — nunca de prosa generada.
+
 ## Desarrollo
 
 ```bash
