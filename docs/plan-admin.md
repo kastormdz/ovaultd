@@ -1,8 +1,8 @@
 # Plan — Panel web de administración, versionado y borde
 
-- Estado: **en ejecución** — **PD ✅, W0 ✅, W1 ✅, W2 ✅ y W3 ✅** (2026-10-17); las 4 decisiones se
+- Estado: **en ejecución** — **PD ✅, W0 ✅, W1 ✅, W2 ✅, W3 ✅ y V1 ✅** (2026-10-17); las 4 decisiones se
   confirmaron tal cual (stack server-rendered, registro cerrado + toggle, borrado con bloques,
-  español). Sigue: **V1**.
+  español). Sigue: **V2** (releases en GitHub).
 - Origen: pedido directo del operador (2026-10-17): el admin tiene que ser **web, moderno y
   PRO** (cuentas, passwords, stats, registro on/off); **sin proxy en el docker** (el borde lo
   pone NPM Plus, que ya opera); **versiones explícitas** server ↔ plugin y **releases en
@@ -127,6 +127,23 @@ las últimas acciones, con empty states en las tres listas. Lo que agregó W3:
   train); matriz de compatibilidad en los READMEs.
 - **Gate**: tests del meta + spec del check del plugin + bump de versiones verificado por
   preflight.
+
+**Cerrado (2026-10-17):** server y plugin en `0.2.0` (release train) con el contrato vivo:
+
+- `GET /api/v1/meta` público (sin auth): `{server_version, api, wire_protocol,
+  min_plugin_version, features}`. `server_version` sale de `env!("CARGO_PKG_VERSION")` (no de
+  una copia a mano) y el wire/API de consts en `ovaultd-protocol`. Features anunciadas:
+  `meta`, `admin-web`, `resumable-uploads`, `vault-delete`, `vault-material`, `device-revoke`.
+- El CORS del server permite el header `x-ovaultd-client` (sin eso el preflight lo corta y el
+  plugin no llega ni a vincular). Todo pedido del plugin lo manda: `oVaultd-plugin/<version>`.
+- Plugin `0.2.0`: `src/compat.ts` (puro y testeado) decide con `evaluarCompatibilidad`;
+  consulta `/meta` **antes de vincular y de crear** un vault (bloqueo con mensaje que apunta al
+  plugin, nunca al server), al arrancar el motor (no sincroniza nada si es incompatible) y en
+  «Probar conexión» (que ahora dice el veredicto, no solo «responde»).
+- Matriz de compatibilidad en los tres READMEs (server EN/ES + plugin).
+- Tests: `crates/ovaultd-server/tests/meta.rs` (3: público y completo, release train,
+  preflight del header) + `test/compat.test.ts` (7) + los mocks de `crear-vault.test.ts`
+  ahora sirven `/meta` como el server real.
 
 ### V2 — Releases en GitHub
 

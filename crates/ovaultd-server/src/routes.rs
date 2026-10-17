@@ -49,6 +49,7 @@ pub fn router(estado: EstadoServidor) -> Router {
         .route("/", get(raiz))
         .route("/setup", get(setup_form).post(setup_crear))
         .merge(crate::admin::rutas())
+        .route("/api/v1/meta", get(meta))
         .route("/api/v1/auth/signin", post(signin))
         .route("/api/v1/auth/signout", post(signout))
         .route("/api/v1/me", get(me))
@@ -101,7 +102,13 @@ pub fn router(estado: EstadoServidor) -> Router {
                     Method::DELETE,
                     Method::HEAD,
                 ])
-                .allow_headers([AUTHORIZATION, CONTENT_TYPE]),
+                .allow_headers([
+                    AUTHORIZATION,
+                    CONTENT_TYPE,
+                    // El cliente se identifica por header (ADR-0018): si no está permitido
+                    // acá, el preflight lo bloquea y el plugin no llega ni a vincular.
+                    axum::http::header::HeaderName::from_static("x-ovaultd-client"),
+                ]),
         )
 }
 
@@ -114,6 +121,43 @@ pub(crate) fn uptime_segundos() -> u64 {
         .get()
         .map(|inicio| inicio.elapsed().as_secs())
         .unwrap_or(0)
+}
+
+/// Versión mínima del plugin con la que este server declara compatibilidad (ADR-0018:
+/// release train, mismo `MAJOR.MINOR` = pareja probada junta).
+const MIN_PLUGIN_VERSION: &str = "0.2.0";
+
+/// Features que este server anuncia en `/meta`. Los nombres son CONTRATO: un cliente
+/// decide capacidades por acá, no por número de versión.
+const FEATURES: [&str; 6] = [
+    "meta",
+    "admin-web",
+    "resumable-uploads",
+    "vault-delete",
+    "vault-material",
+    "device-revoke",
+];
+
+/// Cuerpo de `GET /api/v1/meta` (ADR-0018).
+#[derive(Serialize)]
+struct Meta {
+    server_version: &'static str,
+    api: &'static str,
+    wire_protocol: &'static str,
+    min_plugin_version: &'static str,
+    features: &'static [&'static str],
+}
+
+/// `GET /api/v1/meta` — el contrato de compatibilidad. **Sin auth**: es exactamente lo
+/// que un cliente consulta ANTES de vincular, y el server sabe defenderse solo.
+async fn meta() -> Json<Meta> {
+    Json(Meta {
+        server_version: env!("CARGO_PKG_VERSION"),
+        api: ovaultd_protocol::API_VERSION,
+        wire_protocol: ovaultd_protocol::WIRE_PROTOCOL,
+        min_plugin_version: MIN_PLUGIN_VERSION,
+        features: &FEATURES,
+    })
 }
 
 /// `GET /healthz` — liveness/readiness para el healthcheck del compose y los balanceadores.

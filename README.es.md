@@ -124,6 +124,16 @@ El contenedor publica en loopback y habla HTTP plano; el TLS es del proxy. Tres 
 2. **Permitir el upgrade de WebSocket** en `/api/v1/ws`, con timeouts de lectura largos.
 3. **Subir el límite de body a 40 MB y desactivar el buffering de request.** Los bloques de subida reanudable llegan hasta 32 MiB, y el default de nginx (1 MB) los corta con 413.
 
+## Compatibilidad
+
+Server y plugin viajan en un **release train**: el mismo `MAJOR.MINOR` de los dos lados es una pareja probada junta. Los patches son independientes: el `0.2.5` del server anda con el `0.2.1` del plugin.
+
+| Server | Plugin | Wire |
+|---|---|---|
+| `0.2.x` | `0.2.x` | `v2` |
+
+`GET /api/v1/meta` es el contrato detrás de esa tabla, y es público a propósito: cada cliente lo lee **antes** de vincular cualquier cosa y recibe la versión del server, la del wire, el plugin mínimo que acepta y la lista de features. Un plugin más viejo que `min_plugin_version` se niega a vincular (con un mensaje que apunta al plugin, no al server), y una versión de wire distinta también — en ningún caso queda algo a medio escribir.
+
 ## Desarrollo
 
 ```bash

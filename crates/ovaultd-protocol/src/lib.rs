@@ -4,6 +4,13 @@
 //!
 //! Este crate no realiza I/O ni contiene lógica de transporte.
 
+/// Versión del wire (`docs/protocol.md`, ADR-0018). Un cambio incompatible la sube;
+/// es independiente de la versión del server y del plugin (release train aparte).
+pub const WIRE_PROTOCOL: &str = "v2";
+
+/// Versión de la superficie HTTP pública (`/api/v1`).
+pub const API_VERSION: &str = "v1";
+
 use serde::de::{self, Visitor};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::fmt;

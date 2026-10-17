@@ -122,6 +122,16 @@ The container publishes on loopback and speaks plain HTTP; TLS belongs to the pr
 2. **Allow WebSocket upgrades** on `/api/v1/ws`, with long read timeouts.
 3. **Raise the body limit to 40 MB and disable request buffering.** Resumable upload blocks go up to 32 MiB, and the nginx default of 1 MB kills them with a 413.
 
+## Compatibility
+
+Server and plugin travel on a **release train**: the same `MAJOR.MINOR` on both sides is a pair that was tested together. Patches are independent, so `0.2.5` of the server works with `0.2.1` of the plugin.
+
+| Server | Plugin | Wire |
+|---|---|---|
+| `0.2.x` | `0.2.x` | `v2` |
+
+`GET /api/v1/meta` is the contract behind that table, and it is public on purpose: every client reads it **before** linking anything and gets the server version, the wire version, the minimum plugin it accepts, and the feature list. A plugin older than `min_plugin_version` refuses to link (with a message that points at the plugin, not at the server), and an older wire version refuses too — nothing is half-written in either case.
+
 ## Development
 
 ```bash
