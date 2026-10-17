@@ -26,7 +26,9 @@ un digest inventado) y `docker compose -f compose.yaml up -d`, sin el overlay de
 No hay registro público (ADR-0011). La **primera** cuenta se crea por la web en
 `http://<server>/setup`: solo existe mientras el servidor no tenga ninguna y se desactiva sola
 al crearla (con `OVAULTD_SETUP_TOKEN` seteado además exige `?token=…` — útil si el server va a
-quedar expuesto antes de terminar el bootstrap; ver ADR-0016). Las cuentas **siguientes** se
+quedar expuesto antes de terminar el bootstrap; ver ADR-0016). Esa cuenta nace **admin** y su
+casa es el **panel web** (`/admin`, ADR-0017): login con la password de la cuenta, dashboard y
+cambio de password. Las cuentas **siguientes** se
 crean con `ovaultd-admin`, que viene **dentro de la imagen**:
 
 ```bash

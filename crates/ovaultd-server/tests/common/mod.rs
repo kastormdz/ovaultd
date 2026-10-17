@@ -39,6 +39,9 @@ pub struct TestContext {
     _cas_dir: TempDir,
     pub config: Config,
     pub cas: Arc<CasStore>,
+    /// Compartido entre requests (el `estado()` clona el Arc): el freno de intentos del
+    /// panel acumula como en producción (ADR-0017).
+    pub limitador_login: Arc<ovaultd_server::admin::sesiones::LimitadorDeLogin>,
     pub account_id: i64,
     pub device_id: i64,
     pub token: String,
@@ -100,6 +103,7 @@ impl TestContext {
             challenge_ttl_seconds: 300,
             upload_ttl_hours: 24,
             setup_token: None,
+            secure_cookies: ovaultd_server::config::ModoSecureCookies::Auto,
         };
         let cas = Arc::new(CasStore::new(cas_dir.path().to_path_buf())?);
 
@@ -109,6 +113,7 @@ impl TestContext {
             _cas_dir: cas_dir,
             config,
             cas,
+            limitador_login: Default::default(),
             account_id: account.id,
             device_id,
             token,
@@ -183,6 +188,7 @@ impl TestContext {
             pool: self.pool.clone(),
             config: self.config.clone(),
             cas: self.cas.clone(),
+            limitador_login: self.limitador_login.clone(),
         }
     }
 

@@ -35,14 +35,14 @@ fn env_i64(name: &str, default: i64) -> i64 {
         .unwrap_or(default)
 }
 
-fn token_bytes() -> Vec<u8> {
+pub(crate) fn token_bytes() -> Vec<u8> {
     let mut bytes = Vec::with_capacity(32);
     bytes.extend_from_slice(Uuid::new_v4().as_bytes());
     bytes.extend_from_slice(Uuid::new_v4().as_bytes());
     bytes
 }
 
-fn token_string(bytes: &[u8]) -> String {
+pub(crate) fn token_string(bytes: &[u8]) -> String {
     let mut token = String::with_capacity(bytes.len() * 2);
     for byte in bytes {
         use std::fmt::Write;
@@ -51,11 +51,22 @@ fn token_string(bytes: &[u8]) -> String {
     token
 }
 
-fn hash_bytes(bytes: &[u8]) -> Vec<u8> {
+pub(crate) fn hash_bytes(bytes: &[u8]) -> Vec<u8> {
     Sha256::digest(bytes).to_vec()
 }
 
-fn hash_token(token: &str) -> Vec<u8> {
+/// Comparación de tokens en TIEMPO CONSTANTE (sin early-return): la usan el setup_token
+/// (ADR-0016) y el CSRF del panel (ADR-0017).
+pub(crate) fn tokens_iguales(a: &str, b: &str) -> bool {
+    let (a, b) = (a.as_bytes(), b.as_bytes());
+    if a.len() != b.len() {
+        return false;
+    }
+
+    a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
+}
+
+pub(crate) fn hash_token(token: &str) -> Vec<u8> {
     hash_bytes(token.as_bytes())
 }
 
@@ -159,9 +170,10 @@ pub async fn crear_cuenta_si_vacio(
     let email = normalize_email(email);
     let password_hash = hash_password(password)?;
 
+    // La cuenta del bootstrap nace 'admin' (ADR-0017): es quien operó el server.
     let fila = sqlx::query_as::<_, FilaCuenta>(
-        "INSERT INTO accounts (email, password_hash)
-         SELECT ?, ? WHERE NOT EXISTS (SELECT 1 FROM accounts)
+        "INSERT INTO accounts (email, password_hash, role)
+         SELECT ?, ?, 'admin' WHERE NOT EXISTS (SELECT 1 FROM accounts)
          RETURNING id, email",
     )
     .bind(&email)
@@ -211,6 +223,61 @@ pub async fn iniciar_sesion(
     let device_id = verificar_token(pool, &token).await?;
 
     Ok((token, device_id))
+}
+
+/// Cuenta autenticada por password de CUENTA (base del login del panel web, ADR-0017).
+#[derive(Debug, Clone)]
+pub struct CuentaAutenticada {
+    pub id: i64,
+    pub email: String,
+    pub role: String,
+}
+
+#[derive(Debug, FromRow)]
+struct FilaCuentaCompleta {
+    id: i64,
+    email: String,
+    password_hash: String,
+    role: String,
+}
+
+/// Autentica email + password de CUENTA sin tocar devices (el panel no emite un device
+/// por cada login del navegador). Mismo señuelo que `iniciar_sesion`: un email inexistente
+/// cuesta un Argon2 igual, así que no se filtra por timing qué cuentas existen.
+pub async fn autenticar_cuenta(
+    pool: &SqlitePool,
+    email: &str,
+    password: &str,
+) -> Result<Option<CuentaAutenticada>> {
+    let email = normalize_email(email);
+
+    let fila = sqlx::query_as::<_, FilaCuentaCompleta>(
+        "SELECT id, email, password_hash, role
+         FROM accounts
+         WHERE email = ?",
+    )
+    .bind(&email)
+    .fetch_optional(pool)
+    .await?;
+
+    let (autenticada, password_hash) = match fila {
+        Some(fila) => (
+            Some(CuentaAutenticada {
+                id: fila.id,
+                email: fila.email,
+                role: fila.role,
+            }),
+            fila.password_hash,
+        ),
+        None => (None, hash_senuelo().to_owned()),
+    };
+
+    let password_valida = verificar_password(password, &password_hash)?;
+
+    Ok(match (autenticada, password_valida) {
+        (Some(cuenta), true) => Some(cuenta),
+        _ => None,
+    })
 }
 
 pub async fn emitir_device(

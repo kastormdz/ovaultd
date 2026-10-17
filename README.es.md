@@ -29,6 +29,7 @@ Lo que figura como hecho está respaldado por gates de ejecución real, no mocks
 - Plano de control HTTP y plano de datos por WebSocket para las deltas de revisión.
 - Un solo contenedor endurecido: uid non-root, rootfs de solo lectura, sin capabilities, SQLite WAL y almacén de blobs content-addressed bajo `/data`.
 - Listo para detrás de un borde: el server publica en loopback y habla HTTP plano; `docs/deploy.md` documenta exactamente qué tiene que respetar el borde (Nginx Proxy Manager, nginx, Caddy). El repo no trae proxy — el borde es del operador (ADR-0019).
+- Panel web de administración (ADR-0017, primer corte): login con sesión + CSRF, dashboard con contadores y cambio de password propio — server-rendered con assets embebidos, sin JS obligatorio.
 - Sin registro público. La primera cuenta se crea por la web en `/setup` (solo el primer arranque, ADR-0016); las siguientes, con el CLI de administración que viene dentro de la imagen (ADR-0011).
 
 ## Cómo funciona

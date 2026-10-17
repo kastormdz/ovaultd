@@ -35,6 +35,8 @@ pub struct EstadoServidor {
     pub pool: SqlitePool,
     pub config: Config,
     pub cas: Arc<CasStore>,
+    /// Freno de intentos del login del panel (ADR-0017): en memoria, single-node por diseño.
+    pub limitador_login: Arc<crate::admin::sesiones::LimitadorDeLogin>,
 }
 
 pub fn router(estado: EstadoServidor) -> Router {
@@ -46,6 +48,7 @@ pub fn router(estado: EstadoServidor) -> Router {
         .route("/metrics", get(metrics))
         .route("/", get(raiz))
         .route("/setup", get(setup_form).post(setup_crear))
+        .merge(crate::admin::rutas())
         .route("/api/v1/auth/signin", post(signin))
         .route("/api/v1/auth/signout", post(signout))
         .route("/api/v1/me", get(me))
@@ -169,21 +172,13 @@ fn setup_autorizado(config: &Config, token: Option<&str>) -> bool {
     match config.setup_token.as_deref() {
         None => true,
         Some(esperado) => token
-            .map(|recibido| tokens_iguales(recibido, esperado))
+            .map(|recibido| auth::tokens_iguales(recibido, esperado))
             .unwrap_or(false),
     }
 }
 
-/// Comparación en tiempo constante, sin dependencias: un `==` filtra por `timing` cuántos bytes
-/// acertó quien prueba. El token de instalación es de bajo riesgo, pero esto sale gratis.
-fn tokens_iguales(a: &str, b: &str) -> bool {
-    let (a, b) = (a.as_bytes(), b.as_bytes());
-    if a.len() != b.len() {
-        return false;
-    }
-
-    a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
-}
+// `tokens_iguales` vive en `auth` (una sola fuente en tiempo constante): la comparten el
+// setup_token del bootstrap y el CSRF del panel (ADR-0017).
 
 /// Escape mínimo para interpolar el token (que viene de la config) en un atributo HTML.
 fn escapar(texto: &str) -> String {
@@ -213,13 +208,8 @@ async fn raiz(State(state): State<EstadoServidor>) -> Result<Response> {
         return Ok(Redirect::to("/setup").into_response());
     }
 
-    Ok(pagina(
-        StatusCode::OK,
-        "ovaultd",
-        "<p>Servidor self-hosted de sincronización cifrada de punta a punta.</p>\
-         <p>No hay nada para ver acá: usá tu cliente (la CLI o el plugin de Obsidian).</p>\
-         <p>Estado: <a href=\"/healthz\">/healthz</a></p>",
-    ))
+    // Con cuentas, el server tiene cara de panel (login/dashboard).
+    Ok(Redirect::to("/admin").into_response())
 }
 
 #[derive(Deserialize)]

@@ -6,6 +6,7 @@
 //! Regla de oro: este crate **nunca** recibe `vault_key`, KEK ni recovery, y **nunca** descifra un
 //! `path_enc` ni un blob. Lo único que hace con criptografía es verificar: `ovaultd_crypto::verify_record`.
 
+pub mod admin;
 pub mod auth;
 pub mod config;
 pub mod db;
@@ -34,4 +35,6 @@ pub struct AppState {
     pub cas: Arc<storage::CasStore>,
     /// Configuración del proceso.
     pub cfg: Arc<Config>,
+    /// Freno de intentos del login del panel (ADR-0017): en memoria, single-node por diseño.
+    pub limitador_login: Arc<admin::sesiones::LimitadorDeLogin>,
 }

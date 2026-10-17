@@ -62,6 +62,7 @@ async fn iniciar_servidor() -> Result<(), String> {
         pool,
         config,
         cas: cas.into(),
+        limitador_login: Default::default(),
     };
     let app = routes::router(estado);
 

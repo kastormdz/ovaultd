@@ -21,6 +21,7 @@ crates/ovaultd-server/src/
   storage.rs         CasStore: publicar/leer blobs                         <- Luna
   auth.rs            cuentas, devices, challenge, verificación de firma    <- Luna
   routes.rs          router axum: /healthz, /metrics, /setup, vaults, push, pull   <- Luna
+  admin/             panel web de administración (ADR-0017): sesiones, login, páginas
   sync/mod.rs        pub mod commit;                                      <- YA ESCRITO
   sync/commit.rs     la ÚNICA ruta de escritura (transacción atómica)      <- Luna
   delta.rs           paginado por revisiones COMPLETAS                     <- Luna
@@ -365,9 +366,15 @@ una variante ni un código nuevo acá.
 
 | método | ruta | auth | qué hace |
 |---|---|---|---|
-| GET | `/` | no | raíz web: sin cuentas -> redirect a `/setup`; con cuentas, página mínima de identificación |
-| GET | `/setup` | no | **bootstrap del primer usuario** (ADR-0016): formulario SOLO mientras `accounts = 0`; con cuentas, 410 Gone; `OVAULTD_SETUP_TOKEN` (opcional) la condiciona con `?token=…` |
+| GET | `/` | no | raíz web: sin cuentas -> redirect a `/setup`; con cuentas -> redirect a `/admin` (panel, ADR-0017) |
+| GET | `/setup` | no | **bootstrap del primer usuario** (ADR-0016): formulario SOLO mientras `accounts = 0`; con cuentas, 410 Gone; `OVAULTD_SETUP_TOKEN` (opcional) la condiciona con `?token=…`; la cuenta creada nace `admin` |
 | POST | `/setup` | no | crea la primera cuenta (form: `email`, `password`, `token?`); 410 con cuentas existentes; 403 sin token cuando está configurado; `INSERT` con `WHERE NOT EXISTS` (carrera-safe) |
+| GET | `/admin` | cookie | **panel de administración** (ADR-0017): sin sesión -> redirect a `/admin/login`; con sesión, dashboard con contadores |
+| GET | `/admin/login` | no | formulario de login del panel (cookie `ovaultd_session`: `HttpOnly`, `SameSite=Lax`; `Secure` automático con `X-Forwarded-Proto: https`, forzable con `OVAULTD_SECURE_COOKIES=on/off`) |
+| POST | `/admin/login` | no | email+password de CUENTA (argon2id con señuelo) -> cookie de sesión (30 días); freno de 5 intentos/min por ip+email (429 + `Retry-After`); todo va a `audit_log` |
+| POST | `/admin/logout` | sesión + CSRF | revoca la sesión y expira la cookie |
+| GET/POST | `/admin/mi-cuenta` | sesión + CSRF | cambiar la password de la propia cuenta (actual + nueva ≥8); al cambiarla se revocan las demás sesiones del panel |
+| GET | `/admin/assets/{admin.css,htmx.min.js}` | no | assets embebidos en el binario (sin CDNs; htmx es progresivo: el panel funciona sin JS) |
 | GET | `/healthz` | no | liveness/readiness: `{"status":"ok"}` (503 si la base no responde) — healthcheck de compose |
 | GET | `/metrics` | no | Prometheus mínimo de operación (`ovaultd_up`, `ovaultd_uptime_seconds`); sin secretos; restringir en el proxy |
 | POST | `/api/v1/auth/signin` | no | `{email, password, mfa?}` -> `{token, device_id}` |

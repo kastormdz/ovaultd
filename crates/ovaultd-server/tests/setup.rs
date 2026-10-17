@@ -50,6 +50,7 @@ impl Contexto {
             challenge_ttl_seconds: 300,
             upload_ttl_hours: 24,
             setup_token: setup_token.map(str::to_owned),
+            secure_cookies: ovaultd_server::config::ModoSecureCookies::Auto,
         };
         let cas = Arc::new(CasStore::new(cas_dir.path().to_path_buf())?);
 
@@ -58,6 +59,7 @@ impl Contexto {
                 pool: pool.clone(),
                 config,
                 cas,
+                limitador_login: Default::default(),
             },
             pool,
             _db_dir: db_dir,
@@ -154,11 +156,18 @@ async fn setup_crea_la_primera_cuenta_y_se_cierra() -> Result<()> {
     assert_eq!(response.status(), StatusCode::GONE);
     assert_eq!(contexto.cuentas().await?, 1);
 
-    // La raíz ya no redirige: muestra la página mínima del servidor.
+    // La raíz con cuentas ahora lleva al panel (ADR-0017): login/dashboard.
     let response = contexto
         .request(Request::get("/").body(Body::empty())?)
         .await?;
-    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    assert_eq!(
+        response
+            .headers()
+            .get(axum::http::header::LOCATION)
+            .and_then(|valor| valor.to_str().ok()),
+        Some("/admin")
+    );
     Ok(())
 }
 

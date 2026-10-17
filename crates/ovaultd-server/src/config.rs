@@ -15,6 +15,17 @@ pub struct Config {
     /// de la primera cuenta exige `?token=…`; ausente/vacío, queda abierto MIENTRAS el servidor
     /// no tenga ninguna cuenta. Nunca se imprime en logs (el `Display` solo dice set/unset).
     pub setup_token: Option<String>,
+    /// Cookie `Secure` del panel web (ADR-0017): `auto` la marca cuando el request llega por
+    /// HTTPS (X-Forwarded-Proto del borde), `on`/`off` la fuerzan.
+    pub secure_cookies: ModoSecureCookies,
+}
+
+/// Modo de la marca `Secure` de la cookie de sesión del panel.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModoSecureCookies {
+    Auto,
+    Siempre,
+    Nunca,
 }
 
 impl Config {
@@ -57,6 +68,17 @@ impl Config {
 
         let setup_token = valor(&get, "OVAULTD_SETUP_TOKEN");
 
+        let secure_cookies = match valor(&get, "OVAULTD_SECURE_COOKIES").as_deref() {
+            None | Some("auto") => ModoSecureCookies::Auto,
+            Some("on") => ModoSecureCookies::Siempre,
+            Some("off") => ModoSecureCookies::Nunca,
+            Some(otro) => {
+                return Err(ServerError::Invalid(format!(
+                    "OVAULTD_SECURE_COOKIES tiene un valor inválido: {otro:?} (auto|on|off)"
+                )))
+            }
+        };
+
         Ok(Self {
             bind_addr,
             database_path,
@@ -65,6 +87,7 @@ impl Config {
             challenge_ttl_seconds,
             upload_ttl_hours,
             setup_token,
+            secure_cookies,
         })
     }
 }
@@ -73,7 +96,7 @@ impl fmt::Display for Config {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             formatter,
-            "bind_addr={}, database_path={}, cas_root={}, token_ttl_hours={}, challenge_ttl_seconds={}, upload_ttl_hours={}, setup_token={}",
+            "bind_addr={}, database_path={}, cas_root={}, token_ttl_hours={}, challenge_ttl_seconds={}, upload_ttl_hours={}, setup_token={}, secure_cookies={:?}",
             self.bind_addr,
             self.database_path,
             self.cas_root.display(),
@@ -81,6 +104,7 @@ impl fmt::Display for Config {
             self.challenge_ttl_seconds,
             self.upload_ttl_hours,
             if self.setup_token.is_some() { "set" } else { "unset" },
+            self.secure_cookies,
         )
     }
 }
@@ -130,6 +154,7 @@ mod tests {
         assert_eq!(config.challenge_ttl_seconds, 300);
         assert_eq!(config.upload_ttl_hours, 24);
         assert!(config.setup_token.is_none());
+        assert_eq!(config.secure_cookies, ModoSecureCookies::Auto);
     }
 
     #[test]
@@ -195,5 +220,24 @@ mod tests {
 
         assert!(mensaje.contains("OVAULTD_CHALLENGE_TTL"));
         assert!(mensaje.contains("mayor que cero"));
+    }
+
+    #[test]
+    fn secure_cookies_se_lee_y_valida() {
+        let on = Config::construir(|name| match name {
+            "OVAULTD_SECURE_COOKIES" => Some("on".to_owned()),
+            _ => None,
+        })
+        .unwrap();
+        assert_eq!(on.secure_cookies, ModoSecureCookies::Siempre);
+
+        let malo = Config::construir(|name| match name {
+            "OVAULTD_SECURE_COOKIES" => Some("quizas".to_owned()),
+            _ => None,
+        });
+        assert!(malo
+            .unwrap_err()
+            .to_string()
+            .contains("OVAULTD_SECURE_COOKIES"));
     }
 }

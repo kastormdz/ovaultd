@@ -27,6 +27,7 @@ The parts marked done are backed by real-execution gates, not mocks: Rust unit a
 - HTTP control plane plus a WebSocket data plane for revision deltas.
 - A single hardened container: non-root uid, read-only rootfs, every capability dropped, SQLite WAL and a content-addressed blob store under `/data`.
 - Edge-ready: the server publishes on loopback and speaks plain HTTP; `docs/deploy.md` documents exactly what the edge (Nginx Proxy Manager, nginx, Caddy) must get right. The repository ships no proxy — the edge belongs to the operator (ADR-0019).
+- A web admin panel (ADR-0017, first cut): session login with CSRF, dashboard counters and self-service password change — server-rendered with embedded assets, no JS required.
 - No public registration. The first account is created from the web at `/setup` (first run only, ADR-0016); further accounts with the admin CLI inside the image (ADR-0011).
 
 ## How it works

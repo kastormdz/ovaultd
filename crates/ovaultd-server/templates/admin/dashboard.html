@@ -1,0 +1,32 @@
+{% extends "admin/base.html" %}
+{% block titulo %}Panel — ovaultd{% endblock %}
+{% block nav %}
+<form method="post" action="/admin/logout" class="en-linea">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <button class="boton fantasma" type="submit">Salir</button>
+</form>
+{% endblock %}
+{% block contenido %}
+<div class="cabecera-seccion">
+  <h1>Panel</h1>
+  <span class="chip">{{ email }} · {{ rol }}</span>
+</div>
+
+<section class="grilla">
+  <div class="tarjeta stat"><span class="numero">{{ cuentas }}</span><span class="rotulo">Cuentas</span></div>
+  <div class="tarjeta stat"><span class="numero">{{ vaults }}</span><span class="rotulo">Vaults</span></div>
+  <div class="tarjeta stat"><span class="numero">{{ revisiones }}</span><span class="rotulo">Revisiones</span></div>
+  <div class="tarjeta stat"><span class="numero">{{ devices }}</span><span class="rotulo">Devices activos</span></div>
+</section>
+
+<section class="tarjeta">
+  <h2>Tu cuenta</h2>
+  <p><a href="/admin/mi-cuenta">Cambiar tu password</a> — al cambiarla, las demás sesiones del panel se cierran.</p>
+</section>
+
+<section class="tarjeta">
+  <h2>En construcción</h2>
+  <p class="ayuda">Los próximos cortes suman: alta/baja de cuentas, vaults con detalle y storage,
+  devices con revocación, registro abierto/cerrado y la vista de auditoría.</p>
+</section>
+{% endblock %}

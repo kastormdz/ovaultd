@@ -1,6 +1,8 @@
 # Plan — Panel web de administración, versionado y borde
 
-- Estado: **propuesto** — esperando confirmación de las 4 decisiones marcadas abajo.
+- Estado: **en ejecución** — **PD ✅ y W0 ✅** (2026-10-17); las 4 decisiones se confirmaron
+  tal cual (stack server-rendered, registro cerrado + toggle, borrado con bloques, español).
+  Sigue: **W1**.
 - Origen: pedido directo del operador (2026-10-17): el admin tiene que ser **web, moderno y
   PRO** (cuentas, passwords, stats, registro on/off); **sin proxy en el docker** (el borde lo
   pone NPM Plus, que ya opera); **versiones explícitas** server ↔ plugin y **releases en
@@ -23,22 +25,30 @@
 
 ## Cortes (uno por sesión, con gate completo antes de commit)
 
-### PD — Borde: fuera el proxy del repo (ADR-0019) — chico, primero
+### PD — Borde: fuera el proxy del repo (ADR-0019) — chico, primero ✅
 
-- Borrar `docker/proxy/` y el servicio `proxy` del overlay dev; `docs/deploy.md` con la
-  configuración **NPM Plus exacta** (los 3 puntos) + nginx genérico como alternativa.
-- `container-e2e.sh`: probar directo (HTTP+WS+cripto), sin esperas de nginx.
-- **Gate**: `container-e2e` OK sin proxy · server-smoke · scan-leaks.
+- ✅ `docker/proxy/` eliminado; el overlay de dev solo construye la imagen; `container-e2e.sh`
+  prueba DIRECTO contra el server (healthz, `/metrics`, smoke completo HTTP+WS con cripto real,
+  sync E2E de Chromium, persistencia con recreate). Gate corrido: CONTAINER-E2E OK.
+- ✅ `docs/deploy.md` reescrito: NPM Plus primero (los 3 puntos + cómo lo alcanza un borde en
+  contenedor), nginx de referencia, Caddy. READMEs sin OVAULTD_PROXY_PORT.
+- Commit `db72115` (pusheado).
 
-### W0 — Cimientos del panel (ADR-0017)
+### W0 — Cimientos del panel (ADR-0017) ✅
 
-- Migración `005_admin.sql`: `accounts.role` (+promote de `MIN(id)` a admin si hay cuentas),
-  `sessions`, `audit_log`, `server_settings` (`registro_abierto=off`).
-- Módulo `routes/admin/`: stack askama + htmx vendorizado + layout dark · login/logout con
-  cookie + CSRF + rate limit · `GET /` nueva (landing según estado) · `/admin/mi-cuenta`
-  (cambiar password propia: revoca las demás sesiones).
-- **Gate**: tests de integración (como `setup.rs`): sesión expira, CSRF inválido → 403,
-  rate limit → 429, último admin no se degrada, `/setup` intacto · npm/browser/cargo verdes.
+- ✅ Migración `005_admin.sql`: `accounts.role` (bootstrap nace `admin`; migración promueve a
+  `MIN(id)` en servidores ya bootstrapeados), `sessions` (cookie opaca con hash + CSRF crudo),
+  `audit_log`, `server_settings` (`registro_abierto=off`).
+- ✅ Módulo `admin/`: stack askama 0.14 (templates dentro del binario) + htmx 2.0.4 vendorizado
+  + CSS propio dark, sin CDNs · login/logout con cookie (`HttpOnly`, `SameSite=Lax`, `Secure`
+  automático por `X-Forwarded-Proto` con `OVAULTD_SECURE_COOKIES=auto|on|off`) · CSRF por sesión
+  en TODOS los POST (tiempo constante) · freno de 5 intentos/min por ip+email (429+Retry-After)
+  · auditoría de cada intento · `GET /` → `/admin` con cuentas · `/admin/mi-cuenta` (cambia la
+  password propia y revoca las demás sesiones).
+- ✅ Tests: 9 de integración (`tests/admin.rs`) + unit (sesiones/limitador/config) —
+  workspace **170 passed / 0 failed** + SMOKE + CLI-E2E + CONTAINER-E2E verdes. Prueba viva
+  sobre el binario: bootstrap → login → dashboard → auditoría en la DB. Plan de W1 continúa
+  abajo sin cambios.
 
 ### W1 — Cuentas, registro y reset
 

@@ -1,0 +1,18 @@
+{% extends "admin/base.html" %}
+{% block titulo %}Entrar — ovaultd{% endblock %}
+{% block contenido %}
+<section class="tarjeta estrecha">
+  <h1>Entrar al panel</h1>
+  {% if let Some(texto) = error %}<div class="alerta error">{{ texto }}</div>{% endif %}
+  <form method="post" action="/admin/login" class="formulario">
+    <label>Email
+      <input type="email" name="email" required autofocus autocomplete="username" placeholder="vos@ejemplo.com">
+    </label>
+    <label>Password
+      <input type="password" name="password" required autocomplete="current-password" placeholder="••••••••">
+    </label>
+    <button class="boton primario" type="submit">Entrar</button>
+  </form>
+  <p class="ayuda">Usá la password de tu <strong>cuenta</strong> de ovaultd (la del panel es la misma).</p>
+</section>
+{% endblock %}
