@@ -8,5 +8,5 @@
     "types": ["node"]
   },
   "include": ["src"],
-  "references": [{ "path": "../protocol" }, { "path": "../crypto" }]
+  "references": [{ "path": "../protocol" }, { "path": "../crypto" }, { "path": "../core" }]
 }

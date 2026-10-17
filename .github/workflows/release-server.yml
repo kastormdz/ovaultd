@@ -57,6 +57,10 @@ jobs:
           npm ci
           npm run build
           npm test
+      - name: Specs de browser (durabilidad contra un Chromium real)
+        run: |
+          npx playwright install --with-deps chromium
+          npm run test:browser
       - name: Suites Rust
         run: cargo test --workspace
       - name: Smoke del server (cripto viva y WebSocket)
