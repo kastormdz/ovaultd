@@ -35,7 +35,7 @@
       <button class="boton primario" type="submit">{{ t.btn_crear }}</button>
     </div>
   </form>
-  <p class="ayuda" style="padding:0 15px 12px">{{ t.cuentas_ayuda_crear }}</p>
+  <p class="ayuda ayuda-tabla">{{ t.cuentas_ayuda_crear }}</p>
 </section>
 
 <section class="tarjeta">
@@ -76,9 +76,9 @@
               <button class="boton mini" name="accion" value="deshabilitar">{{ t.btn_deshabilitar }}</button>
               {% endif %}
               {% if c.role == "admin" %}
-              <button class="boton mini" name="accion" value="degradar">{{ t.cuentas_degradar }}</button>
+              <button class="boton mini" name="accion" value="degradar" title="{{ t.cuentas_degradar_title }}" aria-label="{{ t.cuentas_degradar_title }}">{{ t.cuentas_degradar }}</button>
               {% else %}
-              <button class="boton mini" name="accion" value="promover">{{ t.cuentas_promover }}</button>
+              <button class="boton mini" name="accion" value="promover" title="{{ t.cuentas_promover_title }}" aria-label="{{ t.cuentas_promover_title }}">{{ t.cuentas_promover }}</button>
               {% endif %}
               <button class="boton mini" name="accion" value="reset">{{ t.btn_restablecer }}</button>
             </form>

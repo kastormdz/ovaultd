@@ -10,7 +10,10 @@
 
 use askama::Template;
 use axum::extract::{FromRequestParts, State};
-use axum::http::header::{CACHE_CONTROL, CONTENT_TYPE, COOKIE, SET_COOKIE, USER_AGENT};
+use axum::http::header::{
+    CACHE_CONTROL, CONTENT_SECURITY_POLICY, CONTENT_TYPE, COOKIE, REFERRER_POLICY, SET_COOKIE,
+    USER_AGENT, X_CONTENT_TYPE_OPTIONS, X_FRAME_OPTIONS,
+};
 use axum::http::request::Parts;
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::{Html, IntoResponse, Redirect, Response};
@@ -130,19 +133,63 @@ fn user_agent_de(headers: &HeaderMap) -> Option<&str> {
     headers.get(USER_AGENT).and_then(|valor| valor.to_str().ok())
 }
 
+/// CSP estricta: la hoja y htmx salen del propio server (nunca de un CDN) y no hay
+/// nada inline — ni scripts, ni hojas, ni estilos de atributo. Cualquier `style=""`
+/// que vuelva a aparecer lo bloquea el browser y lo caza `tests/panel-audit.mjs`.
+const CSP_PANEL: &str = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; \
+     font-src 'self'; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'";
+
+/// `permissions-policy` no está como constante en el crate `http`: la declaramos.
+const CABECERA_PERMISSIONS_POLICY: axum::http::HeaderName =
+    axum::http::HeaderName::from_static("permissions-policy");
+
+/// Cabeceras de seguridad comunes a todo lo que sirve el panel (páginas y assets).
+const CABECERAS_SEGURIDAD: [(axum::http::HeaderName, &str); 4] = [
+    (X_CONTENT_TYPE_OPTIONS, "nosniff"),
+    (REFERRER_POLICY, "no-referrer"),
+    (
+        CABECERA_PERMISSIONS_POLICY,
+        "geolocation=(), camera=(), microphone=(), payment=()",
+    ),
+    (X_FRAME_OPTIONS, "DENY"),
+];
+
+/// Aplica las cabeceras de seguridad. `con_csp` solo para lo que es HTML: una hoja o
+/// un script no ejecuta CSP, pero sí agradecen el `nosniff`.
+fn con_seguridad(mut respuesta: Response, con_csp: bool) -> Response {
+    let cabeceras = respuesta.headers_mut();
+    if con_csp {
+        cabeceras.insert(CONTENT_SECURITY_POLICY, HeaderValue::from_static(CSP_PANEL));
+    }
+    for (nombre, valor) in CABECERAS_SEGURIDAD {
+        cabeceras.insert(nombre, HeaderValue::from_static(valor));
+    }
+    respuesta
+}
+
 /// Página autenticada: nada se cachea.
 fn respuesta_html(html: String) -> Response {
-    ([(CACHE_CONTROL, "no-store")], Html(html)).into_response()
+    let mut respuesta = con_seguridad(Html(html).into_response(), true);
+    respuesta
+        .headers_mut()
+        .insert(CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    respuesta
 }
 
 pub(crate) fn error_interno(contexto: &str, error: impl std::fmt::Display) -> Response {
     tracing::error!(contexto, %error, "error en el panel");
-    (
-        StatusCode::INTERNAL_SERVER_ERROR,
-        [(CACHE_CONTROL, "no-store")],
-        Html("<h1>500</h1><p>Error interno. Mirá los logs del servidor.</p>".to_owned()),
-    )
-        .into_response()
+    let mut respuesta = con_seguridad(
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Html("<h1>500</h1><p>Error interno. Mirá los logs del servidor.</p>".to_owned()),
+        )
+            .into_response(),
+        true,
+    );
+    respuesta
+        .headers_mut()
+        .insert(CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    respuesta
 }
 
 pub(crate) fn render<F>(renderizar: F, contexto: &str) -> Response
@@ -810,7 +857,7 @@ fn responder_asset(contenido: &'static str, tipo: &'static str, headers: &Header
     if let Ok(valor) = HeaderValue::from_str(&etag) {
         cabeceras.insert(axum::http::header::ETAG, valor);
     }
-    respuesta
+    con_seguridad(respuesta, false)
 }
 
 async fn asset_css(headers: HeaderMap) -> Response {

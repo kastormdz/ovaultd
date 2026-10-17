@@ -1,8 +1,8 @@
 # Plan — Panel web de administración, versionado y borde
 
-- Estado: **en ejecución** — **PD ✅, W0 ✅, W1 ✅ y W2 ✅** (2026-10-17); las 4 decisiones se
+- Estado: **en ejecución** — **PD ✅, W0 ✅, W1 ✅, W2 ✅ y W3 ✅** (2026-10-17); las 4 decisiones se
   confirmaron tal cual (stack server-rendered, registro cerrado + toggle, borrado con bloques,
-  español). Sigue: **W3**.
+  español). Sigue: **V1**.
 - Origen: pedido directo del operador (2026-10-17): el admin tiene que ser **web, moderno y
   PRO** (cuentas, passwords, stats, registro on/off); **sin proxy en el docker** (el borde lo
   pone NPM Plus, que ya opera); **versiones explícitas** server ↔ plugin y **releases en
@@ -98,6 +98,26 @@
 - Dashboard con contadores, versión del server, estado (uptime, CAS), últimas acciones;
   empty states; responsive; CSP estricta + `no-store`; microcopy en español.
 - **Gate**: specs browser de las páginas clave + capturas en CI (artefactos).
+
+**Cerrado (2026-10-17):** el dashboard ya traía contadores, uptime, CAS (fragmentos + bytes) y
+las últimas acciones, con empty states en las tres listas. Lo que agregó W3:
+
+- **CSP estricta** en todas las páginas del panel (`default-src 'none'; script-src 'self';
+  style-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'`) más
+  `nosniff`, `referrer-policy: no-referrer`, `permissions-policy` y `x-frame-options: DENY`,
+  aplicadas en el punto único que emite respuestas (`con_seguridad`). Para que la CSP fuera
+  estricta de verdad hubo que sacar los 22 `style=""` inline (ahora clases utilitarias en
+  `admin.css`) y desactivar por configuración declarativa (`<meta name="htmx-config">`) el
+  `<style>` de indicadores que htmx inyecta solo.
+- **Responsive real**: el rail en móvil no envolvía y sus links en fila forzaban el ancho de
+  toda la página (571 px en un viewport de 390). Ahora envuelve, hay breakpoint de 620 px, y
+  las tablas anchas se deslizan dentro de su tarjeta con barra de scroll visible (en dark una
+  sombra sobre casi-negro no se percibe: la pista es la barra misma).
+- **Gate nuevo**: `tests/panel-audit.mjs` — 10 páginas × 2 viewports (1440 y 390) con login
+  por formulario real; falla si hay status ≠ 200, desborde horizontal, desborde interno sin
+  scroll propio, error de consola (ahí aparecen las violaciones de CSP) o request fallido; y
+  deja capturas de escritorio y móvil. Requiere `PANEL_PASSWORD` por entorno: las credenciales
+  del lab no viven en el repo.
 
 ### V1 — Meta, versiones y compat (ADR-0018)
 

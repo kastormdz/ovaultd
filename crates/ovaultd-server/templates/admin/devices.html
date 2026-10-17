@@ -10,7 +10,7 @@
 {% if let Some(texto) = ok %}<div class="alerta bien">{{ texto }}</div>{% endif %}
 
 <section class="tarjeta">
-  <p class="ayuda" style="margin:0;padding:12px 15px">{{ t.dispositivos_ayuda }}</p>
+  <p class="ayuda ayuda-caja">{{ t.dispositivos_ayuda }}</p>
 
   {% if devices.len() == 0 %}
   <p class="empty">{{ t.dispositivos_sin }}</p>

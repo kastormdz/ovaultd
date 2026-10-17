@@ -2,7 +2,7 @@
 {% block titulo %}{{ t.reset_titulo }} — {{ t.marca }}{% endblock %}
 {% block contenido %}
 <section class="tarjeta estrecha">
-  <h1 style="margin-bottom:14px">{{ t.reset_titulo }}</h1>
+  <h1 class="titulo-form">{{ t.reset_titulo }}</h1>
 
   {% if !valido %}
   <div class="alerta error">
@@ -18,7 +18,7 @@
 
   {% else %}
   {% if let Some(texto) = error %}<div class="alerta error">{{ texto }}</div>{% endif %}
-  <p class="ayuda" style="margin:0 0 12px">{{ t.reset_para }} <strong>{{ email }}</strong>.</p>
+  <p class="ayuda sin-margen-abajo">{{ t.reset_para }} <strong>{{ email }}</strong>.</p>
   <form method="post" action="/reset" class="formulario">
     <input type="hidden" name="token" value="{{ token }}">
     <label>{{ t.mi_cuenta_password_nueva }}

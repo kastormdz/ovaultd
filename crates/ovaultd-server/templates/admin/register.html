@@ -2,7 +2,7 @@
 {% block titulo %}{{ t.register_titulo }} — {{ t.marca }}{% endblock %}
 {% block contenido %}
 <section class="tarjeta estrecha">
-  <h1 style="margin-bottom:14px">{{ t.register_titulo }}</h1>
+  <h1 class="titulo-form">{{ t.register_titulo }}</h1>
 
   {% if !abierto %}
   <div class="alerta error">
@@ -19,7 +19,7 @@
 
   {% else %}
   {% if let Some(texto) = error %}<div class="alerta error">{{ texto }}</div>{% endif %}
-  <p class="ayuda" style="margin:0 0 12px">{{ t.register_ayuda }}</p>
+  <p class="ayuda sin-margen-abajo">{{ t.register_ayuda }}</p>
   <form method="post" action="/register" class="formulario">
     <label>{{ t.login_email }}
       <input type="email" name="email" required autocomplete="username">

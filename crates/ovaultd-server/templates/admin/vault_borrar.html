@@ -3,7 +3,7 @@
 {% block contenido %}
 <section class="tarjeta estrecha">
   <h1>{{ t.vault_borrar_titulo }}</h1>
-  <p class="sub" style="margin:4px 0 12px">«{{ nombre }}» <span class="chip">#{{ vault_id }}</span></p>
+  <p class="sub resumen-borrar">«{{ nombre }}» <span class="chip">#{{ vault_id }}</span></p>
   {% if let Some(texto) = error %}<div class="alerta error">{{ texto }}</div>{% endif %}
 
   <div class="alerta error">

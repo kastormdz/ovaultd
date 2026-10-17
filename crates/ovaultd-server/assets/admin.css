@@ -302,11 +302,50 @@ input[type="checkbox"] { accent-color: var(--acento); width: 15px; height: 15px;
   background: linear-gradient(135deg, #4c9aff, #8a63d2);
 }
 
+/* ── utilidades (reemplazan los style="" inline: la CSP no permite inline) ── */
+.sep { color: var(--tx3); }
+.pad-caja { padding: 12px 15px; }
+.ayuda-caja { margin: 0; padding: 12px 15px; }
+.ayuda-tabla { margin: 0; padding: 0 15px 12px; }
+.ayuda-lados { margin: 0 15px 12px; }
+.pad-lados-abajo { padding: 0 15px 15px; }
+.pie-centrado { margin-top: 18px; text-align: center; }
+.sin-margen { margin: 0; }
+.sin-margen-abajo { margin: 0 0 12px; }
+.con-margen-arriba { margin-top: 10px; }
+.titulo-form { margin-bottom: 14px; }
+.resumen-borrar { margin: 4px 0 12px; }
+.stats.unido { gap: 1px; background: var(--linea); }
+.stat.unido { border: 0; border-radius: 0; }
+
+/* La tabla no encoge: en pantallas chicas su tarjeta se desliza por dentro. La pista
+   de que hay más a la derecha es la barra de scroll misma, siempre dibujada (en dark,
+   una sombra sobre casi-negro no se percibe) + la sombra del borde. */
+@media (max-width: 620px) {
+  .tarjeta {
+    overflow-x: auto;
+    scrollbar-width: thin;
+    scrollbar-color: var(--linea) var(--panel);
+    background:
+      linear-gradient(to right, var(--panel), rgba(15, 20, 27, 0)) left / 28px 100% no-repeat local,
+      linear-gradient(to left, var(--panel), rgba(15, 20, 27, 0)) right / 28px 100% no-repeat local,
+      radial-gradient(farthest-side at 0 50%, rgba(0, 0, 0, .85), rgba(0, 0, 0, 0)) left / 24px 100% no-repeat scroll,
+      radial-gradient(farthest-side at 100% 50%, rgba(0, 0, 0, .85), rgba(0, 0, 0, 0)) right / 24px 100% no-repeat scroll,
+      var(--panel);
+  }
+  .tarjeta::-webkit-scrollbar { height: 9px; }
+  .tarjeta::-webkit-scrollbar-track { background: var(--panel2); }
+  .tarjeta::-webkit-scrollbar-thumb {
+    background: var(--linea); border-radius: 5px; border: 2px solid var(--panel2);
+  }
+}
+
 /* ── responsive ───────────────────────────────────────────────────────── */
 @media (max-width: 980px) {
   .armazon { grid-template-columns: 1fr; }
   .rail {
-    position: static; height: auto; flex-direction: row; justify-content: center;
+    position: static; height: auto; flex-direction: row; justify-content: flex-start;
+    flex-wrap: wrap; /* sin esto, los links en fila fuerzan el ancho de TODA la página */
     padding: 6px; gap: 4px; border-right: 0; border-bottom: 1px solid var(--linea);
   }
   .rail .logo { margin: 0 8px 0 0; }
@@ -315,5 +354,21 @@ input[type="checkbox"] { accent-color: var(--acento); width: 15px; height: 15px;
   .hero .componentes { grid-template-columns: repeat(2, 1fr); }
   .dos, .dos-desigual { grid-template-columns: 1fr; }
   main { padding: 13px 13px 20px; }
-  .top { padding: 8px 13px; }
+  .top { padding: 8px 13px; flex-wrap: wrap; row-gap: 6px; }
+}
+
+@media (max-width: 620px) {
+  .rail a { padding: 6px 8px; gap: 4px; }
+  .rail a .ic { font-size: 15px; }
+  .top .migas { font-size: var(--t1); }
+  .chip { font-size: var(--t1); }
+  main { padding: 11px 10px 18px; }
+  .top { padding: 8px 10px; }
+  .stats { grid-template-columns: repeat(2, 1fr); }
+  .hero .componentes { grid-template-columns: 1fr; }
+  .hero .veredicto { font-size: 30px; }
+  .campos-linea { flex-wrap: wrap; }
+  .campos-linea > * { flex: 1 1 100%; }
+  .acciones { flex-wrap: wrap; }
+  .paginacion { flex-wrap: wrap; }
 }

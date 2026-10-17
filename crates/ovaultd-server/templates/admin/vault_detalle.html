@@ -25,12 +25,12 @@
 
   <section class="tarjeta">
     <h2>{{ t.vault_actividad }}</h2>
-    <div class="stats" style="gap:1px;background:var(--linea)">
-      <div class="stat" style="border:0;border-radius:0"><span class="numero">{{ notas }}</span><span class="rotulo">{{ t.kpi_notas }}</span></div>
-      <div class="stat" style="border:0;border-radius:0"><span class="numero">{{ revisiones }}</span><span class="rotulo">{{ t.kpi_revisiones }}</span></div>
-      <div class="stat" style="border:0;border-radius:0"><span class="numero">{{ batch_count }}</span><span class="rotulo">{{ t.kpi_lotes }}</span></div>
-      <div class="stat" style="border:0;border-radius:0"><span class="numero">{{ blob_count }}</span><span class="rotulo">{{ t.comp_fragmentos }}</span></div>
-      <div class="stat" style="border:0;border-radius:0"><span class="numero">{{ bytes }}</span><span class="rotulo">{{ t.kpi_almacenado }}</span></div>
+    <div class="stats unido">
+      <div class="stat unido"><span class="numero">{{ notas }}</span><span class="rotulo">{{ t.kpi_notas }}</span></div>
+      <div class="stat unido"><span class="numero">{{ revisiones }}</span><span class="rotulo">{{ t.kpi_revisiones }}</span></div>
+      <div class="stat unido"><span class="numero">{{ batch_count }}</span><span class="rotulo">{{ t.kpi_lotes }}</span></div>
+      <div class="stat unido"><span class="numero">{{ blob_count }}</span><span class="rotulo">{{ t.comp_fragmentos }}</span></div>
+      <div class="stat unido"><span class="numero">{{ bytes }}</span><span class="rotulo">{{ t.kpi_almacenado }}</span></div>
     </div>
   </section>
 </div>
@@ -67,8 +67,8 @@
 
 <section class="tarjeta">
   <h2>{{ t.vault_zona_riesgo }}</h2>
-  <p class="ayuda" style="margin:0 15px 12px">{{ t.vault_zona_riesgo_texto }}</p>
-  <div style="padding:0 15px 15px">
+  <p class="ayuda ayuda-lados">{{ t.vault_zona_riesgo_texto }}</p>
+  <div class="pad-lados-abajo">
     <a class="boton peligro" href="/admin/vaults/borrar?id={{ vault_id }}">{{ t.vault_borrar_boton }}</a>
   </div>
 </section>
