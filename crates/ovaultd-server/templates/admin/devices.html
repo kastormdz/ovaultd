@@ -1,0 +1,68 @@
+{% extends "admin/base.html" %}
+{% block titulo %}Devices — ovaultd{% endblock %}
+{% block nav %}<a class="boton fantasma" href="/admin">← Panel</a><a class="boton fantasma" href="/admin/cuentas">Cuentas</a>{% endblock %}
+{% block contenido %}
+<div class="cabecera-seccion">
+  <h1>Devices</h1>
+  <span class="chip">{{ email }}</span>
+</div>
+
+{% if let Some(texto) = error %}<div class="alerta error">{{ texto }}</div>{% endif %}
+{% if let Some(texto) = ok %}<div class="alerta bien">{{ texto }}</div>{% endif %}
+
+<section class="tarjeta">
+  <p class="ayuda">Cada device agrupa los tokens de los clientes (plugin, CLI). Revocar corta
+  TODOS sus tokens al instante: el cliente vuelve a loguear y obtiene un device nuevo.</p>
+
+  {% if devices.len() == 0 %}
+  <p>No hay devices todavía.</p>
+  {% else %}
+  <table class="tabla">
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>Cuenta</th>
+        <th>Device</th>
+        <th>Plataforma</th>
+        <th>Estado</th>
+        <th class="num">Tokens vivos</th>
+        <th>Creado</th>
+        <th>Última actividad</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for d in devices %}
+      <tr>
+        <td>{{ d.id }}</td>
+        <td>{{ d.cuenta }}</td>
+        <td>{{ d.nombre }}</td>
+        <td>{{ d.plataforma }}</td>
+        <td>
+          {% if d.revocado %}<span class="estado-malo">revocado</span>
+          {% else %}<span class="estado-bien">activo</span>{% endif %}
+        </td>
+        <td class="num">{{ d.tokens_vivos }}</td>
+        <td>{{ d.creado }}</td>
+        <td>{% if let Some(ts) = d.ultima_actividad %}{{ ts }}{% else %}—{% endif %}</td>
+        <td>
+          {% if !d.revocado %}
+          <form method="post" action="/admin/devices/revocar" class="en-linea">
+            <input type="hidden" name="csrf" value="{{ csrf }}">
+            <input type="hidden" name="id" value="{{ d.id }}">
+            <button class="boton mini peligro" type="submit">Revocar</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <div class="paginacion">
+    <span>{% if pagina > 1 %}<a class="boton mini" href="/admin/devices?pagina={{ pagina - 1 }}">← Anterior</a>{% endif %}</span>
+    <span class="ayuda">página {{ pagina }}</span>
+    <span>{% if hay_mas %}<a class="boton mini" href="/admin/devices?pagina={{ pagina + 1 }}">Siguiente →</a>{% endif %}</span>
+  </div>
+  {% endif %}
+</section>
+{% endblock %}

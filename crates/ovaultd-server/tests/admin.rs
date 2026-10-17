@@ -926,3 +926,198 @@ async fn register_respeta_el_toggle_del_admin() -> Result<()> {
 
     Ok(())
 }
+
+// ------------------------------------------------------------------ W2: vaults, devices y auditoría
+
+#[tokio::test]
+async fn vault_detalle_muestra_los_numeros_de_la_db() -> Result<()> {
+    let contexto = TestContext::new().await?;
+    hacer_admin(&contexto).await?;
+    let cookie = login(&contexto).await?;
+
+    let resp = contexto
+        .request(get_con_cookie(
+            &format!("/admin/vaults/detalle?id={}", contexto.vault_id),
+            &cookie,
+        )?)
+        .await?;
+    assert_eq!(resp.status(), StatusCode::OK);
+    let html = cuerpo(resp).await?;
+    assert!(html.contains("vault-de-integracion"), "nombre del vault");
+    assert!(html.contains("notas vivas"), "las stats del vault están");
+    // El link de borrado vive en el detalle.
+    assert!(html.contains(&format!("/admin/vaults/borrar?id={}", contexto.vault_id)));
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn vault_borrar_exige_el_nombre_y_purga() -> Result<()> {
+    let contexto = TestContext::new().await?;
+    hacer_admin(&contexto).await?;
+    let cookie = login(&contexto).await?;
+    let csrf = csrf_de_la_ultima_sesion(&contexto).await?;
+
+    // El form existe y muestra el nombre a escribir.
+    let resp = contexto
+        .request(get_con_cookie(
+            &format!("/admin/vaults/borrar?id={}", contexto.vault_id),
+            &cookie,
+        )?)
+        .await?;
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    // Nombre equivocado: rebotado, el vault sigue.
+    let resp = contexto
+        .request(post_form_con_cookie(
+            "/admin/vaults/borrar",
+            &format!("csrf={csrf}&id={}&confirm=nada", contexto.vault_id),
+            &cookie,
+        )?)
+        .await?;
+    assert_eq!(resp.status(), StatusCode::SEE_OTHER);
+    let destino = resp.headers().get(header::LOCATION).unwrap().to_str()?;
+    assert!(destino.contains("error"), "rebote con error: {destino}");
+
+    // Nombre exacto: purgado de verdad.
+    let resp = contexto
+        .request(post_form_con_cookie(
+            "/admin/vaults/borrar",
+            &format!(
+                "csrf={csrf}&id={}&confirm=vault-de-integracion",
+                contexto.vault_id
+            ),
+            &cookie,
+        )?)
+        .await?;
+    assert_eq!(resp.status(), StatusCode::SEE_OTHER);
+    let destino = resp.headers().get(header::LOCATION).unwrap().to_str()?;
+    assert!(destino.starts_with("/admin/vaults?ok="), "éxito: {destino}");
+
+    let vaults: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM vaults WHERE id = ?")
+        .bind(contexto.vault_id)
+        .fetch_one(&contexto.pool)
+        .await?;
+    assert_eq!(vaults, 0);
+    let auditados: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM audit_log WHERE action = 'vault_delete'")
+            .fetch_one(&contexto.pool)
+            .await?;
+    assert_eq!(auditados, 1);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn devices_revocar_mata_el_token_y_queda_auditado() -> Result<()> {
+    let contexto = TestContext::new().await?;
+    hacer_admin(&contexto).await?;
+    let cookie = login(&contexto).await?;
+    let csrf = csrf_de_la_ultima_sesion(&contexto).await?;
+
+    // Con el token del contexto, la API contesta.
+    let resp = contexto
+        .request(
+            Request::builder()
+                .method(Method::GET)
+                .uri("/api/v1/vaults")
+                .header(header::AUTHORIZATION, format!("Bearer {}", contexto.token))
+                .body(Body::empty())?,
+        )
+        .await?;
+    assert_eq!(resp.status(), StatusCode::OK, "el token vivo entra");
+
+    // La lista de devices lo muestra activo.
+    let resp = contexto
+        .request(get_con_cookie("/admin/devices", &cookie)?)
+        .await?;
+    assert_eq!(resp.status(), StatusCode::OK);
+    let html = cuerpo(resp).await?;
+    assert!(html.contains("test-device"));
+
+    // Revocar desde el panel.
+    let resp = contexto
+        .request(post_form_con_cookie(
+            "/admin/devices/revocar",
+            &format!("csrf={csrf}&id={}", contexto.device_id),
+            &cookie,
+        )?)
+        .await?;
+    assert_eq!(resp.status(), StatusCode::SEE_OTHER);
+
+    // El MISMO token ya no entra…
+    let resp = contexto
+        .request(
+            Request::builder()
+                .method(Method::GET)
+                .uri("/api/v1/vaults")
+                .header(header::AUTHORIZATION, format!("Bearer {}", contexto.token))
+                .body(Body::empty())?,
+        )
+        .await?;
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED, "token revocado");
+
+    // …y queda auditado + revocado en la DB.
+    let revocado: Option<String> = sqlx::query_scalar("SELECT revoked_at FROM devices WHERE id = ?")
+        .bind(contexto.device_id)
+        .fetch_one(&contexto.pool)
+        .await?;
+    assert!(revocado.is_some());
+    let auditados: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM audit_log WHERE action = 'device_revocado'")
+            .fetch_one(&contexto.pool)
+            .await?;
+    assert_eq!(auditados, 1);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn auditoria_lista_y_filtra() -> Result<()> {
+    let contexto = TestContext::new().await?;
+    hacer_admin(&contexto).await?;
+    let cookie = login(&contexto).await?;
+
+    // La bitácora muestra el login recién hecho.
+    let resp = contexto
+        .request(get_con_cookie("/admin/auditoria", &cookie)?)
+        .await?;
+    assert_eq!(resp.status(), StatusCode::OK);
+    let html = cuerpo(resp).await?;
+    assert!(html.contains("login_ok"), "el login queda auditado");
+
+    // Filtro por subcadena.
+    let resp = contexto
+        .request(get_con_cookie("/admin/auditoria?q=login_ok", &cookie)?)
+        .await?;
+    assert_eq!(resp.status(), StatusCode::OK);
+    let html = cuerpo(resp).await?;
+    assert!(html.contains("login_ok"));
+
+    // Filtro que no matchea: cero eventos.
+    let resp = contexto
+        .request(get_con_cookie("/admin/auditoria?q=xyz_inexistente", &cookie)?)
+        .await?;
+    let html = cuerpo(resp).await?;
+    assert!(html.contains("0 evento"), "sin coincidencias: {html:.120}");
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn las_paginas_w2_son_solo_para_admins() -> Result<()> {
+    let contexto = TestContext::new().await?;
+    let cookie = login(&contexto).await?;
+
+    for uri in [
+        "/admin/devices".to_owned(),
+        "/admin/auditoria".to_owned(),
+        format!("/admin/vaults/detalle?id={}", contexto.vault_id),
+        format!("/admin/vaults/borrar?id={}", contexto.vault_id),
+    ] {
+        let resp = contexto.request(get_con_cookie(&uri, &cookie)?).await?;
+        assert_eq!(resp.status(), StatusCode::FORBIDDEN, "user en {uri}");
+    }
+
+    Ok(())
+}

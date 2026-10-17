@@ -608,6 +608,7 @@ fn decode_bytes(value: &Value, field: &str) -> Result<Vec<u8>> {
 async fn crear_vault(
     State(state): State<EstadoServidor>,
     autenticado: Autenticado,
+    headers: HeaderMap,
     Json(request): Json<CreateVaultRequest>,
 ) -> Result<axum::response::Response> {
     let salt = decode_bytes(&request.salt, "salt")?;
@@ -645,7 +646,7 @@ async fn crear_vault(
          RETURNING id",
     )
     .bind(autenticado.account_id)
-    .bind(request.name)
+    .bind(&request.name)
     .bind(salt)
     .bind(request.kdf_params.to_string())
     .bind(wrapped_key_pw)
@@ -669,6 +670,16 @@ async fn crear_vault(
         )
             .into_response());
     };
+
+    // El alta queda auditada (el panel la muestra en `/admin/auditoria`).
+    crate::admin::sesiones::auditar(
+        &state.pool,
+        Some(autenticado.account_id),
+        "vault_created",
+        Some(&format!("#{id} «{}»", request.name)),
+        crate::admin::panel::ip_del_cliente(&headers).as_deref(),
+    )
+    .await;
 
     Ok((
         StatusCode::CREATED,

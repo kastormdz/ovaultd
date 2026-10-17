@@ -1,0 +1,75 @@
+{% extends "admin/base.html" %}
+{% block titulo %}Vault #{{ vault_id }} — ovaultd{% endblock %}
+{% block nav %}<a class="boton fantasma" href="/admin">← Panel</a><a class="boton fantasma" href="/admin/vaults">Vaults</a>{% endblock %}
+{% block contenido %}
+<div class="cabecera-seccion">
+  <h1>«{{ nombre }}» <span class="chip">#{{ vault_id }}</span></h1>
+  <span class="chip">{{ email }}</span>
+</div>
+
+<section class="tarjeta">
+  <h2>Datos</h2>
+  <table class="tabla">
+    <tbody>
+      <tr><td>Dueño</td><td>{{ dueno }}</td></tr>
+      <tr><td>Creado</td><td>{{ creado }}</td></tr>
+      <tr><td>Versión de cifrado</td><td>sync{{ enc_version }}</td></tr>
+      <tr><td>Revisión actual (head)</td><td>{{ head_rev }}</td></tr>
+      <tr><td>Epoch (rotación de llave)</td><td>{{ epoch }}</td></tr>
+      <tr><td>Cuota</td><td>{{ cuota }}</td></tr>
+      <tr><td>Tamaño máximo por archivo</td><td>{{ max_file }}</td></tr>
+    </tbody>
+  </table>
+  <p class="ayuda">El server es ciego: no conoce nombres de nota ni contenido. Todo esto es lo
+  que SÍ puede contar (conteos, bytes cifrados, revisiones).</p>
+</section>
+
+<section class="tarjeta">
+  <h2>Actividad</h2>
+  <div class="grilla">
+    <div class="tarjeta stat"><span class="numero">{{ notas }}</span><span class="rotulo">notas vivas</span></div>
+    <div class="tarjeta stat"><span class="numero">{{ revisiones }}</span><span class="rotulo">revisiones</span></div>
+    <div class="tarjeta stat"><span class="numero">{{ batches }}</span><span class="rotulo">batches</span></div>
+    <div class="tarjeta stat"><span class="numero">{{ blob_count }}</span><span class="rotulo">blobs</span></div>
+    <div class="tarjeta stat"><span class="numero">{{ bytes }}</span><span class="rotulo">almacenado</span></div>
+  </div>
+</section>
+
+{% if miembros.len() > 0 %}
+<section class="tarjeta">
+  <h2>Miembros</h2>
+  <table class="tabla">
+    <thead><tr><th>Cuenta</th><th>Rol</th><th>Desde</th></tr></thead>
+    <tbody>
+      {% for m in miembros %}
+      <tr><td>{{ m.email }}</td><td>{{ m.role }}</td><td>{{ m.desde }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endif %}
+
+<section class="tarjeta">
+  <h2>Últimos batches</h2>
+  {% if ultimos.len() == 0 %}
+  <p>Todavía no hay actividad.</p>
+  {% else %}
+  <table class="tabla">
+    <thead><tr><th class="num">Rev</th><th>Device</th><th class="num">Ops</th><th>Cuándo</th></tr></thead>
+    <tbody>
+      {% for b in ultimos %}
+      <tr><td class="num">{{ b.rev }}</td><td>{{ b.device }}</td><td class="num">{{ b.ops }}</td><td>{{ b.ts }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</section>
+
+<section class="tarjeta">
+  <h2>Zona de riesgo</h2>
+  <p class="ayuda">Borrar el vault elimina sus datos cifrados del server (cascada + blobs del CAS).
+  Los dispositivos conservan sus copias locales, pero sin la password del vault no se pueden
+  re-subir.</p>
+  <a class="boton peligro" href="/admin/vaults/borrar?id={{ vault_id }}">Borrar este vault…</a>
+</section>
+{% endblock %}

@@ -1,0 +1,28 @@
+{% extends "admin/base.html" %}
+{% block titulo %}Borrar vault — ovaultd{% endblock %}
+{% block nav %}<a class="boton fantasma" href="/admin/vaults">← Vaults</a>{% endblock %}
+{% block contenido %}
+<section class="tarjeta estrecha">
+  <h1>Borrar «{{ nombre }}» <span class="chip">#{{ vault_id }}</span></h1>
+  {% if let Some(texto) = error %}<div class="alerta error">{{ texto }}</div>{% endif %}
+
+  <div class="alerta error">
+    <p>Se borran del server <strong>{{ notas }} nota(s) cifrada(s)</strong> y
+    <strong>{{ revisiones }} revisión(es)</strong> ({{ bytes }} de blobs) para siempre.
+    Es <strong>irreversible</strong>.</p>
+    <p>Es la misma operación que la API (<code>DELETE /api/v1/vaults/{{ vault_id }}</code>):
+    cascada completa + barrido del almacén. Queda auditado.</p>
+  </div>
+
+  <p class="ayuda">Dueño: <code>{{ dueno }}</code></p>
+
+  <form method="post" action="/admin/vaults/borrar" class="formulario">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <input type="hidden" name="id" value="{{ vault_id }}">
+    <label>Escribí el nombre exacto del vault (<code>{{ nombre }}</code>) para confirmar
+      <input type="text" name="confirm" required autocomplete="off">
+    </label>
+    <button class="boton peligro" type="submit">Borrar definitivamente</button>
+  </form>
+</section>
+{% endblock %}

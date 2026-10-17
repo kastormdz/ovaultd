@@ -19,28 +19,13 @@ use axum::{
 };
 use serde::Deserialize;
 
-use crate::admin::{panel, sesiones};
+use super::{flash, panel, sesiones, SesionAdmin};
 use crate::auth;
 use crate::routes::{purgar_vault, EstadoServidor};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 const POR_PAGINA: i64 = 25;
 const RESET_VIGENCIA_HORAS: i64 = 24;
-
-/// Percent-encoding mínimo para mandar un mensaje humano en un querystring
-/// (los acentos y las comillas rompen `HeaderValue`).
-fn flash(mensaje: &str) -> String {
-    let mut salida = String::with_capacity(mensaje.len() * 3);
-    for byte in mensaje.bytes() {
-        match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'.' | b'-' | b'_' | b'~' => {
-                salida.push(byte as char);
-            }
-            _ => salida.push_str(&format!("%{byte:02X}")),
-        }
-    }
-    salida
-}
 
 pub fn rutas() -> Router<EstadoServidor> {
     Router::new()
@@ -54,40 +39,6 @@ pub fn rutas() -> Router<EstadoServidor> {
         .route("/admin/ajustes", get(ajustes_form).post(ajustes_post))
         .route("/register", get(register_form).post(register_post))
         .route("/reset", get(reset_form).post(reset_post))
-}
-
-// ------------------------------------------------------------------ extractor admin
-
-/// Sesión válida con rol `admin`. Sin rol: página 403 (no redirect).
-pub struct SesionAdmin(pub sesiones::SesionActiva);
-
-impl axum::extract::FromRequestParts<EstadoServidor> for SesionAdmin {
-    type Rejection = Response;
-
-    async fn from_request_parts(
-        parts: &mut axum::http::request::Parts,
-        estado: &EstadoServidor,
-    ) -> std::result::Result<Self, Self::Rejection> {
-        let sesion = panel::Sesion::from_request_parts(parts, estado)
-            .await
-            .map_err(IntoResponse::into_response)?;
-
-        if sesion.0.role != "admin" {
-            let pagina = panel::render(
-                || {
-                    PlantillaSinPermiso {
-                        version: VERSION.to_owned(),
-                        email: sesion.0.email.clone(),
-                    }
-                    .render()
-                },
-                "sin_permiso",
-            );
-            return Err((StatusCode::FORBIDDEN, pagina).into_response());
-        }
-
-        Ok(SesionAdmin(sesion.0))
-    }
 }
 
 // ------------------------------------------------------------------ plantillas
@@ -165,13 +116,6 @@ struct PlantillaReset {
     error: Option<String>,
     hecho: bool,
     valido: bool,
-}
-
-#[derive(Template)]
-#[template(path = "admin/sin_permiso.html")]
-struct PlantillaSinPermiso {
-    version: String,
-    email: String,
 }
 
 // ------------------------------------------------------------------ lista y creación

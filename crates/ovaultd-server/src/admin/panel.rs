@@ -34,6 +34,9 @@ pub fn rutas() -> Router<EstadoServidor> {
         .route("/admin/logout", post(logout))
         .route("/admin/mi-cuenta", get(mi_cuenta_form).post(mi_cuenta_post))
         .merge(super::cuentas::rutas())
+        .merge(super::vaults::rutas())
+        .merge(super::devices::rutas())
+        .merge(super::auditoria::rutas())
         .route("/admin/assets/admin.css", get(asset_css))
         .route("/admin/assets/htmx.min.js", get(asset_htmx))
 }
@@ -456,7 +459,7 @@ async fn vaults(State(estado): State<EstadoServidor>, Sesion(sesion): Sesion) ->
 }
 
 /// Tamaño legible para humanos (los bytes del CAS: ciphertext — el server no ve más).
-fn formato_bytes(bytes: i64) -> String {
+pub(crate) fn formato_bytes(bytes: i64) -> String {
     const UNIDADES: [&str; 4] = ["B", "KB", "MB", "GB"];
     let mut valor = bytes as f64;
     let mut unidad = 0;

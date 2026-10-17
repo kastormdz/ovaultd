@@ -24,6 +24,7 @@
         <th class="num">Revisiones</th>
         <th class="num">Espacio</th>
         <th>Última revisión</th>
+        <th></th>
       </tr>
     </thead>
     <tbody>
@@ -35,6 +36,12 @@
         <td class="num">{{ v.revisiones }}</td>
         <td class="num">{{ v.espacio }}</td>
         <td>{% if let Some(ts) = v.ultima_revision %}{{ ts }}{% else %}—{% endif %}</td>
+        <td>
+          <div class="acciones">
+            <a class="boton mini" href="/admin/vaults/detalle?id={{ v.id }}">Detalle</a>
+            <a class="boton mini peligro" href="/admin/vaults/borrar?id={{ v.id }}">Borrar…</a>
+          </div>
+        </td>
       </tr>
       {% endfor %}
     </tbody>

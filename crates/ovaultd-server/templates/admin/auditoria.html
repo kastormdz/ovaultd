@@ -1,0 +1,48 @@
+{% extends "admin/base.html" %}
+{% block titulo %}Auditoría — ovaultd{% endblock %}
+{% block nav %}<a class="boton fantasma" href="/admin">← Panel</a><a class="boton fantasma" href="/admin/devices">Devices</a>{% endblock %}
+{% block contenido %}
+<div class="cabecera-seccion">
+  <h1>Auditoría</h1>
+  <span class="chip">{{ email }}</span>
+</div>
+
+<section class="tarjeta">
+  <form method="get" action="/admin/auditoria" class="formulario">
+    <div class="campos-linea">
+      <label>Filtrar (acción o detalle)
+        <input type="text" name="q" value="{{ q }}" autocomplete="off">
+      </label>
+      <button class="boton primario" type="submit">Filtrar</button>
+      {% if q != "" %}<a class="boton fantasma" href="/admin/auditoria">Limpiar</a>{% endif %}
+    </div>
+  </form>
+  <p class="ayuda">{{ total }} evento(s){% if q != "" %} con «{{ q }}»{% endif %}.</p>
+
+  {% if eventos.len() == 0 %}
+  <p>No hay eventos que mostrar.</p>
+  {% else %}
+  <table class="tabla">
+    <thead>
+      <tr><th>Cuándo</th><th>Actor</th><th>Acción</th><th>Detalle</th><th>IP</th></tr>
+    </thead>
+    <tbody>
+      {% for e in eventos %}
+      <tr>
+        <td>{{ e.ts }}</td>
+        <td>{{ e.actor }}</td>
+        <td><code>{{ e.action }}</code></td>
+        <td>{% if let Some(d) = e.detail %}{{ d }}{% else %}—{% endif %}</td>
+        <td>{% if let Some(ip) = e.ip %}{{ ip }}{% else %}—{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <div class="paginacion">
+    <span>{% if pagina > 1 %}<a class="boton mini" href="/admin/auditoria?pagina={{ pagina - 1 }}{% if q != "" %}&q={{ q }}{% endif %}">← Anterior</a>{% endif %}</span>
+    <span class="ayuda">página {{ pagina }}</span>
+    <span>{% if hay_mas %}<a class="boton mini" href="/admin/auditoria?pagina={{ pagina + 1 }}{% if q != "" %}&q={{ q }}{% endif %}">Siguiente →</a>{% endif %}</span>
+  </div>
+  {% endif %}
+</section>
+{% endblock %}

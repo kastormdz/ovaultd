@@ -1,8 +1,8 @@
 # Plan — Panel web de administración, versionado y borde
 
-- Estado: **en ejecución** — **PD ✅, W0 ✅ y W1 ✅** (2026-10-17); las 4 decisiones se confirmaron
-  tal cual (stack server-rendered, registro cerrado + toggle, borrado con bloques, español).
-  Sigue: **W2**.
+- Estado: **en ejecución** — **PD ✅, W0 ✅, W1 ✅ y W2 ✅** (2026-10-17); las 4 decisiones se
+  confirmaron tal cual (stack server-rendered, registro cerrado + toggle, borrado con bloques,
+  español). Sigue: **W3**.
 - Origen: pedido directo del operador (2026-10-17): el admin tiene que ser **web, moderno y
   PRO** (cuentas, passwords, stats, registro on/off); **sin proxy en el docker** (el borde lo
   pone NPM Plus, que ya opera); **versiones explícitas** server ↔ plugin y **releases en
@@ -72,13 +72,26 @@
   auditoría completa en la DB.
 - Commit `964bd29` (pusheado).
 
-### W2 — Vaults, devices y auditoría
+### W2 — Vaults, devices y auditoría ✅
 
-- `/admin/vaults` con stats reales (notas, revisiones, blobs/bytes, última actividad) y
-  detalle; borrar vault con confirmación fuerte. `/admin/devices` global + revocar +
-  `last_seen`. `/admin/auditoria` paginada.
-- **Gate**: tests + E2E contra una DB con vault real (el vault del container-e2e): los
-  números del panel iguales a los de la DB.
+- ✅ `/admin/vaults`: cada fila suma [Detalle] [Borrar…]. El detalle muestra TODO lo que el
+  server puede ver (dueño, `enc_version`, `head_rev`, epoch, cuota, notas vivas, revisiones,
+  batches, blobs, bytes, miembros y los últimos 10 batches con su device); el borrado es la
+  MISMA operación que la API (`purgar_vault`: cascada + barrido del CAS) con confirmación por
+  NOMBRE EXACTO y auditoría.
+- ✅ `/admin/devices` (global): cuenta, nombre, plataforma, estado, tokens vivos, última
+  actividad (`COALESCE(last_seen, último batch)`) y revocación con un click
+  (`auth::revocar_device`: marca el device y TODOS sus tokens; el token muerto deja de andar
+  en el mismo request).
+- ✅ `/admin/auditoria`: paginada (50/pág) con filtro por subcadena sobre acción o detalle.
+- ✅ Las altas de vault ahora también se auditan (`vault_created` en `POST /api/v1/vaults`).
+- ✅ Gate: workspace **187 passed / 0 failed** (5 tests nuevos en `tests/admin.rs`: detalle
+  con los números de la DB, borrado por nombre + purge + audit, revocar mata el token de
+  verdad, lista + filtro de auditoría, 403 sin rol en las 4 páginas nuevas) + E2E vivo contra
+  el lab (`:8894`): vault real creado y sincronizado por CLI (3 notas), números del panel ==
+  DB, borrado desde la web (rebote con nombre mal y purga con el exacto), revocación de
+  device en vivo y `vault_created` visible en la bitácora.
+- Commit `pendiente` (pusheado).
 
 ### W3 — Dashboard y pulido PRO
 
