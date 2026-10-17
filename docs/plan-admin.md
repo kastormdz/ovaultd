@@ -91,7 +91,7 @@
   el lab (`:8894`): vault real creado y sincronizado por CLI (3 notas), números del panel ==
   DB, borrado desde la web (rebote con nombre mal y purga con el exacto), revocación de
   device en vivo y `vault_created` visible en la bitácora.
-- Commit `pendiente` (pusheado).
+- Commit `a98962e` (pusheado).
 
 ### W3 — Dashboard y pulido PRO
 
