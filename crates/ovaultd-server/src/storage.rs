@@ -18,6 +18,11 @@ impl CasStore {
         Ok(Self { root })
     }
 
+    /// Raíz del CAS (para backups y verificaciones externas).
+    pub fn raiz(&self) -> &Path {
+        &self.root
+    }
+
     pub async fn publish(&self, hash: &BlobId, bytes: &[u8]) -> Result<()> {
         let root = self.root.clone();
         let hash = *hash;
@@ -208,8 +213,14 @@ fn publish_sync(root: &Path, hash: &BlobId, bytes: &[u8]) -> Result<()> {
             ));
         }
 
+        // Failpoint de test (no-op en release): crash después de escribir el temporal.
+        crate::failpoints::failpoint("cas.temp");
+
         file.sync_all()?;
         drop(file);
+
+        // Failpoint de test: crash después del fsync, antes de publicar.
+        crate::failpoints::failpoint("cas.fsync");
 
         match fs::rename(&temporary, &destination) {
             Ok(()) => {}
@@ -233,6 +244,11 @@ fn publish_sync(root: &Path, hash: &BlobId, bytes: &[u8]) -> Result<()> {
         }
 
         File::open(directory)?.sync_all()?;
+
+        // Failpoint de test: crash después de publicar en el CAS (rename + fsync del
+        // directorio), antes de que el llamador registre el blob en el índice.
+        crate::failpoints::failpoint("cas.publish");
+
         Ok(())
     })();
 

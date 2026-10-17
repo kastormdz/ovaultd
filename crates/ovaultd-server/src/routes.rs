@@ -747,6 +747,7 @@ async fn put_blob(
         // Idempotente, y además cura: si el CAS tiene los bytes pero falta la fila del índice
         // (crash entre publish y registro), re-subir el mismo blob la deja consistente.
         crate::storage::registrar_blob(&state.pool, vault_id, &blob_id, size).await?;
+        crate::failpoints::failpoint("ack.put_blob");
         return Ok(StatusCode::OK);
     }
 
@@ -755,6 +756,9 @@ async fn put_blob(
     // El índice primero que la referencia: `commit_batch` rechaza (`not_found`) un batch que
     // apunte a un blob sin fila en `blobs`.
     crate::storage::registrar_blob(&state.pool, vault_id, &blob_id, size).await?;
+
+    // Failpoint de test: crash después del registro y antes del ACK HTTP.
+    crate::failpoints::failpoint("ack.put_blob");
 
     Ok(StatusCode::CREATED)
 }

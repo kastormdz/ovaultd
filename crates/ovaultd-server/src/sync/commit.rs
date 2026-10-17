@@ -622,6 +622,10 @@ pub async fn commit_batch(
 
     tx.commit().await?;
 
+    // Failpoint de test: crash DESPUÉS del commit SQL y antes de responder el ack. La
+    // revisión quedó confirmada; el reintento del mismo `operation_id` debe ser idempotente.
+    crate::failpoints::failpoint("sql.commit");
+
     Ok(CommitOutcome {
         rev,
         idempotente: false,

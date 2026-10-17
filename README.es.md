@@ -15,7 +15,7 @@ Etapa temprana, pero las partes riesgosas están hechas y probadas.
 | 0.1 — spike cripto (`sync1`) | histórico, superado |
 | 0.2 — gateway cripto `sync2` + plan de construcción | **cerrada** — `INTEROP sync2 OK` (byte a byte Rust ⇄ JS) |
 | 1 — server MVP + CLI | funcionalmente completa (falta imagen arm64) |
-| 2 — núcleo durable offline (estado, outbox, journal) | en curso — estado, outbox save-first, journal y un runtime Chromium real que baja y aplica las deltas firmadas |
+| 2 — núcleo durable offline (estado, outbox, journal) | en curso — estado, outbox save-first, journal, un runtime Chromium real que baja y aplica las deltas firmadas, y backup/restore verificados con pruebas de crash |
 | 3 — plugin de Obsidian | siguiente, en su propio repo |
 | 4 — E2E completo, rotación de claves, recovery | planificada |
 | 5 — conflictos, historial, restore, preview | planificada |
@@ -57,8 +57,9 @@ El server persiste blobs cifrados, registros de revisión firmados y metadatos d
 | `packages/cli` | `login`, `create-remote`, `setup`, `list-remote`, `status` + el runtime durable en Chromium |
 | `spikes/crypto-interop` | el spike Rust ⇄ JS y la maquinaria de congelamiento de vectores |
 | `tests/` | specs de browser, fixtures congelados, scripts de smoke / canaria / E2E de contenedor |
-| `docs/` | specs de protocolo y cripto, ADRs, guía de despliegue, plan de construcción |
-| `xtask/` | tareas del repo (`cargo xtask protocol-check`) |
+| `scripts/` | herramientas de operación: `backup.sh`, `restore.sh`, el escáner de fugas que corre antes de cada push |
+| `docs/` | especificaciones de protocolo y cripto, ADRs, guía de deploy, runbook, plan de construcción |
+| `xtask/` | tareas del repo (`cargo xtask protocol-check`, `cargo xtask backup-restore`) |
 
 ## Modelo de seguridad
 

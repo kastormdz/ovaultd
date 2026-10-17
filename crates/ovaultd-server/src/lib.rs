@@ -11,6 +11,7 @@ pub mod config;
 pub mod db;
 pub mod delta;
 pub mod error;
+pub mod failpoints;
 pub mod routes;
 pub mod storage;
 pub mod sync;
