@@ -12,5 +12,7 @@ export * from './apply.js';
 export * from './apply-runner.js';
 export * from './file-port.js';
 export * from './retry.js';
+export * from './scan.js';
+export * from './push.js';
 export * from './SyncConnection.js';
 export * from './reconcile.js';

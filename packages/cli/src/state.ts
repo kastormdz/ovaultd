@@ -99,4 +99,12 @@ export const listVaultStates = (): VaultLocalState[] => {
     .map((nombre) => JSON.parse(readFileSync(join(dir, nombre), 'utf8')) as VaultLocalState);
 };
 
+/** Borra el estado local de un vault (`unlink`). Devuelve si existía. */
+export const removeVaultState = (servidor: string, vault: number): boolean => {
+  const ruta = vaultPath(servidor, vault);
+  if (!existsSync(ruta)) return false;
+  rmSync(ruta);
+  return true;
+};
+
 export type { VaultSummary };

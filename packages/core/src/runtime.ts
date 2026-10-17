@@ -21,7 +21,9 @@ import { applyRevision, recoverApplies, type ApplyRevision } from './apply-runne
 import { createIntent, type ApplyCandidate } from './apply.js';
 import { HttpFileSystemPort } from './file-port.js';
 import { prepareOutboxEntry, type EnqueueRequest } from './outbox.js';
+import { pushOnce } from './push.js';
 import { pullOnce } from './reconcile.js';
+import { diffLocal, escanearVault } from './scan.js';
 import { SyncConnection } from './SyncConnection.js';
 import {
   SCHEMA_VERSION,
@@ -63,6 +65,9 @@ const exigirApply = (): { store: StateStore; keys: SubKeys } => {
 
 /** Conexión de sync abierta (sync.open), reutilizada por sync.pullOnce. */
 let syncConn: SyncConnection | null = null;
+
+/** Material de firma del vault para el push (`sync.open` lo recibe del estado local). */
+let syncVaultMeta: { vaultUuid: Uint8Array; epoch: number } | null = null;
 
 /** Serializa una entrada de outbox para el wire JSON (los Blob no viajan por el puente). */
 const serializarOutbox = (entry: OutboxEntry) => ({
@@ -257,6 +262,10 @@ const handlers: Record<string, Handler> = {
       syncConn.close();
       syncConn = null;
     }
+    const vaultUuid = typeof params.vaultUuid === 'string' ? b64Decode(params.vaultUuid) : null;
+    if (!vaultUuid || vaultUuid.length !== 16) {
+      throw new Error('sync.open: falta vaultUuid (16 B en base64, el del material del vault)');
+    }
     const conn = new SyncConnection({
       baseUrl: String(params.baseUrl),
       token: String(params.token),
@@ -266,6 +275,7 @@ const handlers: Record<string, Handler> = {
     });
     const { headRev } = await conn.open({ since: Number(params.since ?? 0) });
     syncConn = conn;
+    syncVaultMeta = { vaultUuid, epoch: Number(params.epoch ?? 1) };
     return { headRev };
   },
 
@@ -279,9 +289,42 @@ const handlers: Record<string, Handler> = {
     });
   },
 
+  /** Escaneo + hash-diff sin tocar la red (lo que muestra `list-local`). */
+  'sync.scan': async () => {
+    const { store, keys } = exigirApply();
+    const port = new HttpFileSystemPort(globalThis.location.origin);
+    const entradas = await escanearVault(port, keys);
+    const diff = await diffLocal(store, entradas);
+    return {
+      diff,
+      entradas: entradas.map((entrada) => ({
+        path: entrada.path,
+        pathId: entrada.pathId,
+        size: entrada.size,
+        contentHash: entrada.contentHash,
+      })),
+    };
+  },
+
+  'sync.pushOnce': async () => {
+    if (!syncConn || !syncVaultMeta) {
+      throw new Error('sync: no hay conexión abierta (sync.open primero)');
+    }
+    const { store, keys } = exigirApply();
+    return pushOnce({
+      store,
+      port: new HttpFileSystemPort(globalThis.location.origin),
+      keys,
+      conn: syncConn,
+      vaultUuid: syncVaultMeta.vaultUuid,
+      epoch: syncVaultMeta.epoch,
+    });
+  },
+
   'sync.close': () => {
     syncConn?.close();
     syncConn = null;
+    syncVaultMeta = null;
     return { closed: true };
   },
 };

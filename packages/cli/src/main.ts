@@ -13,6 +13,7 @@ import { resolve } from 'node:path';
 
 import { Command } from 'commander';
 
+import { backoffMs } from '@ovaultd/core';
 import {
   KDF_DEFAULTS,
   deriveKek,
@@ -38,12 +39,14 @@ import {
 
 import { ApiError, OvaultdClient, normalizeServer } from './api.js';
 import { resolvePassword } from './credentials.js';
+import { abrirVaultLocal, purgarRuntimeDir, runtimeDirDe } from './local-runtime.js';
 import {
   clearSession,
   configDir,
   listVaultStates,
   readSession,
   readVaultState,
+  removeVaultState,
   saveSession,
   saveVaultState,
   vaultPath,
@@ -308,6 +311,232 @@ programa
     if (locales.length > 0) {
       console.log(`vaults con estado local: ${locales.length}`);
     }
+  });
+
+// ----------------------------------------------------------------------- sync
+
+const dormir = (ms: number): Promise<void> => new Promise((resolver) => setTimeout(resolver, ms));
+const hora = (): string => new Date().toTimeString().slice(0, 8);
+
+programa
+  .command('sync [vault]')
+  .description('una pasada (o --continuous): sube los cambios locales y baja los remotos')
+  .option('--continuous', 'sigue corriendo: intervalos + backoff con reconexión')
+  .option('--interval <segundos>', 'segundos entre pasadas en --continuous', '5')
+  .option('--password-stdin', 'lee la password de stdin (para scripts)')
+  .action(
+    async (
+      vaultTexto: string | undefined,
+      opciones: { continuous?: boolean; interval: string; passwordStdin?: boolean },
+    ) => {
+      const abierto = await abrirVaultLocal(vaultTexto, opciones);
+      try {
+        // Recuperación al abrir: resuelve lo que un crash anterior dejó a medias.
+        const recuperado = (await abierto.runtime.call('apply.recover')) as {
+          completed: number;
+          cleaned: number;
+          blocked: number;
+        };
+        if (recuperado.completed + recuperado.cleaned + recuperado.blocked > 0) {
+          console.log(
+            `recuperación al abrir: ${recuperado.completed} completadas, ${recuperado.cleaned} limpiadas, ${recuperado.blocked} bloqueadas`,
+          );
+        }
+
+        const conectar = async (): Promise<void> => {
+          const checkpoint = (await abierto.runtime.call('store.checkpoint.read')) as {
+            since: number;
+          } | null;
+          await abierto.runtime.call('sync.open', {
+            baseUrl: abierto.sesion.server,
+            token: abierto.token,
+            vault: abierto.vault.vault,
+            device: abierto.sesion.device_id,
+            since: checkpoint?.since ?? 0,
+            vaultUuid: abierto.vault.vault_id,
+            epoch: abierto.vault.epoch,
+          });
+        };
+
+        const pasada = async (): Promise<void> => {
+          // Orden del plan (§4.2): PULL primero — la base queda al día y el push que
+          // sigue rebasea con el head actual (una operación que quedó pendiente de una
+          // corrida anterior se firma/commitea contra la base NUEVA, y si su contenido
+          // ya no aplica el server la trata como conflicto real). Lo local vive en disco:
+          // el guard de tercera versión impide que el pull lo pise (`blocked`).
+          const bajado = (await abierto.runtime.call('sync.pullOnce')) as {
+            status: string;
+            applied: number;
+            blocked?: { rev: number; reason?: string };
+            resync?: { since: number; minRev: number };
+          };
+          const empujado = (await abierto.runtime.call('sync.pushOnce')) as {
+            encoladas: number;
+            empujadas: number;
+            headRev: number;
+            conflicto?: { path?: string; mensaje: string };
+          };
+
+          console.log(
+            `${hora()} ↓ ${bajado.applied} aplicada(s) · ↑ ${empujado.empujadas} subida(s), rev ${empujado.headRev}`,
+          );
+          if (empujado.conflicto) {
+            console.warn(
+              `  ⚠ conflicto en ${empujado.conflicto.path ?? '(sin path)'}: ${empujado.conflicto.mensaje}`,
+            );
+            console.warn('    la operación queda pendiente en la outbox; no se pierde nada');
+          }
+          if (bajado.status === 'blocked') {
+            console.warn(
+              `  ⚠ revisión ${bajado.blocked?.rev} bloqueada (${bajado.blocked?.reason ?? 'tercera versión local'}); el checkpoint NO avanza`,
+            );
+          }
+          if (bajado.status === 'resync-required') {
+            console.warn(
+              `  ⚠ resync requerido: since=${bajado.resync?.since} quedó bajo min_rev=${bajado.resync?.minRev} (el estado local NO se borra)`,
+            );
+          }
+        };
+
+        await conectar();
+        if (!opciones.continuous) {
+          await pasada();
+          return;
+        }
+
+        const intervaloSeg = Math.max(1, Number.parseInt(opciones.interval, 10) || 5);
+        let parar = false;
+        process.once('SIGINT', () => {
+          parar = true;
+          console.log('\nSIGINT: terminando la pasada y saliendo…');
+        });
+        console.log(`modo continuo: cada ~${intervaloSeg} s (Ctrl-C para salir)`);
+
+        let fallas = 0;
+        while (!parar) {
+          try {
+            await pasada();
+            fallas = 0;
+          } catch (error) {
+            fallas = Math.min(fallas + 1, 7);
+            const espera = backoffMs(fallas - 1);
+            console.warn(
+              `pasada falló: ${error instanceof Error ? error.message : String(error)}; reconecto en ${Math.round(espera / 1000)} s`,
+            );
+            try {
+              await abierto.runtime.call('sync.close');
+            } catch {
+              /* ya estaba cerrada */
+            }
+            await dormir(espera);
+            await conectar();
+            continue;
+          }
+          await dormir(intervaloSeg * 1000 + Math.floor(Math.random() * 1000));
+        }
+        await abierto.runtime.call('sync.close');
+      } finally {
+        await abierto.cerrar();
+      }
+    },
+  );
+
+// ---------------------------------------------------------------- list-local
+
+programa
+  .command('list-local [vault]')
+  .description('estado local del vault: escaneo + hash-diff (sin tocar la red)')
+  .option('--password-stdin', 'lee la password de stdin (para scripts)')
+  .action(async (vaultTexto: string | undefined, opciones: { passwordStdin?: boolean }) => {
+    const abierto = await abrirVaultLocal(vaultTexto, opciones);
+    try {
+      const { diff, entradas } = (await abierto.runtime.call('sync.scan', {})) as {
+        diff: {
+          nuevos: Array<{ pathId: string }>;
+          modificados: Array<{ pathId: string }>;
+          borrados: Array<{ pathId: string; path?: string }>;
+          sinCambios: number;
+        };
+        entradas: Array<{ path: string; pathId: string; size: number }>;
+      };
+      const pendientes = (await abierto.runtime.call('outbox.list')) as unknown[];
+
+      const estado = new Map<string, string>();
+      for (const entrada of diff.nuevos) estado.set(entrada.pathId, 'nuevo');
+      for (const entrada of diff.modificados) estado.set(entrada.pathId, 'modificado');
+      for (const entrada of diff.borrados) estado.set(entrada.pathId, 'borrado');
+
+      console.log(`vault #${abierto.vault.vault} «${abierto.vault.name}» → ${abierto.vault.dir}`);
+      console.log(
+        `${entradas.length} archivo(s) · nuevos=${diff.nuevos.length} modificados=${diff.modificados.length} ` +
+          `borrados=${diff.borrados.length} sinCambios=${diff.sinCambios} pendientesEnOutbox=${pendientes.length}`,
+      );
+      for (const entrada of entradas) {
+        console.log(`  [${estado.get(entrada.pathId) ?? 'igual'}] ${entrada.path} (${entrada.size} B)`);
+      }
+      for (const borrado of diff.borrados) {
+        console.log(`  [borrado] ${borrado.path ?? borrado.pathId}`);
+      }
+    } finally {
+      await abierto.cerrar();
+    }
+  });
+
+// --------------------------------------------------------------------- config
+
+programa
+  .command('config')
+  .description('muestra la configuración local (sin secretos)')
+  .action(() => {
+    const sesion = readSession();
+    console.log(`config dir: ${configDir()}`);
+    if (!sesion) {
+      console.log('sin sesión (ovaultd login <server> --email <email>)');
+    } else {
+      console.log(`server:  ${sesion.server}`);
+      console.log(`cuenta:  ${sesion.email} (#${sesion.account_id})`);
+      console.log(`device:  #${sesion.device_id}`);
+      console.log(
+        `token:   ${process.env.OVAULTD_TOKEN ? 'por OVAULTD_TOKEN (env; no se persiste aparte)' : 'persistido (0600) en session.json'}`,
+      );
+    }
+
+    const locales = listVaultStates();
+    if (locales.length === 0) {
+      console.log('vaults locales: ninguno');
+      return;
+    }
+    console.log(`vaults locales: ${locales.length}`);
+    for (const vault of locales) {
+      const dir = vault.dir ? `→ ${vault.dir}` : '(sin carpeta)';
+      console.log(`  #${vault.vault} «${vault.name}» ${dir}  server=${vault.server}`);
+      console.log(`    perfil del runtime: ${runtimeDirDe(vault.server, vault.vault)}`);
+    }
+  });
+
+// --------------------------------------------------------------------- unlink
+
+programa
+  .command('unlink <vault>')
+  .description('desvincula la carpeta local (borra el estado local; el server no se toca)')
+  .option('--purge', 'borra además el perfil del runtime (IndexedDB/outbox local)')
+  .action((vaultTexto: string, opciones: { purge?: boolean }) => {
+    const sesion = exigirSesion();
+    const vault = Number.parseInt(vaultTexto, 10);
+    if (!Number.isInteger(vault) || vault <= 0) throw new Error(`vault inválido: ${vaultTexto}`);
+
+    const estado = readVaultState(sesion.server, vault);
+    if (!estado) throw new Error(`no hay estado local del vault #${vault} para ${sesion.server}`);
+
+    removeVaultState(sesion.server, vault);
+    console.log(`vault #${vault} «${estado.name}» desvinculado${estado.dir ? ` de ${estado.dir}` : ''}`);
+    if (opciones.purge) {
+      purgarRuntimeDir(sesion.server, vault);
+      console.log('perfil del runtime borrado (--purge): la outbox local y el checkpoint se descartaron');
+    } else {
+      console.log(`el perfil del runtime quedó en ${runtimeDirDe(sesion.server, vault)} (--purge lo borra)`);
+    }
+    console.log('el vault remoto sigue intacto; nada se borró del server');
   });
 
 // ----------------------------------------------------------------------- main

@@ -12,13 +12,13 @@
  *  - Idempotencia: una segunda pasada no re-aplica nada.
  */
 
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { expect, test } from '@playwright/test';
 
-import { deriveSubkeys } from '@ovaultd/crypto';
+import { decryptBlob, deriveSubkeys } from '@ovaultd/crypto';
 
 import { BrowserRuntime } from '../../packages/cli/src/browser-runtime';
 
@@ -45,6 +45,8 @@ test.describe('sync E2E (stack real)', () => {
       email: string;
       password: string;
       vault_key: string;
+      /** UUID de 16 B (b64): lo exige `sync.open` para firmar el push. */
+      vault_uid: string;
       salt: string;
     };
 
@@ -96,6 +98,8 @@ test.describe('sync E2E (stack real)', () => {
         vault,
         device: signin.device_id,
         since: 0,
+        vaultUuid: estado.vault_uid,
+        epoch: 1,
       })) as { headRev: number };
       expect(abierto.headRev).toBe(2);
 
@@ -119,6 +123,60 @@ test.describe('sync E2E (stack real)', () => {
       // Idempotente: nada nuevo, checkpoint intacto.
       const segunda = (await runtime.call('sync.pullOnce')) as { status: string; applied: number };
       expect(segunda).toEqual({ status: 'pulled', applied: 0, headRev: 2 });
+
+      // ---------------------------------------------------------------- push
+      // La vuelta completa: un cambio, un archivo nuevo y un borrado suben por el mismo
+      // motor (encolar save-first → cifrar → firmar → batch por WS → ack → base/índice).
+      // El borrado ejercita la firma del `del`: sin mtime en el wire (el server firma con 0).
+      const editado = new TextEncoder().encode('# Nota uno\ncanaria: editada por el runtime\n');
+      writeFileSync(join(vaultRoot, 'Notas/uno.md'), editado);
+      const nueva = new TextEncoder().encode('nota nueva del runtime\n');
+      writeFileSync(join(vaultRoot, 'Notas/tres.md'), nueva);
+      unlinkSync(join(vaultRoot, 'Notas/dos.md'));
+
+      const empujado = (await runtime.call('sync.pushOnce')) as {
+        encoladas: number;
+        empujadas: number;
+        headRev: number;
+        conflicto?: unknown;
+      };
+      expect(empujado.conflicto).toBeUndefined();
+      expect(empujado.encoladas).toBe(3);
+      expect(empujado.empujadas).toBe(3);
+      expect(empujado.headRev).toBe(5);
+      expect(await runtime.call('outbox.list')).toEqual([]);
+
+      // El server confirma: tres revisiones nuevas cuyos blobs DESCIFRAN al contenido
+      // que escribimos (E2E real del sobre, ADR-0014, y de las firmas que acepta commit).
+      const delta = (await pedirJson(`/api/v1/vaults/${vault}/changes?since=2&limit=100`, {
+        headers: { authorization: `Bearer ${signin.token}` },
+      })) as { items: Array<{ rev: number; op: string; blob_id: string }> };
+      expect(delta.items.length).toBe(3);
+      const porOp = new Map(delta.items.map((item) => [item.op, item.blob_id]));
+      expect([...porOp.keys()].sort()).toEqual(['add', 'del', 'mod']);
+
+      const descargarYDescifrar = async (blobIdB64: string): Promise<Uint8Array> => {
+        const hexa = Buffer.from(blobIdB64, 'base64').toString('hex');
+        const respuesta = await fetch(`${BASE}/api/v1/vaults/${vault}/blobs/${hexa}`, {
+          headers: { authorization: `Bearer ${signin.token}` },
+        });
+        expect(respuesta.ok).toBe(true);
+        return decryptBlob(subkeys, new Uint8Array(await respuesta.arrayBuffer()));
+      };
+      expect(Buffer.from(await descargarYDescifrar(porOp.get('add')!))).toEqual(Buffer.from(nueva));
+      expect(Buffer.from(await descargarYDescifrar(porOp.get('mod')!))).toEqual(Buffer.from(editado));
+
+      // El ciclo cierra: el checkpoint YA avanzó con nuestros propios acks (reconciliados:
+      // el disco los refleja y el CAS impidió saltar revisiones ajenas), así que el pull
+      // de nuestras revisiones no tiene nada que re-aplicar.
+      const cierre = (await runtime.call('sync.pullOnce')) as { status: string; applied: number };
+      expect(cierre.status).toBe('pulled');
+      expect(cierre.applied).toBe(0);
+      expect((await runtime.call('store.checkpoint.read')) as { since: number }).toHaveProperty(
+        'since',
+        5,
+      );
+      expect(await runtime.call('apply.pending')).toEqual([]);
 
       await runtime.call('sync.close');
     } finally {

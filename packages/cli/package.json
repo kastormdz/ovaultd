@@ -13,6 +13,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@ovaultd/core": "*",
     "@ovaultd/crypto": "*",
     "@ovaultd/protocol": "*",
     "commander": "15.0.0",
