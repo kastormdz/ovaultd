@@ -632,7 +632,7 @@ Esperado:
    npm run build -w @ovaultd/plugin
    ```
 
-   Manifest: `id: ovaultd`, nombre `Self-hosted Sync`, `isDesktopOnly: true`. Elegir `minAppVersion` según la versión realmente probada.
+   Manifest: `id: ovaultd`, nombre `oVaultd Plugin`, `isDesktopOnly: true`. Elegir `minAppVersion` según la versión realmente probada.
 
    El bundle deja `obsidian` externo y falla si importa módulos de Node desde plugin/core/crypto.
 
