@@ -51,6 +51,11 @@
 
 ## Datos (WebSocket `/api/v1/ws`)
 
+El **upgrade** se autentica con `Authorization: Bearer <token de device>` o, para clientes que
+no pueden fijar headers en un WebSocket (navegadores: el runtime del núcleo y el plugin corren
+en Chromium/Electron), con el subprotocolo `ovaultd.bearer.<token en base64url sin padding>`
+acompañado de `ovaultd.v1` — que el server ecoa. El bearer **nunca** se ecoa. Ver **ADR-0015**.
+
 ### Handshake (se prueba la clave, no se la manda)
 
 ```json

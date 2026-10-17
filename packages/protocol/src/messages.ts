@@ -32,11 +32,38 @@ export const MAX_BATCH_OPS = 1000;
 // Operaciones
 // ---------------------------------------------------------------------------
 
-/** Códigos numéricos de operación (los que firma `msg_rec`). */
+/**
+ * Discriminantes del enum `Op` en el JSON del wire (la forma numérica que el `Deserialize`
+ * tolera; la forma textual `"add"`/`"mod"`/… es la que usamos).
+ */
 export const OP_ADD = 1;
 export const OP_MOD = 2;
 export const OP_DEL = 3;
 export const OP_MOVE = 4;
+
+/**
+ * Códigos de operación que firma `msg_rec` — el mapeo de `commit.rs::verify_batch_operation`
+ * (`Add => 0, Mod => 1, Del => 2, Move => 3`). **NO** son los discriminantes del enum:
+ * firmar con `OP_ADD` (1) produce una firma que el server rechaza.
+ */
+export const SIGN_OP_ADD = 0;
+export const SIGN_OP_MOD = 1;
+export const SIGN_OP_DEL = 2;
+export const SIGN_OP_MOVE = 3;
+
+/** Código de firma para una operación del wire. */
+export const signOpCode = (op: OpWire): number => {
+  switch (op) {
+    case 'add':
+      return SIGN_OP_ADD;
+    case 'mod':
+      return SIGN_OP_MOD;
+    case 'del':
+      return SIGN_OP_DEL;
+    case 'move':
+      return SIGN_OP_MOVE;
+  }
+};
 
 export type OpCode = typeof OP_ADD | typeof OP_MOD | typeof OP_DEL | typeof OP_MOVE;
 export type OpWire = 'add' | 'mod' | 'del' | 'move';

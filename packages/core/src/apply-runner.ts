@@ -70,6 +70,9 @@ type Guard =
 /** Guard de tercera versión: ¿publicar esta revisión pisa algo que no debería? */
 async function evaluarGuard(deps: ApplyDeps, revision: ApplyRevision): Promise<Guard> {
   const { store, port } = deps;
+  // Un borrado sin path (tombstone de algo que nunca vimos) no toca el vault.
+  if (revision.deleted && revision.path === '') return { verdict: 'already-gone' };
+
   const base = await store.getBase(revision.pathId);
   const actual = await port.stat(revision.path).catch(() => null);
 

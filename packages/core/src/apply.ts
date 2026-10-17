@@ -47,8 +47,11 @@ export function createIntent(candidate: ApplyCandidate): IntentEntry {
   if (!Number.isInteger(candidate.rev) || candidate.rev < 0) {
     throw new Error(`rev inválida: ${String(candidate.rev)}`);
   }
-  if (candidate.pathId.length === 0 || candidate.blobId.length === 0) {
-    throw new Error('pathId y blobId son obligatorios');
+  if (candidate.pathId.length === 0) {
+    throw new Error('pathId es obligatorio');
+  }
+  if (candidate.blobId.length === 0 && candidate.deleted !== true) {
+    throw new Error('blobId es obligatorio salvo en un borrado');
   }
   return {
     intentId: intentIdFor(candidate),

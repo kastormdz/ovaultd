@@ -13,7 +13,7 @@ Early-stage, but the risky parts are done and tested.
 | 0.1 — crypto spike (`sync1`) | historical, superseded |
 | 0.2 — crypto gateway `sync2` + build plan | **closed** — `INTEROP sync2 OK` (byte-exact Rust ⇄ JS) |
 | 1 — server MVP + CLI | functionally complete (arm64 image pending) |
-| 2 — durable offline core (state, outbox, apply journal) | in progress |
+| 2 — durable offline core (state, outbox, apply journal) | in progress — state, save-first outbox, apply journal and a real Chromium runtime that pulls signed deltas |
 | 3 — Obsidian plugin | next, in its own repo |
 | 4 — full E2E, key rotation, recovery | planned |
 | 5 — conflicts, history, restore, preview | planned |
@@ -51,7 +51,7 @@ The server persists encrypted blobs, signed revision records and account metadat
 | `crates/ovaultd-protocol` | wire types shared by both sides |
 | `packages/protocol` | the wire contract in TypeScript (types, strict base64, canonical serialization) |
 | `packages/crypto` | `sync2` in TypeScript, a byte-faithful port of the spike |
-| `packages/core` | durable client core: versioned IndexedDB state, save-first outbox, apply journal |
+| `packages/core` | durable client core: versioned IndexedDB state, save-first outbox, apply journal, sync session (WS + HTTP) and pull reconcile |
 | `packages/cli` | `login`, `create-remote`, `setup`, `list-remote`, `status`, plus the durable Chromium runtime |
 | `spikes/crypto-interop` | the Rust ⇄ JS interop spike and the golden-vector freeze tooling |
 | `tests/` | browser specs, frozen fixtures, smoke / canary / container-E2E scripts |

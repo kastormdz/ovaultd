@@ -595,8 +595,11 @@ cabeza real del vault).
 
 El WS exige **las dos cosas**, porque responden a preguntas diferentes:
 
-- **Identidad de cuenta y device**: el bearer token del HTTP (el mismo `Autenticado`). Un `WebSocketUpgrade` **no ejecuta
-  extractores solo**, asi que el handler los recibe explicitos y guarda `account_id`/`device_id` por conexion.
+- **Identidad de cuenta y device**: el bearer token del HTTP (la misma resolucion que el extractor `Autenticado`,
+  factorizada en `routes::autenticar_token`). Un `WebSocketUpgrade` **no ejecuta extractores solo**, asi que el handler
+  autentica el upgrade el mismo y guarda `account_id`/`device_id` por conexion. El token llega por `Authorization:
+  Bearer` o por el subprotocolo `ovaultd.bearer.<token>` (clientes de navegador que no pueden fijar headers; **ADR-0015**)
+  — el server negocia/ecoa `ovaultd.v1` y **nunca** el bearer.
 - **Posesion de la clave del vault**: el `auth` con el proof. El token dice *quien sos*; el proof dice *que tenes la
   clave*. Un token robado no alcanza para leer ni escribir el contenido.
 

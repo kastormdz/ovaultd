@@ -5,9 +5,13 @@ use axum::{
         ws::{Message, WebSocket, WebSocketUpgrade},
         State,
     },
+    http::{header::AUTHORIZATION, HeaderMap},
     response::Response,
 };
-use base64::{engine::general_purpose::STANDARD, Engine as _};
+use base64::{
+    engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD},
+    Engine as _,
+};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use sqlx::SqlitePool;
@@ -16,7 +20,7 @@ use ovaultd_protocol::{Batch, ErrorCode};
 use crate::{
     auth,
     error::{Result, ServerError},
-    routes::{resolve_vault, EstadoServidor},
+    routes::{autenticar_token, resolve_vault, EstadoServidor},
     storage::CasStore,
     sync::commit::commit_batch,
 };
@@ -613,19 +617,64 @@ fn serialize_message(message: &ServerMessage) -> Result<String> {
         .map_err(|error| ServerError::Invalid(format!("no se pudo serializar WS: {error}")))
 }
 
-/// Único camino público para montar el WebSocket: exige `Autenticado`
-/// para fijar la identidad de la conexión desde el token HTTP.
+/// Único camino público para montar el WebSocket: exige autenticación para fijar la
+/// identidad de la conexión. El token viene por `Authorization: Bearer` o — para
+/// clientes de navegador, que no pueden fijar headers en `new WebSocket()` — por el
+/// subprotocolo `ovaultd.bearer.<token en base64url sin padding>` (ADR-0015).
+/// El server negocia `ovaultd.v1` como subprotocolo de aplicación (lo ecoa; el bearer
+/// NUNCA se ecoa).
 pub async fn authenticated_handler(
     State(state): State<EstadoServidor>,
-    autenticado: crate::routes::Autenticado,
+    headers: HeaderMap,
     upgrade: WebSocketUpgrade,
-) -> Response {
-    upgrade.on_upgrade(move |socket| {
-        let mut connection = Connection::new(&state);
-        connection.account_id = Some(autenticado.account_id);
-        connection.device_id = Some(autenticado.device_id);
-        websocket_with_connection(socket, connection)
-    })
+) -> Result<Response> {
+    let (account_id, device_id) = autenticar_upgrade(&state, &headers, &upgrade).await?;
+
+    Ok(upgrade
+        .protocols(["ovaultd.v1"])
+        .on_upgrade(move |socket| {
+            let mut connection = Connection::new(&state);
+            connection.account_id = Some(account_id);
+            connection.device_id = Some(device_id);
+            websocket_with_connection(socket, connection)
+        }))
+}
+
+/// Autentica el upgrade: header primero (el camino de siempre), subprotocolo después.
+async fn autenticar_upgrade(
+    state: &EstadoServidor,
+    headers: &HeaderMap,
+    upgrade: &WebSocketUpgrade,
+) -> Result<(i64, i64)> {
+    if let Some(value) = headers
+        .get(AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+    {
+        if let Some(token) = value
+            .strip_prefix("Bearer ")
+            .filter(|token| !token.is_empty())
+        {
+            return autenticar_token(state, token).await;
+        }
+    }
+
+    const PREFIJO: &str = "ovaultd.bearer.";
+    for protocolo in upgrade.requested_protocols() {
+        let Ok(texto) = protocolo.to_str() else {
+            continue;
+        };
+        let Some(b64) = texto.strip_prefix(PREFIJO) else {
+            continue;
+        };
+        let token = URL_SAFE_NO_PAD
+            .decode(b64)
+            .ok()
+            .and_then(|bytes| String::from_utf8(bytes).ok())
+            .ok_or(ServerError::Unauthorized)?;
+        return autenticar_token(state, &token).await;
+    }
+
+    Err(ServerError::Unauthorized)
 }
 
 async fn websocket_with_connection(mut socket: WebSocket, mut connection: Connection) {

@@ -95,21 +95,33 @@ if [ "$MODE" != "--worktree" ]; then
   # commiteado queda en el object store y sale con el próximo push. Si el repo
   # NUNCA se pusheó, no hace falta reescribir nada: el primer push limpio se
   # arma con `git archive` del árbol saneado + commit raíz (sin historia vieja).
+  #
+  # Mismas exclusiones por línea que el modo árbol: los CIDR de EJEMPLO del nginx
+  # y del propio comentario del scanner no identifican a nadie (bug cazado acá:
+  # el modo historia no las aplicaba y marcaba falsos positivos).
   historial_patron="$HOME_PATHS|$REDES_PRIVADAS"
-  [ -n "$PATTERNS_PERSONAL" ] && historial_patron="$historial_patron|$PATTERNS_PERSONAL"
-  hist=0
-  while IFS= read -r c; do
-    while IFS= read -r linea; do
-      [ -n "$linea" ] || continue
-      f="${linea#"$c":}"   # git grep con un rev PREFIJA `rev:`; sin este strip se duplica
-      printf '  %s:%s\n' "$c" "$f"
-      hist=$((hist + 1))
-    done < <(git grep -I -l -i -E "$historial_patron" "$c" -- . 2>/dev/null)
-  done < <(git rev-list --all)
-  if [ "$hist" -eq 0 ]; then
+  hist_salida="$(
+    while IFS= read -r c; do
+      {
+        git grep -I -n -i -E "$historial_patron" "$c" -- . 2>/dev/null \
+          | grep -vF -e '10.0.0.0/8' -e '172.16.0.0/12' -e '192.168.0.0/16'
+        if [ -n "$PATTERNS_PERSONAL" ]; then
+          git grep -I -n -i -E "$PATTERNS_PERSONAL" "$c" -- . 2>/dev/null
+        fi
+      } | while IFS= read -r linea; do
+        [ -n "$linea" ] || continue
+        resto="${linea#"$c":}"   # git grep con un rev PREFIJA `rev:`
+        printf '  %s:%s\n' "$c" "${resto%:*}"   # archivo:línea (sin el texto)
+      done
+    done < <(git rev-list --all) | sort -u
+  )"
+  if [ -z "$hist_salida" ]; then
     echo "  (limpio)"
+    hist=0
   else
-    echo "  $hist archivo(s) filtran en la historia (se resuelve en el primer push limpio)."
+    printf '%s\n' "$hist_salida"
+    hist="$(printf '%s\n' "$hist_salida" | grep -c .)"
+    echo "  $hist coincidencia(s) en la historia."
   fi
   hits=$((hits + hist))
 fi

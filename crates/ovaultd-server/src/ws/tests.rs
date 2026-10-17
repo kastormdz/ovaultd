@@ -1,10 +1,16 @@
 use std::sync::Arc;
 
 use axum::{
-    http::{header::AUTHORIZATION, HeaderValue},
+    http::{
+        header::{AUTHORIZATION, SEC_WEBSOCKET_PROTOCOL},
+        HeaderValue,
+    },
     Router,
 };
-use base64::{engine::general_purpose::STANDARD, Engine as _};
+use base64::{
+    engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD},
+    Engine as _,
+};
 use futures::{SinkExt, StreamExt};
 use serde_json::{json, Value};
 use sqlx::SqlitePool;
@@ -158,11 +164,23 @@ type Ws = WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStrea
 struct WsContext {
     socket: Ws,
     server: JoinHandle<()>,
+    /// Subprotocolo que el server negoció (lo que llegó en la respuesta del upgrade).
+    protocolo_negociado: Option<String>,
 }
 
 async fn connect(
     context: &TestContext,
     token: Option<&str>,
+) -> Result<WsContext, Box<dyn std::error::Error>> {
+    connect_full(context, token, &[]).await
+}
+
+/// Conexión completa: `authorization` va como header (si está) y `protocolos` como
+/// subprotocolos ofrecidos (comma-joined), igual que los manda un navegador.
+async fn connect_full(
+    context: &TestContext,
+    authorization: Option<&str>,
+    protocolos: &[&str],
 ) -> Result<WsContext, Box<dyn std::error::Error>> {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
     let address = listener.local_addr()?;
@@ -175,15 +193,33 @@ async fn connect(
 
     let mut request = format!("ws://{address}/api/v1/ws").into_client_request()?;
 
-    if let Some(token) = token {
+    if let Some(token) = authorization {
         request.headers_mut().insert(
             AUTHORIZATION,
             HeaderValue::from_str(&format!("Bearer {token}"))?,
         );
     }
 
+    if !protocolos.is_empty() {
+        request.headers_mut().insert(
+            SEC_WEBSOCKET_PROTOCOL,
+            HeaderValue::from_str(&protocolos.join(", "))?,
+        );
+    }
+
     match connect_async(request).await {
-        Ok((socket, _)) => Ok(WsContext { socket, server }),
+        Ok((socket, response)) => {
+            let protocolo_negociado = response
+                .headers()
+                .get(SEC_WEBSOCKET_PROTOCOL)
+                .and_then(|valor| valor.to_str().ok())
+                .map(str::to_owned);
+            Ok(WsContext {
+                socket,
+                server,
+                protocolo_negociado,
+            })
+        }
         Err(error) => {
             server.abort();
             Err(error.into())
@@ -990,6 +1026,73 @@ async fn sin_token_no_hay_handshake() -> Result<(), Box<dyn std::error::Error>> 
     let context = TestContext::new().await?;
 
     let result = connect(&context, None).await;
+    assert!(result.is_err());
+
+    Ok(())
+}
+
+/// ADR-0015: token por subprotocolo (el navegador no puede fijar headers). El server
+/// negocia `ovaultd.v1` (lo ecoa) y la identidad queda fijada para el handshake de datos.
+#[tokio::test]
+async fn upgrade_con_token_por_subprotocolo_completa_el_handshake(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let context = TestContext::new().await?;
+    let bearer = format!(
+        "ovaultd.bearer.{}",
+        URL_SAFE_NO_PAD.encode(context.token.as_bytes())
+    );
+
+    let mut ws = connect_full(&context, None, &["ovaultd.v1", &bearer]).await?;
+    assert_eq!(ws.protocolo_negociado.as_deref(), Some("ovaultd.v1"));
+
+    let response = hello(&mut ws.socket, &context, context.vault_id, 0).await?;
+    assert_eq!(response["t"], "hello_ok", "response = {response}");
+
+    let challenge = STANDARD.decode(
+        response["challenge"]
+            .as_str()
+            .ok_or("falta challenge")?,
+    )?;
+    let proof = ovaultd_crypto::sign_proof(
+        &context.keys,
+        context.vault_id,
+        context.device_id,
+        &challenge,
+    );
+    send_json(
+        &mut ws.socket,
+        json!({ "t": "auth", "proof": STANDARD.encode(proof) }),
+    )
+    .await?;
+    let auth_ok = recv_json(&mut ws.socket).await?;
+    assert_eq!(auth_ok["t"], "auth_ok", "auth_ok = {auth_ok}");
+
+    ws.server.abort();
+    Ok(())
+}
+
+#[tokio::test]
+async fn subprotocolo_bearer_con_token_invalido_rechaza_el_upgrade(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let context = TestContext::new().await?;
+
+    let result = connect_full(
+        &context,
+        None,
+        &["ovaultd.v1", "ovaultd.bearer.bm8tb3JpZ2luYWRv"],
+    )
+    .await;
+
+    assert!(result.is_err());
+    Ok(())
+}
+
+#[tokio::test]
+async fn subprotocolo_sin_bearer_ni_header_rechaza_el_upgrade(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let context = TestContext::new().await?;
+
+    let result = connect_full(&context, None, &["ovaultd.v1"]).await;
     assert!(result.is_err());
 
     Ok(())

@@ -8,7 +8,7 @@ use axum::{
     http::{
         header::{AUTHORIZATION, CONTENT_RANGE, CONTENT_TYPE, HOST, LOCATION, RANGE},
         request::Parts,
-        HeaderMap, HeaderValue, StatusCode,
+        HeaderMap, HeaderValue, Method, StatusCode,
     },
     response::IntoResponse,
     routing::{delete, get, head, post, put},
@@ -20,6 +20,7 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 use sqlx::{FromRow, SqlitePool};
 use ovaultd_protocol::BlobId;
+use tower_http::cors::{Any, CorsLayer};
 
 use crate::{
     auth,
@@ -79,6 +80,23 @@ pub fn router(estado: EstadoServidor) -> Router {
         .route("/api/v1/devices/{id}", delete(revocar_device))
         .route("/api/v1/ws", axum::routing::get(crate::ws::authenticated_handler))
         .with_state(estado)
+        .layer(
+            // CORS para los clientes browser (runtime del núcleo / plugin de Obsidian):
+            // hacen fetch cross-origin al server. El API es token-based (sin cookies):
+            // el origen comodín no habilita CSRF, y sin esto el fetch queda bloqueado
+            // (el upgrade del WS no pasa por CORS y por eso no lo cubre).
+            CorsLayer::new()
+                .allow_origin(Any)
+                .allow_methods([
+                    Method::GET,
+                    Method::POST,
+                    Method::PUT,
+                    Method::PATCH,
+                    Method::DELETE,
+                    Method::HEAD,
+                ])
+                .allow_headers([AUTHORIZATION, CONTENT_TYPE]),
+        )
 }
 
 /// Marca de arranque del proceso para `/metrics` (la fija el primer router montado).
@@ -137,6 +155,29 @@ pub struct Autenticado {
     pub device_id: i64,
 }
 
+/// Resuelve un token de device a `(account_id, device_id)`. Fuente ÚNICA para el
+/// extractor HTTP y para la autenticación del upgrade del WebSocket (ADR-0015).
+pub(crate) async fn autenticar_token(
+    state: &EstadoServidor,
+    token: &str,
+) -> std::result::Result<(i64, i64), ServerError> {
+    let device_id = auth::verificar_token(&state.pool, token)
+        .await
+        .map_err(|_| ServerError::Unauthorized)?;
+
+    let account_id = sqlx::query_scalar::<_, i64>(
+        "SELECT account_id
+         FROM devices
+         WHERE id = ?",
+    )
+    .bind(device_id)
+    .fetch_optional(&state.pool)
+    .await?
+    .ok_or(ServerError::Unauthorized)?;
+
+    Ok((account_id, device_id))
+}
+
 impl FromRequestParts<EstadoServidor> for Autenticado {
     type Rejection = ServerError;
 
@@ -155,19 +196,7 @@ impl FromRequestParts<EstadoServidor> for Autenticado {
             .filter(|token| !token.is_empty())
             .ok_or(ServerError::Unauthorized)?;
 
-        let device_id = auth::verificar_token(&state.pool, token)
-            .await
-            .map_err(|_| ServerError::Unauthorized)?;
-
-        let account_id = sqlx::query_scalar::<_, i64>(
-            "SELECT account_id
-             FROM devices
-             WHERE id = ?",
-        )
-        .bind(device_id)
-        .fetch_optional(&state.pool)
-        .await?
-        .ok_or(ServerError::Unauthorized)?;
+        let (account_id, device_id) = autenticar_token(state, token).await?;
 
         Ok(Self {
             account_id,

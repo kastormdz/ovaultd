@@ -128,6 +128,21 @@ SMOKE_DB="$DIR/datos/metadata.db" \
 SMOKE_DIR=".tmp/container-e2e/smoke" \
     bash tests/scripts/server-smoke.sh
 
+# ---------------------------------------------------------------- 4b. sync E2E
+
+paso "sync E2E: el runtime (Chromium) baja la delta del smoke y la aplica"
+# El estado del vault y los plaintext que dejó el smoke-cliente son la fuente de verdad:
+# el runtime real (Chromium + IndexedDB + puente /fs) hace signin, abre el WS por el
+# proxy con el token en subprotocolo (ADR-0015) y aplica la delta firmada por el cliente
+# canónico en Rust, byte a byte. Correr DESPUÉS del smoke y ANTES del recreate.
+( cd tests && OVAULTD_SYNC_E2E=1 \
+    OVAULTD_SYNC_BASE="http://127.0.0.1:$OVAULTD_PROXY_PORT" \
+    OVAULTD_SYNC_STATE="$DIR/smoke/cliente/estado.json" \
+    OVAULTD_SYNC_SMOKE="$DIR/smoke" \
+    npx playwright test browser/sync-pull.spec.ts --reporter=line ) \
+    || fallo "el E2E de sync falló"
+nota "upgrade por subprotocolo + delta de 2 revisiones aplicada byte a byte"
+
 # ---------------------------------------------------------------- 5. persistencia
 
 paso "persistencia: recreate"

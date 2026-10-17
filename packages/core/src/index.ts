@@ -11,3 +11,6 @@ export * from './outbox.js';
 export * from './apply.js';
 export * from './apply-runner.js';
 export * from './file-port.js';
+export * from './retry.js';
+export * from './SyncConnection.js';
+export * from './reconcile.js';

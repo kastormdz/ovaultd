@@ -10,7 +10,8 @@
  * Corte 1: runtime + StateStore. Corte 2: outbox save-first (enqueue determinista con
  * snapshot verificado) y journal de aplicación (begin/verify/complete atómico). Corte 3:
  * orquestación real de `apply` contra el filesystem (puente confinado al vault) y
- * recuperación de intenciones al reiniciar. Los métodos de sync se agregan encima.
+ * recuperación de intenciones al reiniciar. Corte 4: `SyncConnection` (WS+HTTP contra el
+ * wire, commit solo por WS) y `pullOnce` (convergencia).
  */
 
 import type { SubKeys } from '@ovaultd/crypto';
@@ -20,6 +21,8 @@ import { applyRevision, recoverApplies, type ApplyRevision } from './apply-runne
 import { createIntent, type ApplyCandidate } from './apply.js';
 import { HttpFileSystemPort } from './file-port.js';
 import { prepareOutboxEntry, type EnqueueRequest } from './outbox.js';
+import { pullOnce } from './reconcile.js';
+import { SyncConnection } from './SyncConnection.js';
 import {
   SCHEMA_VERSION,
   STORE_NAMES,
@@ -28,7 +31,7 @@ import {
   type OutboxEntry,
 } from './StateStore.js';
 
-export const RUNTIME_VERSION = '0.3.0';
+export const RUNTIME_VERSION = '0.4.0';
 
 interface RuntimeRequest {
   id: number;
@@ -57,6 +60,9 @@ const exigirApply = (): { store: StateStore; keys: SubKeys } => {
   if (!applyKeys) throw new Error('apply: falta apply.configure (subclaves del vault)');
   return { store: exigirStore(), keys: applyKeys };
 };
+
+/** Conexión de sync abierta (sync.open), reutilizada por sync.pullOnce. */
+let syncConn: SyncConnection | null = null;
 
 /** Serializa una entrada de outbox para el wire JSON (los Blob no viajan por el puente). */
 const serializarOutbox = (entry: OutboxEntry) => ({
@@ -241,6 +247,42 @@ const handlers: Record<string, Handler> = {
       port: new HttpFileSystemPort(globalThis.location.origin),
       keys,
     });
+  },
+
+  // ------------------------------------------------------------------ sync (corte 4)
+
+  'sync.open': async (params) => {
+    const { keys } = exigirApply();
+    if (syncConn) {
+      syncConn.close();
+      syncConn = null;
+    }
+    const conn = new SyncConnection({
+      baseUrl: String(params.baseUrl),
+      token: String(params.token),
+      vault: Number(params.vault),
+      device: Number(params.device),
+      keys,
+    });
+    const { headRev } = await conn.open({ since: Number(params.since ?? 0) });
+    syncConn = conn;
+    return { headRev };
+  },
+
+  'sync.pullOnce': async () => {
+    if (!syncConn) throw new Error('sync: no hay conexión abierta (sync.open primero)');
+    const { store, keys } = exigirApply();
+    return pullOnce(syncConn, {
+      store,
+      port: new HttpFileSystemPort(globalThis.location.origin),
+      keys,
+    });
+  },
+
+  'sync.close': () => {
+    syncConn?.close();
+    syncConn = null;
+    return { closed: true };
   },
 };
 
