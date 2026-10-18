@@ -33,6 +33,10 @@ services:
       # Vacío = bootstrap /setup abierto mientras no haya cuentas (ver docs/deploy.md, ADR-0016).
       OVAULTD_SETUP_TOKEN: "${OVAULTD_SETUP_TOKEN:-}"
       OVAULTD_LOG_JSON: "${OVAULTD_LOG_JSON:-1}"
+      # 1 = hay un borde de confianza adelante: se obedecen X-Real-IP / X-Forwarded-For /
+      # X-Forwarded-Proto (docs/deploy.md). Default 0: los headers de cualquiera NO cuentan
+      # (la IP sale del peer TCP y el esquema no habilita el Secure de la cookie).
+      OVAULTD_TRUST_PROXY: "${OVAULTD_TRUST_PROXY:-0}"
     volumes:
       # Default: volumen nombrado. Para un bind mount (backups con rsync, NFS, etc.):
       # OVAULTD_DATA=/ruta/absoluta/en/el/host
