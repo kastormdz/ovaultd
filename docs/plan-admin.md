@@ -1,8 +1,8 @@
 # Plan — Panel web de administración, versionado y borde
 
-- Estado: **en ejecución** — **PD ✅, W0 ✅, W1 ✅, W2 ✅, W3 ✅ y V1 ✅** (2026-10-17); las 4 decisiones se
+- Estado: **CERRADO** ✅ — **PD, W0, W1, W2, W3, V1 y V2** entregados (2026-10-17); las 4 decisiones se
   confirmaron tal cual (stack server-rendered, registro cerrado + toggle, borrado con bloques,
-  español). Sigue: **V2** (releases en GitHub).
+  español). Sigue lo grande: **fase 4** (rotación de `vault_key`) y **fase 5** (historia/restore).
 - Origen: pedido directo del operador (2026-10-17): el admin tiene que ser **web, moderno y
   PRO** (cuentas, passwords, stats, registro on/off); **sin proxy en el docker** (el borde lo
   pone NPM Plus, que ya opera); **versiones explícitas** server ↔ plugin y **releases en
