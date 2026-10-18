@@ -138,7 +138,7 @@ jobs:
       # sobreviva a un recreate.
       # El driver por defecto de compose (`docker`) no soporta cache_from/cache_to de GHA: esta
       # action deja un builder docker-container como default, que es el que entiende `type=gha`.
-      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - name: E2E del contenedor (flujo completo + persistencia)
         env:
           # Activa el overlay docker/compose.ci.yaml (caché de layers). Comparte la clave con el
