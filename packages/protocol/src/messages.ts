@@ -348,6 +348,34 @@ export interface ChangesWire {
   min_rev: number | null;
 }
 
+/**
+ * Un ítem de la historia (`GET /vaults/{id}/history`): una fila del oplog, sin descifrar.
+ * `path_id`/`prev_path_id`/`blob_hash` viajan en hex; `path_enc`/`sig`/`t_mac` en base64.
+ */
+export interface HistoryItemWire {
+  rev: number;
+  op: OpWire;
+  path_id: string;
+  path_enc?: string;
+  prev_path_id?: string;
+  blob_hash?: string;
+  sig?: string;
+  t_mac?: string;
+  size?: number;
+  mtime?: number;
+  device_id?: number;
+  epoch: number;
+  ts: string;
+}
+
+export interface HistoryWire {
+  items: HistoryItemWire[];
+  /** `rev` para seguir paginando hacia atrás (`before`); `null` = no hay más. */
+  next_before: number | null;
+  /** Piso de retención del vault: por debajo, la historia ya no está. */
+  min_rev: number;
+}
+
 /** Sobre de error del wire: `{ "t": "error", "code": ..., "detail": ... }`. */
 export interface ErrorWire {
   t: string;

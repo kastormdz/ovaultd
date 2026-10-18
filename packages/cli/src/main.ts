@@ -8,12 +8,12 @@
  */
 
 import { hostname } from 'node:os';
-import { chmodSync, writeFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { chmodSync, readFileSync, writeFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 
 import { Command } from 'commander';
 
-import { backoffMs } from '@ovaultd/core';
+import { backoffMs, diffDeTextos, type RevisionResumen } from '@ovaultd/core';
 import {
   KDF_DEFAULTS,
   deriveKek,
@@ -39,7 +39,7 @@ import {
 
 import { ApiError, OvaultdClient, normalizeServer } from './api.js';
 import { resolvePassword } from './credentials.js';
-import { abrirVaultLocal, purgarRuntimeDir, runtimeDirDe } from './local-runtime.js';
+import { abrirVaultLocal, purgarRuntimeDir, runtimeDirDe, type VaultAbierto } from './local-runtime.js';
 import {
   clearSession,
   configDir,
@@ -481,6 +481,152 @@ programa
       await abierto.cerrar();
     }
   });
+
+// -------------------------------------------------------------------- history
+
+/**
+ * Abre el vault y su conexión SOLO para leer (`sync.open` + `history.*`): la conexión
+ * se cierra al salir. Nada de esto toca el vault ni el estado de sync.
+ */
+async function conVaultEnLectura<T>(
+  opciones: { vault?: string; passwordStdin?: boolean },
+  fn: (
+    abierto: VaultAbierto,
+    call: (method: string, params?: Record<string, unknown>) => Promise<unknown>,
+  ) => Promise<T>,
+): Promise<T> {
+  const abierto = await abrirVaultLocal(opciones.vault, opciones);
+  try {
+    const checkpoint = (await abierto.runtime.call('store.checkpoint.read')) as {
+      since: number;
+    } | null;
+    await abierto.runtime.call('sync.open', {
+      baseUrl: abierto.sesion.server,
+      token: abierto.token,
+      vault: abierto.vault.vault,
+      device: abierto.sesion.device_id,
+      since: checkpoint?.since ?? 0,
+      vaultUuid: abierto.vault.vault_id,
+      epoch: abierto.vault.epoch,
+    });
+    try {
+      return await fn(abierto, (method, params) => abierto.runtime.call(method, params));
+    } finally {
+      await abierto.runtime.call('sync.close');
+    }
+  } finally {
+    await abierto.cerrar();
+  }
+}
+
+programa
+  .command('history <vault-path>')
+  .description(
+    'historia de un archivo: cada revisión (op, fecha, dispositivo, tamaño); lectura pura, no toca el vault',
+  )
+  .option('--vault <n>', 'número de vault (si hay más de uno vinculado)')
+  .option('--limit <n>', 'máximo de revisiones', '20')
+  .option('--before <rev>', 'seguir hacia atrás desde esta revisión')
+  .option('--password-stdin', 'lee la password de stdin (para scripts)')
+  .action(
+    async (
+      vaultPath: string,
+      opciones: { vault?: string; limit: string; before?: string; passwordStdin?: boolean },
+    ) => {
+      await conVaultEnLectura(opciones, async (_abierto, call) => {
+        const resultado = (await call('history.list', {
+          ruta: vaultPath,
+          limit: Number.parseInt(opciones.limit, 10) || 20,
+          before: opciones.before ? Number.parseInt(opciones.before, 10) : undefined,
+        })) as { items: RevisionResumen[]; nextBefore: number | null; minRev: number };
+
+        if (resultado.items.length === 0) {
+          console.log(
+            `sin historia para «${vaultPath}» (si lo renombraste, probá con el nombre viejo)`,
+          );
+          return;
+        }
+        for (const item of resultado.items) {
+          const fecha = item.ts.replace('T', ' ').replace(/\.\d+Z?$/, '');
+          const dispositivo = item.deviceId === null ? '-' : `dev #${item.deviceId}`;
+          const tamaño = item.size === null ? '' : `${item.size} B`;
+          const nombre = item.ruta ?? `(sin nombre: ${item.pathId.slice(0, 8)}…)`;
+          console.log(
+            `rev ${String(item.rev).padStart(5)}  ${item.op.padEnd(4)}  ${fecha}  ${nombre.padEnd(36)}  ${dispositivo.padEnd(7)} ${tamaño}`,
+          );
+        }
+        if (resultado.nextBefore !== null) {
+          console.log(`  (hay más: --before ${resultado.nextBefore})`);
+        }
+        if (resultado.minRev > 0) {
+          console.log(`  (retención: la historia anterior a la rev ${resultado.minRev} ya no está)`);
+        }
+      });
+    },
+  );
+
+programa
+  .command('preview <vault-path>')
+  .description(
+    'muestra una versión de la historia SIN escribir en el vault (--diff la compara con el archivo local)',
+  )
+  .requiredOption('--rev <n>', 'revisión a mostrar')
+  .option('--diff', 'en vez del contenido, el diff contra el archivo local')
+  .option('--vault <n>', 'número de vault (si hay más de uno vinculado)')
+  .option('--password-stdin', 'lee la password de stdin (para scripts)')
+  .action(
+    async (
+      vaultPath: string,
+      opciones: { rev: string; diff?: boolean; vault?: string; passwordStdin?: boolean },
+    ) => {
+      const rev = Number.parseInt(opciones.rev, 10);
+      if (!Number.isInteger(rev) || rev <= 0) throw new Error(`revisión inválida: ${opciones.rev}`);
+
+      await conVaultEnLectura(opciones, async (abierto, call) => {
+        // `before = rev + 1` acota a rev <= N; el primero de la página es la N buscada.
+        const resultado = (await call('history.list', {
+          ruta: vaultPath,
+          before: rev + 1,
+          limit: 1,
+        })) as { items: RevisionResumen[] };
+
+        const item = resultado.items[0];
+        if (!item || item.rev !== rev) {
+          throw new Error(
+            item
+              ? `no existe la rev ${rev} para «${vaultPath}» (la más cercana hacia abajo es la ${item.rev})`
+              : `sin historia para «${vaultPath}» hasta la rev ${rev}`,
+          );
+        }
+        if (!item.blobId) {
+          throw new Error(`la rev ${rev} no tiene contenido (fue un «${item.op}»)`);
+        }
+
+        const { texto } = (await call('history.preview', { blobId: item.blobId })) as {
+          texto: string;
+        };
+
+        if (!opciones.diff) {
+          process.stdout.write(texto.endsWith('\n') ? texto : `${texto}\n`);
+          return;
+        }
+
+        let actual: string | null = null;
+        try {
+          actual = readFileSync(join(abierto.vault.dir!, ...vaultPath.split('/')), 'utf8');
+        } catch {
+          actual = null;
+        }
+        if (actual === null) {
+          console.log(`(${vaultPath} no existe localmente: muestro el contenido completo)`);
+          process.stdout.write(texto.endsWith('\n') ? texto : `${texto}\n`);
+          return;
+        }
+        const diff = diffDeTextos(actual, texto);
+        console.log(diff === '' ? 'sin diferencias con el archivo local' : diff);
+      });
+    },
+  );
 
 // --------------------------------------------------------------------- config
 

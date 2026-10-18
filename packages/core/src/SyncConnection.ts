@@ -19,6 +19,7 @@ import {
   type ChangesWire,
   type ConflictWire,
   type HelloOkWire,
+  type HistoryWire,
   type ServerMessageWire,
 } from '@ovaultd/protocol';
 
@@ -157,6 +158,21 @@ export class SyncConnection {
       { headers: this.headers() },
     );
     return this.json<ChangesWire>(respuesta);
+  }
+
+  /**
+   * Historia de un archivo (LECTURA pura del oplog): página por `path_id` (hex), más
+   * nueva primero, con la cadena de renames ya resuelta por el server. `before` acota
+   * (`rev < before`). Nada viaja descifrado: el llamador resuelve nombres con `path_enc`.
+   */
+  async historial(pathIdHex: string, before?: number, limit = 50): Promise<HistoryWire> {
+    const params = new URLSearchParams({ path_id: pathIdHex, limit: String(limit) });
+    if (before !== undefined) params.set('before', String(before));
+    const respuesta = await fetch(
+      `${this.base}/api/v1/vaults/${this.opciones.vault}/history?${params.toString()}`,
+      { headers: this.headers() },
+    );
+    return this.json<HistoryWire>(respuesta);
   }
 
   /** Descarga un blob del CAS (el llamador verifica que los bytes hasheen al `blob_id`). */

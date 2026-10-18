@@ -22,6 +22,7 @@ import { b64Decode, b64Encode, fromHex } from '@ovaultd/protocol';
 import { applyRevision, recoverApplies, type ApplyRevision } from './apply-runner.js';
 import { createIntent, type ApplyCandidate } from './apply.js';
 import { HttpFileSystemPort } from './file-port.js';
+import { contenidoDeRevision, diffDeTextos, historiaDeArchivo } from './history.js';
 import { prepareOutboxEntry, type EnqueueRequest } from './outbox.js';
 import { pushOnce } from './push.js';
 import { pullOnce } from './reconcile.js';
@@ -36,7 +37,7 @@ import {
   type OutboxEntry,
 } from './StateStore.js';
 
-export const RUNTIME_VERSION = '0.5.0';
+export const RUNTIME_VERSION = '0.6.0';
 
 interface RuntimeRequest {
   id: number;
@@ -322,6 +323,52 @@ const handlers: Record<string, Handler> = {
       vaultUuid: syncVaultMeta.vaultUuid,
       epoch: syncVaultMeta.epoch,
     });
+  },
+
+  // -------------------------------------------------------------- history (corte 5b)
+
+  /**
+   * Historia de un archivo (LECTURA pura): usa la conexión abierta SOLO para leer.
+   * No toca el estado de sync ni el vault.
+   */
+  'history.list': async (params) => {
+    if (!syncConn) throw new Error('history: no hay conexión abierta (sync.open primero)');
+    const { keys } = exigirApply();
+    const ruta = typeof params.ruta === 'string' ? params.ruta : '';
+    if (!ruta) throw new Error('history.list: falta ruta');
+    return historiaDeArchivo({
+      conn: syncConn,
+      keys,
+      ruta,
+      before:
+        params.before === undefined || params.before === null ? undefined : Number(params.before),
+      limit: params.limit === undefined ? undefined : Number(params.limit),
+    });
+  },
+
+  /** Contenido descifrado de una revisión (verifica el hash del blob antes de descifrar). */
+  'history.preview': async (params) => {
+    if (!syncConn) throw new Error('history: no hay conexión abierta (sync.open primero)');
+    const { keys } = exigirApply();
+    const blobId = typeof params.blobId === 'string' ? params.blobId : '';
+    if (!blobId) throw new Error('history.preview: falta blobId');
+    const contenido = await contenidoDeRevision({ conn: syncConn, keys, blobId });
+    // El puente es JSON: el texto viaja como string. Un binario no puede pasar por
+    // acá (el preview es para notas): mejor un error claro que mojibake.
+    let texto: string;
+    try {
+      texto = new TextDecoder('utf-8', { fatal: true }).decode(contenido);
+    } catch {
+      throw new Error(`la revisión no es texto UTF-8 (${contenido.length} bytes binarios)`);
+    }
+    return { texto, bytes: contenido.length };
+  },
+
+  /** Diff legible por líneas entre dos textos (lo usa el preview del CLI). */
+  'history.diff': (params) => {
+    const anterior = typeof params.anterior === 'string' ? params.anterior : '';
+    const nuevo = typeof params.nuevo === 'string' ? params.nuevo : '';
+    return { diff: diffDeTextos(anterior, nuevo) };
   },
 
   'sync.close': () => {
