@@ -51,7 +51,7 @@ El server persiste blobs cifrados, registros de revisión firmados y metadatos d
 | `docs/` | especificaciones de protocolo y cripto, ADRs, guía de deploy, runbook |
 | `xtask/` | tareas del repo (`cargo xtask protocol-check`, `cargo xtask backup-restore`) |
 
-El plugin de Obsidian vive en su propio repositorio: [github.com/kastormdz/ovaultd-plugin](https://github.com/kastormdz/ovaultd-plugin).
+El plugin de Obsidian vive en su propio repositorio: [github.com/kastormdz/ovaultd-plugin](https://github.com/kastormdz/ovaultd-plugin). Está publicado en el directorio de la comunidad como **[oVaultd Sync](https://community.obsidian.md/plugins/ovaultd)** — se instala desde el propio Obsidian (Ajustes → Complementos comunitarios → Explorar).
 
 ## Modelo de seguridad
 
