@@ -373,8 +373,12 @@ impl Connection {
     /// la MISMA fuente que un pull (el oplog), no de una copia a mano: así el aviso nunca puede
     /// mentir sobre lo que hay, porque es literalmente lo que un pull devolvería.
     async fn avisar_del_lote(&self, vault_id: i64, device_id: i64, rev: i64) {
-        let Ok(cambios) = crate::delta::changes(&self.pool, vault_id, rev - 1, 0).await else {
-            return;
+        let registros = match crate::delta::registros_de_rev(&self.pool, vault_id, rev).await {
+            Ok(registros) => registros,
+            Err(error) => {
+                let _ = error;
+                return;
+            }
         };
 
         // La spec muestra el device legible ("laptop (Linux)"), así que va el nombre; si el
@@ -387,12 +391,20 @@ impl Connection {
             .flatten()
             .unwrap_or_else(|| device_id.to_string());
 
-        let avisos: Vec<Arc<String>> = cambios
-            .items
+        let avisos: Vec<Arc<String>> = registros
             .iter()
             .filter_map(|registro| aviso_de_registro(registro, &device))
             .map(Arc::new)
             .collect();
+
+        tracing::debug!(
+            vault = vault_id,
+            rev,
+            registros = registros.len(),
+            avisos = avisos.len(),
+            device = %device,
+            "aviso de lote"
+        );
 
         if !avisos.is_empty() {
             self.notifier.avisar(vault_id, device_id, &avisos);
@@ -784,7 +796,8 @@ async fn websocket_with_connection(socket: WebSocket, mut connection: Connection
                     match aviso {
                         // El eco de mi propio batch no sirve: el pull que dispararía no traería
                         // nada nuevo (yo acabo de subirlo y el server ya me devolvió su rev).
-                        Ok(aviso) if Some(aviso.de_device) == connection.device_id => {}
+                        Ok(aviso) if Some(aviso.de_device) == connection.device_id => {
+                        }
                         Ok(aviso) => {
                             if sink
                                 .send(Message::Text(aviso.texto.as_str().into()))

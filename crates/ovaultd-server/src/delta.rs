@@ -108,57 +108,7 @@ pub async fn changes(
         }
 
         for row in &rows[index..end] {
-            let rev = row.get::<i64, _>("rev");
-            let path_id = decode_path_id(row.get::<Vec<u8>, _>("path_id"))?;
-            let op = decode_op(row.get::<String, _>("op"))?;
-
-            let blob_id = decode_blob_id(row.get::<Option<Vec<u8>>, _>("blob_hash"))?;
-
-            let t_mac = row
-                .get::<Option<Vec<u8>>, _>("t_mac")
-                .map(|value| STANDARD.encode(value))
-                .unwrap_or_else(|| STANDARD.encode([0u8; 64]));
-
-            let sig = STANDARD.encode(row.get::<Vec<u8>, _>("sig"));
-
-            let path_enc = row
-                .get::<Option<Vec<u8>>, _>("path_enc")
-                .unwrap_or_default();
-
-            let size = row.get::<Option<i64>, _>("size").unwrap_or(0);
-            let mtime = row.get::<Option<i64>, _>("mtime").unwrap_or(0);
-
-            let size = u64::try_from(size).map_err(|_| invalid("size fuera de rango"))?;
-            let mtime = u64::try_from(mtime).map_err(|_| invalid("mtime fuera de rango"))?;
-
-            let expected_rev =
-                checked_revision(row.get::<i64, _>("expected_rev"), "expected_rev")?;
-
-            let operation_id =
-                decode_operation_id(row.get::<Option<String>, _>("operation_id"))?;
-
-            let epoch = checked_epoch(row.get::<i64, _>("epoch"))?;
-
-            let prev_path_id = row
-                .get::<Option<Vec<u8>>, _>("prev_path_id")
-                .map(decode_path_id)
-                .transpose()?;
-
-            items.push(SignedRecord {
-                rev: checked_revision(rev, "rev")?,
-                op,
-                path_id,
-                blob_id,
-                path_enc,
-                t_mac,
-                sig,
-                size,
-                mtime,
-                expected_rev,
-                operation_id,
-                epoch,
-                prev_path_id,
-            });
+            items.push(registro_de_fila(row)?);
         }
 
         next_since = revision;
@@ -169,6 +119,87 @@ pub async fn changes(
         items,
         next_since: checked_revision(next_since, "next_since")?,
         min_rev: None,
+    })
+}
+
+/// Los registros de UNA revisión, leídos del oplog. A diferencia de `changes`, no aplica la guarda
+/// de `min_rev`: se piden registros que acaban de commitear (los de un lote que el server aplicó
+/// hace un instante), así que el truncado del oplog no puede haberlos alcanzado. Con `changes` y
+/// `since = rev - 1` esto devolvía vacío en el primer lote de un vault (`min_rev = 1`, `rev = 1`),
+/// y el aviso del lote nunca salía.
+pub async fn registros_de_rev(
+    pool: &SqlitePool,
+    vault_id: i64,
+    rev: i64,
+) -> Result<Vec<SignedRecord>> {
+    let rows = sqlx::query(
+        "SELECT rev, path_id, op, path_enc, prev_path_id,
+                blob_hash, t_mac, sig, epoch, size, mtime,
+                operation_id, expected_rev
+         FROM revisions
+         WHERE vault_id = ? AND rev = ?
+         ORDER BY rev, path_id",
+    )
+    .bind(vault_id)
+    .bind(rev)
+    .fetch_all(pool)
+    .await?;
+
+    rows.iter().map(registro_de_fila).collect()
+}
+
+/// Mapeo de una fila del oplog a su registro firmado. Una sola fuente para el pull y para los
+/// avisos: el aviso no puede mentir sobre lo que hay, porque es exactamente el mismo registro que
+/// un pull devolvería.
+fn registro_de_fila(row: &sqlx::sqlite::SqliteRow) -> Result<SignedRecord> {
+    let rev = row.get::<i64, _>("rev");
+    let path_id = decode_path_id(row.get::<Vec<u8>, _>("path_id"))?;
+    let op = decode_op(row.get::<String, _>("op"))?;
+
+    let blob_id = decode_blob_id(row.get::<Option<Vec<u8>>, _>("blob_hash"))?;
+
+    let t_mac = row
+        .get::<Option<Vec<u8>>, _>("t_mac")
+        .map(|value| STANDARD.encode(value))
+        .unwrap_or_else(|| STANDARD.encode([0u8; 64]));
+
+    let sig = STANDARD.encode(row.get::<Vec<u8>, _>("sig"));
+
+    let path_enc = row
+        .get::<Option<Vec<u8>>, _>("path_enc")
+        .unwrap_or_default();
+
+    let size = row.get::<Option<i64>, _>("size").unwrap_or(0);
+    let mtime = row.get::<Option<i64>, _>("mtime").unwrap_or(0);
+
+    let size = u64::try_from(size).map_err(|_| invalid("size fuera de rango"))?;
+    let mtime = u64::try_from(mtime).map_err(|_| invalid("mtime fuera de rango"))?;
+
+    let expected_rev = checked_revision(row.get::<i64, _>("expected_rev"), "expected_rev")?;
+
+    let operation_id = decode_operation_id(row.get::<Option<String>, _>("operation_id"))?;
+
+    let epoch = checked_epoch(row.get::<i64, _>("epoch"))?;
+
+    let prev_path_id = row
+        .get::<Option<Vec<u8>>, _>("prev_path_id")
+        .map(decode_path_id)
+        .transpose()?;
+
+    Ok(SignedRecord {
+        rev: checked_revision(rev, "rev")?,
+        op,
+        path_id,
+        blob_id,
+        path_enc,
+        t_mac,
+        sig,
+        size,
+        mtime,
+        expected_rev,
+        operation_id,
+        epoch,
+        prev_path_id,
     })
 }
 

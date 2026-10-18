@@ -308,12 +308,11 @@ impl Notifier {
 
     /// Suscribe una conexión a los avisos de un vault.
     pub fn suscribir(&self, vault_id: i64) -> broadcast::Receiver<Aviso> {
-        self.canales
-            .lock()
-            .expect("el lock del notifier no se envenena")
+        let mut canales = self.canales.lock().expect("el lock del notifier no se envenena");
+        let canal = canales
             .entry(vault_id)
-            .or_insert_with(|| broadcast::channel(CAPACIDAD_CANAL).0)
-            .subscribe()
+            .or_insert_with(|| broadcast::channel(CAPACIDAD_CANAL).0);
+        canal.subscribe()
     }
 
     /// Avisa que hay revisiones nuevas a todos los suscriptos del vault. El `de_device` que las

@@ -36,6 +36,9 @@ struct TestContext {
     _cas_dir: TempDir,
     config: Config,
     cas: Arc<CasStore>,
+    /// Un solo notifier para todo el contexto: cada `connect` levanta su propio server, así que si
+    /// cada uno trajera el suyo, dos conexiones del mismo vault jamás compartirían canal.
+    notifier: Arc<crate::storage::Notifier>,
     device_id: i64,
     token: String,
     vault_id: i64,
@@ -107,6 +110,7 @@ impl TestContext {
             _cas_dir: cas_dir,
             config,
             cas,
+            notifier: std::sync::Arc::new(crate::storage::Notifier::new()),
             device_id,
             token,
             vault_id,
@@ -121,7 +125,7 @@ impl TestContext {
             config: self.config.clone(),
             cas: self.cas.clone(),
             limitador_login: Default::default(),
-            notifier: std::sync::Arc::new(crate::storage::Notifier::new()),
+            notifier: self.notifier.clone(),
         }
     }
 
@@ -259,13 +263,24 @@ async fn hello(
     vault_id: i64,
     since: u64,
 ) -> Result<Value, Box<dyn std::error::Error>> {
+    hello_con(socket, vault_id, context.device_id, since).await
+}
+
+/// `hello` para un dispositivo concreto: un segundo dispositivo de la misma cuenta y el mismo
+/// vault es lo que hace falta para probar que el aviso viaja entre dispositivos.
+async fn hello_con(
+    socket: &mut Ws,
+    vault_id: i64,
+    device_id: i64,
+    since: u64,
+) -> Result<Value, Box<dyn std::error::Error>> {
     send_json(
         socket,
         json!({
             "t": "hello",
             "proto": 1,
             "vault": vault_id,
-            "device": context.device_id,
+            "device": device_id,
             "since": since
         }),
     )
@@ -278,19 +293,25 @@ async fn authenticate(
     socket: &mut Ws,
     context: &TestContext,
 ) -> Result<(Value, Vec<u8>), Box<dyn std::error::Error>> {
-    let hello_response = hello(socket, context, context.vault_id, 0).await?;
+    authenticate_con(socket, context, context.device_id).await
+}
+
+/// Autentica como un dispositivo concreto. El `proof` se firma con las claves del VAULT (el server
+/// valida contra `vault_pubkey`), así que un device nuevo de la misma cuenta sólo aporta su
+/// identidad: no hace falta un segundo juego de claves en el test.
+async fn authenticate_con(
+    socket: &mut Ws,
+    context: &TestContext,
+    device_id: i64,
+) -> Result<(Value, Vec<u8>), Box<dyn std::error::Error>> {
+    let hello_response = hello_con(socket, context.vault_id, device_id, 0).await?;
     let challenge = STANDARD.decode(
         hello_response["challenge"]
             .as_str()
             .ok_or("falta challenge")?,
     )?;
 
-    let proof = ovaultd_crypto::sign_proof(
-        &context.keys,
-        context.vault_id,
-        context.device_id,
-        &challenge,
-    );
+    let proof = ovaultd_crypto::sign_proof(&context.keys, context.vault_id, device_id, &challenge);
 
     send_json(
         socket,
@@ -1121,3 +1142,75 @@ async fn subprotocolo_sin_bearer_ni_header_rechaza_el_upgrade(
 //   al endpoint HTTP. La implementación actual sólo devuelve `max_file_exceeded`
 //   y cierra la conexión; no realiza ningún redireccionamiento HTTP, porque un
 //   WebSocket no puede redirigir la solicitud original a otro endpoint.
+
+/// El aviso viaja al OTRO dispositivo del vault, y sólo a él: es lo que hace que un cliente con
+/// Obsidian ya abierto se entere de lo que subió el otro sin esperar a nada.
+///
+/// Cubre las tres reglas que hacen que el aviso sirva: llega al otro (no al emisor, que no
+/// necesita un pull inútil), trae el registro completo como lo define la spec, y no puede romper
+/// el batch que lo originó.
+#[tokio::test]
+async fn el_otro_dispositivo_del_vault_recibe_el_aviso_del_lote(
+) -> Result<(), Box<dyn std::error::Error>> {
+    // Un cuelgue acá significa que el aviso no llegó, no que el test sea lento: el timeout lo
+    // convierte en un fallo legible en vez de dejar la corrida colgada.
+    tokio::time::timeout(std::time::Duration::from_secs(20), aviso_entre_dispositivos()).await??;
+    Ok(())
+}
+
+async fn aviso_entre_dispositivos() -> Result<(), Box<dyn std::error::Error>> {
+    let context = TestContext::new().await?;
+
+    // Segundo dispositivo de la MISMA cuenta, con su propia sesión: `hello` exige que el device
+    // coincida con el del token, así que no alcanza con insertar la fila a mano.
+    let (token_otro, otro_device) = auth::iniciar_sesion(
+        &context.pool,
+        "a@example.com",
+        auth::PASSWORD_DE_PRUEBA,
+        "telefono",
+        Some("Android"),
+    )
+    .await?;
+
+    // El que escucha: el dispositivo del contexto. El otro es el que sube.
+    let mut escucha = connect(&context, Some(&context.token)).await?;
+    authenticate(&mut escucha.socket, &context).await?;
+
+    let mut sube = connect(&context, Some(&token_otro)).await?;
+    authenticate_con(&mut sube.socket, &context, otro_device).await?;
+
+    subir_blob(&mut sube.socket, 1, CONTENIDO_DEL_BLOB).await?;
+    let operation_id = Uuid::new_v4().to_string();
+    send_json(&mut sube.socket, batch_value(&context, &operation_id, true)).await?;
+
+    let ack = recv_json(&mut sube.socket).await?;
+    assert_eq!(ack["t"], "batch_ack", "el que sube recibe su ack: {ack}");
+
+    // El aviso: con el registro completo (la spec: rev, op, path, blob, MAC y firma) y con el
+    // nombre del dispositivo que lo produjo.
+    let aviso = recv_json(&mut escucha.socket).await?;
+    assert_eq!(aviso["t"], "notify", "el que escucha recibe el aviso: {aviso}");
+    assert_eq!(aviso["device"], "telefono", "el aviso dice quién subió: {aviso}");
+    assert_eq!(aviso["rev"], ack["rev"], "apunta a la revisión del lote: {aviso}");
+    assert_eq!(aviso["op"], "add", "la operación del registro: {aviso}");
+    assert_eq!(aviso["deleted"], false, "no es un tombstone: {aviso}");
+    assert!(
+        aviso["path_id"].as_str().is_some_and(|p| !p.is_empty()),
+        "trae el path_id del registro: {aviso}"
+    );
+    assert!(
+        aviso["sig"].as_str().is_some_and(|s| !s.is_empty()),
+        "trae la firma del registro: {aviso}"
+    );
+    assert_eq!(aviso["size"], CONTENIDO_DEL_BLOB.len(), "trae el tamaño: {aviso}");
+
+    // Y el emisor NO recibe su propio eco: el pull que dispararía no traería nada nuevo. Si el
+    // eco llegara, el `ping` de abajo se leería como notify y este assert fallaría.
+    send_json(&mut sube.socket, json!({"t": "ping"})).await?;
+    let respuesta = recv_json(&mut sube.socket).await?;
+    assert_eq!(respuesta["t"], "ping", "sin eco para el emisor: {respuesta}");
+
+    escucha.server.abort();
+    sube.server.abort();
+    Ok(())
+}
