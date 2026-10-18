@@ -5,6 +5,23 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y e
 [semver](https://semver.org/lang/es/): server y plugin viajan en un **release train** (mismo
 `MAJOR.MINOR` = pareja probada junta; ver ADR-0018 y la sección «Compatibilidad» del README).
 
+## [0.2.6] — 2026-10-18
+
+Fix de una carrera del handshake: dos conexiones paralelas del mismo dispositivo ya no se pisan.
+
+### Fixed
+
+- **El `hello` del WS emite SIEMPRE un challenge nuevo.** Reusaba el challenge pendiente del
+  dispositivo, así que dos conexiones simultáneas del mismo device (el motor del plugin y una
+  lectura al vuelo — historia, resolver, export) firmaban el MISMO challenge: la primera lo
+  consumía al autenticar y la segunda quedaba rechazada con `unauthorized`. El motor del plugin
+  moría al recargar con una lectura en paralelo (carrera reproducida en producción el
+  2026-10-18); ahora cada conexión tiene su challenge y el retry re-firma el que acaba de
+  recibir. Covered-by: `ws::tests::dos_conexiones_paralelas_del_mismo_device_autentican_las_dos`.
+- El endpoint HTTP `/challenge` + `/access` conserva el reuso a propósito: el proof lleva el
+  challenge dentro de la firma, así que el server DEBE buscar el pendiente no consumido para
+  verificar (flujo secuencial del CLI).
+
 ## [0.2.5] — 2026-10-18
 
 Fase 5, cortes 5a+5b: historia por archivo y snapshots (server) + el cliente de historia

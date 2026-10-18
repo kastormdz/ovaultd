@@ -626,8 +626,8 @@ async fn auth_con_proof_invalido_da_error_y_no_quema_el_challenge(
             .ok_or("falta challenge")?,
     )?;
 
-    assert_eq!(challenge_b, challenge_a);
-
+    // El reuso del challenge se eliminó a propósito (rompía las conexiones paralelas del mismo
+    // device): la reconexión recibe un challenge NUEVO y con ese se autentica.
     let valid_proof = ovaultd_crypto::sign_proof(
         &context.keys,
         context.vault_id,
@@ -645,8 +645,29 @@ async fn auth_con_proof_invalido_da_error_y_no_quema_el_challenge(
     .await?;
 
     let valid_response = recv_json(&mut ws2.socket).await?;
-    assert_eq!(valid_response["t"], "auth_ok");
+    assert_eq!(
+        valid_response["t"], "auth_ok",
+        "el retry autentica con su challenge: {valid_response}"
+    );
     assert_eq!(valid_response["rev"], 0);
+
+    // Y el challenge del primer intento sigue SIN CONSUMIR en la DB: el proof inválido no lo
+    // quemó (la prueba directa, sin depender de que una reconexión lo devuelva).
+    let estado: Option<Option<String>> = sqlx::query_scalar(
+        "SELECT used_at
+         FROM auth_challenges
+         WHERE device_id = ? AND vault_id = ? AND challenge = ?",
+    )
+    .bind(context.device_id)
+    .bind(context.vault_id)
+    .bind(&challenge_a)
+    .fetch_optional(&context.pool)
+    .await?;
+    assert_eq!(
+        estado,
+        Some(None),
+        "el challenge del intento fallido sigue vigente y sin consumir"
+    );
 
     ws2.server.abort();
     Ok(())
@@ -1214,5 +1235,73 @@ async fn aviso_entre_dispositivos() -> Result<(), Box<dyn std::error::Error>> {
 
     escucha.server.abort();
     sube.server.abort();
+    Ok(())
+}
+
+/// DOS conexiones PARALELAS del mismo dispositivo: las dos tienen que autenticar. Este era el bug
+/// real de la fase 5: el `hello` reusaba el challenge pendiente del device, las dos conexiones
+/// firmaban el MISMO challenge, la primera lo consumía al autenticar y la segunda quedaba
+/// rechazada con "no autorizado" (el motor del plugin moría al recargar con una lectura al vuelo
+/// en paralelo — carrera cazada en vivo el 2026-10-18).
+#[tokio::test]
+async fn dos_conexiones_paralelas_del_mismo_device_autentican_las_dos(
+) -> Result<(), Box<dyn std::error::Error>> {
+    // Un cuelgue acá sería la segunda autenticación sin respuesta, no un test lento.
+    tokio::time::timeout(std::time::Duration::from_secs(20), paralelas()).await??;
+    Ok(())
+}
+
+async fn paralelas() -> Result<(), Box<dyn std::error::Error>> {
+    let context = TestContext::new().await?;
+
+    let mut una = connect(&context, Some(&context.token)).await?;
+    let mut otra = connect(&context, Some(&context.token)).await?;
+
+    // Los DOS `hello` primero: es el interleaving real (el motor y la lectura al vuelo piden
+    // challenge casi juntos, antes de que ninguno autentique).
+    let h_una = hello_con(&mut una.socket, context.vault_id, context.device_id, 0).await?;
+    let h_otra = hello_con(&mut otra.socket, context.vault_id, context.device_id, 0).await?;
+
+    let challenge_una = STANDARD.decode(h_una["challenge"].as_str().ok_or("falta challenge")?)?;
+    let challenge_otra = STANDARD.decode(h_otra["challenge"].as_str().ok_or("falta challenge")?)?;
+    assert_ne!(
+        challenge_una, challenge_otra,
+        "cada conexión recibe SU challenge: reusar el pendiente rompía las paralelas"
+    );
+
+    // Cada firma va con su challenge: las DOS autentican.
+    let proof_una = ovaultd_crypto::sign_proof(
+        &context.keys,
+        context.vault_id,
+        context.device_id,
+        &challenge_una,
+    );
+    send_json(
+        &mut una.socket,
+        json!({"t": "auth", "proof": STANDARD.encode(proof_una)}),
+    )
+    .await?;
+    let r_una = recv_json(&mut una.socket).await?;
+    assert_eq!(r_una["t"], "auth_ok", "la primera autentica: {r_una}");
+
+    let proof_otra = ovaultd_crypto::sign_proof(
+        &context.keys,
+        context.vault_id,
+        context.device_id,
+        &challenge_otra,
+    );
+    send_json(
+        &mut otra.socket,
+        json!({"t": "auth", "proof": STANDARD.encode(proof_otra)}),
+    )
+    .await?;
+    let r_otra = recv_json(&mut otra.socket).await?;
+    assert_eq!(
+        r_otra["t"], "auth_ok",
+        "la SEGUNDA también autentica (era la que el reuso del challenge rechazaba): {r_otra}"
+    );
+
+    una.server.abort();
+    otra.server.abort();
     Ok(())
 }

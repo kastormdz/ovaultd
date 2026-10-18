@@ -220,15 +220,14 @@ impl Connection {
             .await
             .map_err(WsFailure::from_server_error)?;
 
-        let challenge = match auth::challenge_pendiente(&self.pool, device_id, hello.vault)
+        // SIEMPRE un challenge NUEVO: reusar el pendiente rompía las conexiones PARALELAS
+        // del mismo device (el motor + una lectura al vuelo al recargar el plugin: las dos
+        // recibían el mismo challenge, la primera lo consumía y la segunda quedaba
+        // rechazada con "no autorizado" — carrera real del 2026-10-18). El cliente firma
+        // el challenge que acaba de recibir, así que emitir uno nuevo no le cuesta nada.
+        let challenge = auth::emitir_challenge(&self.pool, device_id, hello.vault)
             .await
-            .map_err(WsFailure::from_server_error)?
-        {
-            Some(challenge) => challenge,
-            None => auth::emitir_challenge(&self.pool, device_id, hello.vault)
-                .await
-                .map_err(WsFailure::from_server_error)?,
-        };
+            .map_err(WsFailure::from_server_error)?;
 
         let head_rev = sqlx::query_scalar::<_, i64>(
             "SELECT head_rev
