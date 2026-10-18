@@ -24,6 +24,20 @@ pub struct Config {
     /// cuando hay un borde de confianza adelante (ej. NPM/nginx en el mismo host): si no,
     /// la IP del cliente y el `Secure` de la cookie quedan a merced de quien mande el header.
     pub trust_proxy: bool,
+    /// Exposición de `GET /metrics` (F-09 de la auditoría): `off` no monta la ruta (404),
+    /// `localhost` responde solo al peer TCP de loopback (acceso directo al puerto, sin
+    /// borde) y `on` la expone como el resto del API (restringila en el borde). Default
+    /// `off`: las métricas exponen la disponibilidad del proceso y no tienen por qué ser
+    /// públicas.
+    pub metrics: ModoMetrics,
+}
+
+/// Modo de exposición de `/metrics`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModoMetrics {
+    Off,
+    Localhost,
+    On,
 }
 
 /// Modo de la marca `Secure` de la cookie de sesión del panel.
@@ -95,6 +109,17 @@ impl Config {
             }
         };
 
+        let metrics = match valor(&get, "OVAULTD_METRICS").as_deref() {
+            None | Some("off") => ModoMetrics::Off,
+            Some("localhost") => ModoMetrics::Localhost,
+            Some("on") => ModoMetrics::On,
+            Some(otro) => {
+                return Err(ServerError::Invalid(format!(
+                    "OVAULTD_METRICS tiene un valor inválido: {otro:?} (off|localhost|on)"
+                )))
+            }
+        };
+
         Ok(Self {
             bind_addr,
             database_path,
@@ -105,6 +130,7 @@ impl Config {
             setup_token,
             secure_cookies,
             trust_proxy,
+            metrics,
         })
     }
 }

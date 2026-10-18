@@ -386,6 +386,14 @@ pub async fn emitir_challenge(
     device_id: i64,
     vault_id: i64,
 ) -> Result<Vec<u8>> {
+    // Barrido perezoso de vencidos (el patrón de `uploads::barrer`, y para eso está el
+    // índice `idx_challenges_expira`): cada `hello` emite un challenge y sin barrido la
+    // tabla crece sin techo con clientes que nunca los consumen. Es higiene: si el DELETE
+    // falla, la emisión sigue igual.
+    let _ = sqlx::query("DELETE FROM auth_challenges WHERE expires_at < datetime('now')")
+        .execute(pool)
+        .await;
+
     let challenge = token_bytes();
     let ttl_seconds = env_i64("OVAULTD_CHALLENGE_TTL", 300);
     let expires_modifier = format!("+{ttl_seconds} seconds");

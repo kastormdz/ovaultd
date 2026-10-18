@@ -110,6 +110,8 @@ impl TestContext {
             // Los tests simulan el deploy real (detrás de un borde de confianza); los tests
             // del modelo "sin borde" apagan `contexto.config.trust_proxy` a mano.
             trust_proxy: true,
+            // El modo más completo del server; los tests de `off`/`localhost` lo cambian.
+            metrics: ovaultd_server::config::ModoMetrics::On,
         };
         let cas = Arc::new(CasStore::new(cas_dir.path().to_path_buf())?);
 

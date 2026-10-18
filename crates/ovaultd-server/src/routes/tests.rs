@@ -86,6 +86,7 @@ impl TestContext {
             setup_token: None,
             secure_cookies: crate::config::ModoSecureCookies::Auto,
             trust_proxy: true,
+            metrics: crate::config::ModoMetrics::On,
         };
 
         let cas = Arc::new(CasStore::new(cas_dir.path().to_path_buf())?);
@@ -347,6 +348,41 @@ async fn metrics_expone_solo_operacion() -> Result<(), Box<dyn std::error::Error
     assert!(body.contains("ovaultd_up 1"));
     assert!(body.contains("ovaultd_uptime_seconds"));
     assert!(!body.contains("token"), "metrics no expone secretos");
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn metrics_apagado_no_existe_y_localhost_exige_loopback(
+) -> Result<(), Box<dyn std::error::Error>> {
+    // Apagado (el default): la ruta no se monta — 404 como cualquier ruta inexistente.
+    let mut context = TestContext::new().await?;
+    context.config.metrics = crate::config::ModoMetrics::Off;
+
+    let response = context
+        .request(
+            Request::builder()
+                .method(axum::http::Method::GET)
+                .uri("/metrics")
+                .body(Body::empty())?,
+        )
+        .await?;
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+    // `localhost`: sin connect info (el harness usa `oneshot`, no hay peer TCP) no hay
+    // loopback del que fiarse → 404. Un request que llegó por el borde tampoco lo es,
+    // aunque su X-Forwarded-For diga 127.0.0.1.
+    context.config.metrics = crate::config::ModoMetrics::Localhost;
+
+    let response = context
+        .request(
+            Request::builder()
+                .method(axum::http::Method::GET)
+                .uri("/metrics")
+                .body(Body::empty())?,
+        )
+        .await?;
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
 
     Ok(())
 }

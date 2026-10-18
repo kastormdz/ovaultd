@@ -5,6 +5,30 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y e
 [semver](https://semver.org/lang/es/): server y plugin viajan en un **release train** (mismo
 `MAJOR.MINOR` = pareja probada junta; ver ADR-0018 y la sección «Compatibilidad» del README).
 
+## [0.2.4] — 2026-10-18
+
+Segundo bloque del plan de remediación (P1 de la auditoría del 2026-10-18): higiene de la
+superficie de operación y de la cadena de suministro del CI.
+
+### Changed
+
+- **`/metrics` sale de `OVAULTD_METRICS` y queda apagado por defecto** (`off`): la ruta no
+  existe (404) y el endpoint deja de ser público sin pedirlo. `localhost` responde solo al
+  peer TCP de loopback (el acceso directo al puerto: un request que llegó por el borde no lo
+  es, aunque su `X-Forwarded-For` diga `127.0.0.1`); `on` la expone como el resto del API y
+  conviene cortarla en el borde (`docs/deploy.md` trae el `location /metrics { deny all; }`).
+
+### Fixed
+
+- **`auth_challenges` se barre al emitir**: los vencidos se limpian en cada emisión (perezoso,
+  el patrón de `uploads::barrer`, sobre el índice `idx_challenges_expira` que ya existía).
+  Sin el barrido, un cliente sin credenciales podía hacer crecer la tabla con `hello`s que
+  nunca consume.
+- **Las Actions del CI van pinneadas por SHA** (commit completo + comentario de la versión) y
+  el gate corre **`osv-scanner`** (versión fijada; el binario se verifica contra su
+  `SHA256SUMS` oficial) sobre `Cargo.lock` y los `package-lock.json`: con hallazgos, el gate
+  cae y la release no se publica. Dependabot mantiene los pins actualizados.
+
 ## [0.2.3] — 2026-10-18
 
 Corrección del P0 sobre la 0.2.2, cazada por la verificación del deploy en producción.

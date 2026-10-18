@@ -1,0 +1,8 @@
+# F-06 (auditoría 2026-10-18): las actions del CI van pinneadas por SHA — para que el pin no
+# se quede viejo, Dependabot abre el PR con el SHA nuevo (y actualiza el comentario).
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

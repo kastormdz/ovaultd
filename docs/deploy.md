@@ -162,7 +162,15 @@ location / {
 Con Caddy: `reverse_proxy ovaultd:8080` ya preserva Host y hace WebSocket; Caddy no limita el
 body por defecto (no hace falta `request_body`).
 
-Aviso de seguridad: `/metrics` no lleva auth. Dejalo en red interna o restringilo en el borde.
+**`/metrics`**: la ruta sale de `OVAULTD_METRICS` — `off` por defecto (no existe: 404),
+`localhost` (solo el peer de loopback) u `on` (expuesta como el resto del API). Con `on`,
+restringila en el borde:
+
+```nginx
+location /metrics {
+    deny all;    # 403; si preferís ni revelar que existe: `return 404;`
+}
+```
 
 ## Backups
 

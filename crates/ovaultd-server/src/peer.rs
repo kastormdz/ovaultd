@@ -32,6 +32,10 @@ use crate::routes::EstadoServidor;
 /// request (un valor puesto por el cliente nunca sobrevive).
 const HEADER_IP: HeaderName = HeaderName::from_static("x-ovaultd-ip-cliente");
 
+/// Header interno con el peer TCP crudo (el del socket, sin headers). Lo usan los chequeos
+/// de loopback, que no deben creerle a ningún header del cliente.
+const HEADER_PEER: HeaderName = HeaderName::from_static("x-ovaultd-peer");
+
 /// Middleware: resuelve la IP (headers solo si `trust_proxy`; si no, peer TCP) y la deja en
 /// el header interno. NUNCA falla ni corta: es una anotación.
 pub async fn resolver_ip_de_cliente(
@@ -45,6 +49,19 @@ pub async fn resolver_ip_de_cliente(
         .map(|ConnectInfo(addr)| addr.ip());
 
     let ip = ip_del_cliente(request.headers(), estado.config.trust_proxy, peer);
+
+    // Los dos datos internos se PISAN siempre (un valor del cliente no sobrevive): la IP
+    // resuelta (freno y auditoría) y el peer TCP crudo (chequeos de loopback).
+    match peer {
+        Some(addr) => {
+            if let Ok(valor) = HeaderValue::from_str(&addr.to_string()) {
+                request.headers_mut().insert(HEADER_PEER, valor);
+            }
+        }
+        None => {
+            request.headers_mut().remove(HEADER_PEER);
+        }
+    }
 
     match ip {
         Some(ip) => {
@@ -110,6 +127,15 @@ pub fn ip_de(headers: &HeaderMap) -> Option<String> {
         .and_then(|valor| valor.to_str().ok())
         .map(str::to_owned)
         .filter(|ip| !ip.is_empty())
+}
+
+/// El peer TCP crudo del request (nunca un header del cliente: el middleware lo pisa). Es
+/// lo que miran los chequeos de loopback.
+pub fn peer_de(headers: &HeaderMap) -> Option<IpAddr> {
+    headers
+        .get(&HEADER_PEER)
+        .and_then(|valor| valor.to_str().ok())
+        .and_then(|valor| valor.parse().ok())
 }
 
 #[cfg(test)]

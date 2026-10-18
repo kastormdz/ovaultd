@@ -53,9 +53,16 @@ pub fn router(estado: EstadoServidor) -> Router {
     // queda con la otra en `with_state`).
     let estado_para_ip = estado.clone();
 
-    Router::new()
-        .route("/healthz", get(healthz))
-        .route("/metrics", get(metrics))
+    // F-09: con `metrics` apagado la ruta no existe (404). En `localhost`, el handler exige
+    // que el peer TCP sea loopback; en `on`, queda como el resto del API.
+    let router = Router::new().route("/healthz", get(healthz));
+    let router = if estado.config.metrics == crate::config::ModoMetrics::Off {
+        router
+    } else {
+        router.route("/metrics", get(metrics))
+    };
+
+    router
         .route("/", get(raiz))
         .route("/setup", get(setup_form).post(setup_crear))
         .merge(crate::admin::rutas())
@@ -392,8 +399,22 @@ async fn setup_crear(
 
 /// `GET /metrics` — Prometheus mínimo y SOLO de operación: ni secretos ni payloads.
 ///
-/// Si no querés que sea público, restringilo en el proxy (`docker/proxy/nginx.conf.example`).
-async fn metrics() -> impl IntoResponse {
+/// El modo sale de la config (`OVAULTD_METRICS`): en `localhost`, responde solo al peer TCP
+/// de loopback (el acceso directo al puerto; un request que llegó por el borde no lo es,
+/// aunque su `X-Forwarded-For` diga `127.0.0.1`); en `on`, queda expuesto como el resto del
+/// API y conviene restringirlo en el borde (`location /metrics { deny all; }`, ver
+/// `docs/deploy.md`).
+async fn metrics(
+    State(estado): State<EstadoServidor>,
+    headers: HeaderMap,
+) -> axum::response::Response {
+    if estado.config.metrics == crate::config::ModoMetrics::Localhost
+        && !crate::peer::peer_de(&headers)
+            .map(|ip| ip.is_loopback())
+            .unwrap_or(false)
+    {
+        return StatusCode::NOT_FOUND.into_response();
+    }
     let uptime = ARRANQUE
         .get()
         .map(|arranque| arranque.elapsed().as_secs())
@@ -413,6 +434,7 @@ async fn metrics() -> impl IntoResponse {
         [("content-type", "text/plain; version=0.0.4; charset=utf-8")],
         cuerpo,
     )
+        .into_response()
 }
 
 pub struct Autenticado {

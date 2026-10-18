@@ -69,6 +69,57 @@ async fn challenge_vencido_no_se_puede_consumir() -> Result<(), Box<dyn std::err
 }
 
 #[tokio::test]
+async fn emitir_challenge_barre_los_vencidos() -> Result<(), Box<dyn std::error::Error>> {
+    let ctx = TestContext::new().await?;
+
+    // Tres challenges vencidos (uno usado, dos nunca usados): todos son basura.
+    for i in 0..3u8 {
+        sqlx::query(
+            "INSERT INTO auth_challenges (device_id, vault_id, challenge, expires_at, used_at)
+             VALUES (?, ?, ?, datetime('now', '-1 hour'), ?)",
+        )
+        .bind(ctx.device_id)
+        .bind(ctx.vault_id)
+        .bind(vec![i; 32])
+        .bind(if i == 0 {
+            Some("2026-01-01 00:00:00")
+        } else {
+            None
+        })
+        .execute(&ctx.pool)
+        .await?;
+    }
+
+    let vencidos_antes: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM auth_challenges WHERE expires_at < datetime('now')",
+    )
+    .fetch_one(&ctx.pool)
+    .await?;
+    assert_eq!(vencidos_antes, 3);
+
+    // Emitir barre los vencidos (perezoso, el patrón de `uploads::barrer` con el índice
+    // `idx_challenges_expira`) y deja el recién emitido.
+    let fresco = auth::emitir_challenge(&ctx.pool, ctx.device_id, ctx.vault_id).await?;
+
+    let vencidos_despues: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM auth_challenges WHERE expires_at < datetime('now')",
+    )
+    .fetch_one(&ctx.pool)
+    .await?;
+    assert_eq!(vencidos_despues, 0, "el barrido deja la tabla sin vencidos");
+
+    assert_eq!(
+        auth::challenge_pendiente(&ctx.pool, ctx.device_id, ctx.vault_id)
+            .await?
+            .as_deref(),
+        Some(fresco.as_slice()),
+        "el challenge recién emitido no se barre"
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn challenge_ligado_al_device_y_al_vault() -> Result<(), Box<dyn std::error::Error>> {
     let ctx = TestContext::new().await?;
 

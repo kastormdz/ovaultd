@@ -98,6 +98,7 @@ impl TestContext {
             setup_token: None,
             secure_cookies: crate::config::ModoSecureCookies::Auto,
             trust_proxy: true,
+            metrics: crate::config::ModoMetrics::On,
         };
 
         let cas = Arc::new(CasStore::new(cas_dir.path().to_path_buf())?);
