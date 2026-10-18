@@ -132,6 +132,14 @@ Dos formas, ambas válidas:
    únicamente si el server está detrás de tu borde: sin borde, esos headers los puede mandar
    cualquiera y falsearían la IP del freno de login y el `Secure` de la cookie. El borde
    tiene que pisarlos SIEMPRE (el ejemplo usa `$remote_addr`, que ignora los del cliente).
+   **Ojo con NPM Plus**: su `real_ip` (activo por defecto) resuelve la IP del
+   `X-Forwarded-For` cuando el peer cae en una red "confiable" (`set_real_ip_from`: redes
+   privadas + rangos de Cloudflare). Es el modelo esperado del borde —los requests de esas
+   redes pueden decir su IP y el server la obedece—; para un peer de internet la IP queda
+   real y el XFF del atacante viaja como `<basura>, <ip-real>`: el server toma la última y
+   el freno no se puede falsificar desde afuera. Verificación sin salir del host: forzar el
+   peer por una interfaz fuera de esas listas (p.ej. Tailscale, 100.64/10) y comprobar que
+   la auditoría registra la IP del peer y no el header.
 
 nginx mínimo de referencia:
 
