@@ -121,6 +121,7 @@ impl TestContext {
             config: self.config.clone(),
             cas: self.cas.clone(),
             limitador_login: Default::default(),
+            notifier: std::sync::Arc::new(crate::storage::Notifier::new()),
         }
     }
 

@@ -60,6 +60,7 @@ impl Contexto {
                 config,
                 cas,
                 limitador_login: Default::default(),
+                notifier: std::sync::Arc::new(ovaultd_server::storage::Notifier::new()),
             },
             pool,
             _db_dir: db_dir,

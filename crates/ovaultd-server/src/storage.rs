@@ -1,10 +1,13 @@
 use crate::error::{Result, ServerError};
 use sha2::{Digest, Sha256};
 use sqlx::SqlitePool;
+use std::collections::HashMap;
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 use ovaultd_protocol::BlobId;
+use tokio::sync::broadcast;
 use tokio::task;
 use uuid::Uuid;
 
@@ -270,6 +273,73 @@ fn publish_sync(root: &Path, hash: &BlobId, bytes: &[u8]) -> Result<()> {
     }
 
     result
+}
+
+/// Señal de "hay revisiones nuevas en el vault N" para las conexiones de ese vault.
+///
+/// Es SOLO una señal, nunca una fuente de verdad: el cliente que la recibe hace un pull con su
+/// `since` y relee el oplog. Por eso un aviso perdido (receptor lento, canal lleno, nadie
+/// escuchando, un cliente que estaba reconectando) no pierde datos — y por eso el plan dice que
+/// no se usa un broadcast descartable como fuente de verdad: es un empujón.
+#[derive(Clone)]
+pub struct Notifier {
+    canales: Arc<Mutex<HashMap<i64, broadcast::Sender<Aviso>>>>,
+}
+
+/// Un aviso en tránsito: el JSON que viaja al cliente y **quién lo produjo**. El emisor va en el
+/// sobre y no dentro del JSON a propósito: la spec del wire no cambia, y así cada conexión puede
+/// saltear su propio eco (el pull que dispara un aviso no sirve para quien acaba de subir).
+#[derive(Clone)]
+pub struct Aviso {
+    pub de_device: i64,
+    pub texto: Arc<String>,
+}
+
+/// Cuántos avisos puede atrasarse un receptor antes de que el canal lo marque `lagged`. Si se
+/// atrasa, el cliente igual relee el oplog con su `since`: el aviso es sólo el empujón.
+const CAPACIDAD_CANAL: usize = 64;
+
+impl Notifier {
+    pub fn new() -> Self {
+        Self {
+            canales: Arc::new(Mutex::new(HashMap::new())),
+        }
+    }
+
+    /// Suscribe una conexión a los avisos de un vault.
+    pub fn suscribir(&self, vault_id: i64) -> broadcast::Receiver<Aviso> {
+        self.canales
+            .lock()
+            .expect("el lock del notifier no se envenena")
+            .entry(vault_id)
+            .or_insert_with(|| broadcast::channel(CAPACIDAD_CANAL).0)
+            .subscribe()
+    }
+
+    /// Avisa que hay revisiones nuevas a todos los suscriptos del vault. El `de_device` que las
+    /// produjo viaja en el sobre, así que cada conexión saltea su propio eco.
+    pub fn avisar(&self, vault_id: i64, de_device: i64, avisos: &[Arc<String>]) {
+        let canales = self
+            .canales
+            .lock()
+            .expect("el lock del notifier no se envenena");
+        let Some(canal) = canales.get(&vault_id) else {
+            return;
+        };
+        for texto in avisos {
+            // Sin receptores el envío falla y se descarta: es una señal, no una cola.
+            let _ = canal.send(Aviso {
+                de_device,
+                texto: texto.clone(),
+            });
+        }
+    }
+}
+
+impl Default for Notifier {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 #[cfg(test)]

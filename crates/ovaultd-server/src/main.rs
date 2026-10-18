@@ -63,6 +63,7 @@ async fn iniciar_servidor() -> Result<(), String> {
         config,
         cas: cas.into(),
         limitador_login: Default::default(),
+        notifier: std::sync::Arc::new(ovaultd_server::storage::Notifier::new()),
     };
     let app = routes::router(estado);
 

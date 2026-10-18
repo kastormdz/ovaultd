@@ -42,6 +42,9 @@ pub struct TestContext {
     /// Compartido entre requests (el `estado()` clona el Arc): el freno de intentos del
     /// panel acumula como en producción (ADR-0017).
     pub limitador_login: Arc<ovaultd_server::admin::sesiones::LimitadorDeLogin>,
+    /// Compartido entre requests igual que el freno del login: el `estado()` clona el Arc, así que
+    /// un aviso emitido desde un request llega a la conexión WebSocket del test.
+    pub notifier: Arc<ovaultd_server::storage::Notifier>,
     pub account_id: i64,
     pub device_id: i64,
     pub token: String,
@@ -114,6 +117,7 @@ impl TestContext {
             config,
             cas,
             limitador_login: Default::default(),
+            notifier: Default::default(),
             account_id: account.id,
             device_id,
             token,
@@ -189,6 +193,7 @@ impl TestContext {
             config: self.config.clone(),
             cas: self.cas.clone(),
             limitador_login: self.limitador_login.clone(),
+            notifier: self.notifier.clone(),
         }
     }
 

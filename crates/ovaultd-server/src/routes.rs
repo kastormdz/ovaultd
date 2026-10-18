@@ -37,6 +37,9 @@ pub struct EstadoServidor {
     pub cas: Arc<CasStore>,
     /// Freno de intentos del login del panel (ADR-0017): en memoria, single-node por diseño.
     pub limitador_login: Arc<crate::admin::sesiones::LimitadorDeLogin>,
+    /// Señal de "hay revisiones" para los clientes conectados por WebSocket. En proceso (single
+    /// node por diseño): no es fuente de verdad, el cliente relee el oplog. Ver `storage::Notifier`.
+    pub notifier: Arc<crate::storage::Notifier>,
 }
 
 pub fn router(estado: EstadoServidor) -> Router {

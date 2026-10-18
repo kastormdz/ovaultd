@@ -1,4 +1,6 @@
+use futures::{SinkExt, StreamExt};
 use std::{collections::HashMap, sync::Arc};
+use tokio::sync::broadcast;
 
 use axum::{
     extract::{
@@ -15,7 +17,7 @@ use base64::{
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use sqlx::SqlitePool;
-use ovaultd_protocol::{Batch, ErrorCode};
+use ovaultd_protocol::{Batch, BlobId, ErrorCode, Op, PathId, SignedRecord};
 
 use crate::{
     auth,
@@ -98,6 +100,20 @@ enum ServerMessage {
         detail: String,
     },
     Ping,
+    /// `notify`: "hay revisiones nuevas en este vault". Lleva el registro completo, como lo define
+    /// la spec, y quien lo recibe hace un pull: el aviso NO es la fuente de verdad, es el empujón.
+    Notify {
+        rev: u64,
+        op: Op,
+        path_id: PathId,
+        blob_id: BlobId,
+        t_mac: String,
+        sig: String,
+        size: u64,
+        device: String,
+        deleted: bool,
+        prev_path_id: Option<PathId>,
+    },
 }
 
 struct BlobTransfer {
@@ -117,6 +133,9 @@ struct Connection {
     since: u64,
     authenticated: bool,
     transfers: HashMap<u64, BlobTransfer>,
+    /// Señal de "hay revisiones" del vault: la conexión se suscribe al autenticarse.
+    notifier: Arc<crate::storage::Notifier>,
+    avisos: Option<broadcast::Receiver<crate::storage::Aviso>>,
 }
 
 impl Connection {
@@ -131,7 +150,15 @@ impl Connection {
             since: 0,
             authenticated: false,
             transfers: HashMap::new(),
+            notifier: state.notifier.clone(),
+            avisos: None,
         }
+    }
+
+    /// Se suscribe a los avisos del vault ya autenticado y entrega el receptor **una sola vez**:
+    /// el loop del WebSocket lo toma y desde ahí escucha los dos canales a la vez.
+    fn tomar_avisos(&mut self) -> Option<broadcast::Receiver<crate::storage::Aviso>> {
+        self.avisos.take()
     }
 
     async fn handle_text(&mut self, text: &str) -> std::result::Result<ServerMessage, WsFailure> {
@@ -304,6 +331,9 @@ impl Connection {
             .map_err(|_| WsFailure::close(ErrorCode::Internal, "revisión inválida"))?;
 
         self.authenticated = true;
+        // A partir de acá esta conexión escucha los avisos del vault: si otro dispositivo
+        // commitea, el loop los reenvía y este cliente se entera sin esperar a nada.
+        self.avisos = Some(self.notifier.suscribir(vault_id));
         self.since = self.since.min(head_rev);
 
         Ok(ServerMessage::AuthOk { rev: self.since })
@@ -329,10 +359,44 @@ impl Connection {
         let rev = u64::try_from(outcome.rev)
             .map_err(|_| WsFailure::close(ErrorCode::Internal, "revisión inválida"))?;
 
+        // El empujón para los demás dispositivos del vault. El batch YA commiteó acá: si el aviso
+        // falla (o no hay nadie escuchando), no se pierde nada — el aviso es una señal, no una cola.
+        self.avisar_del_lote(vault_id, device_id, outcome.rev).await;
+
         Ok(ServerMessage::BatchAck {
             batch_id: message.batch.batch_id.clone(),
             rev,
         })
+    }
+
+    /// Reenvía a los demás dispositivos del vault los registros que acaban de entrar. Los saca de
+    /// la MISMA fuente que un pull (el oplog), no de una copia a mano: así el aviso nunca puede
+    /// mentir sobre lo que hay, porque es literalmente lo que un pull devolvería.
+    async fn avisar_del_lote(&self, vault_id: i64, device_id: i64, rev: i64) {
+        let Ok(cambios) = crate::delta::changes(&self.pool, vault_id, rev - 1, 0).await else {
+            return;
+        };
+
+        // La spec muestra el device legible ("laptop (Linux)"), así que va el nombre; si el
+        // registro no está, el id cumple la misma función: es el filtro del eco.
+        let device = sqlx::query_scalar::<_, String>("SELECT name FROM devices WHERE id = ?")
+            .bind(device_id)
+            .fetch_optional(&self.pool)
+            .await
+            .ok()
+            .flatten()
+            .unwrap_or_else(|| device_id.to_string());
+
+        let avisos: Vec<Arc<String>> = cambios
+            .items
+            .iter()
+            .filter_map(|registro| aviso_de_registro(registro, &device))
+            .map(Arc::new)
+            .collect();
+
+        if !avisos.is_empty() {
+            self.notifier.avisar(vault_id, device_id, &avisos);
+        }
     }
 
     async fn blob_head(
@@ -612,6 +676,25 @@ fn error_code_name(code: ErrorCode) -> &'static str {
     }
 }
 
+/// El `notify` de un registro recién commiteado, armado desde el oplog. El registry guarda
+/// el blob ausente como hash cero (`delta::decode_blob_id`), así que acá se copia tal cual.
+fn aviso_de_registro(registro: &SignedRecord, device: &str) -> Option<String> {
+    let mensaje = ServerMessage::Notify {
+        rev: registro.rev,
+        op: registro.op,
+        path_id: registro.path_id,
+        blob_id: registro.blob_id,
+        t_mac: registro.t_mac.clone(),
+        sig: registro.sig.clone(),
+        size: registro.size,
+        device: device.to_string(),
+        deleted: matches!(registro.op, Op::Del),
+        prev_path_id: registro.prev_path_id,
+    };
+
+    serialize_message(&mensaje).ok()
+}
+
 fn serialize_message(message: &ServerMessage) -> Result<String> {
     serde_json::to_string(message)
         .map_err(|error| ServerError::Invalid(format!("no se pudo serializar WS: {error}")))
@@ -678,7 +761,53 @@ async fn autenticar_upgrade(
 }
 
 async fn websocket_with_connection(mut socket: WebSocket, mut connection: Connection) {
-    while let Some(message) = socket.recv().await {
+    // Dos cosas despiertan esta conexión: su propio socket, y la señal de que OTRA conexión del
+    // mismo vault commiteó. El aviso se reenvía tal cual y el cliente que lo recibe hace un pull,
+    // así que el aviso nunca es fuente de verdad (si se pierde, el pull lo recupera).
+    //
+    // El socket va partido en sink/stream para que el `select!` pueda esperar un mensaje del
+    // cliente y escribir un aviso sin prestar dos veces el mismo socket.
+    let (mut sink, mut stream) = socket.split();
+    let mut avisos: Option<broadcast::Receiver<crate::storage::Aviso>> = None;
+
+    loop {
+        // El canal del vault se conoce recién con el `hello`, así que se toma cuando el Connection
+        // ya lo tiene; hasta entonces esta conexión sólo escucha su propio socket.
+        if avisos.is_none() {
+            avisos = connection.tomar_avisos();
+        }
+
+        let message = if let Some(canal) = avisos.as_mut() {
+            tokio::select! {
+                message = stream.next() => message,
+                aviso = canal.recv() => {
+                    match aviso {
+                        // El eco de mi propio batch no sirve: el pull que dispararía no traería
+                        // nada nuevo (yo acabo de subirlo y el server ya me devolvió su rev).
+                        Ok(aviso) if Some(aviso.de_device) == connection.device_id => {}
+                        Ok(aviso) => {
+                            if sink
+                                .send(Message::Text(aviso.texto.as_str().into()))
+                                .await
+                                .is_err()
+                            {
+                                break;
+                            }
+                        }
+                        // Receptor atrasado: se saltea avisos y el pull del cliente con su `since`
+                        // recupera igual lo que quedó en el camino. No es un error.
+                        Err(broadcast::error::RecvError::Lagged(_)) => {}
+                        Err(broadcast::error::RecvError::Closed) => avisos = None,
+                    }
+                    continue;
+                }
+            }
+        } else {
+            stream.next().await
+        };
+
+        let Some(message) = message else { break };
+
         let message = match message {
             Ok(message) => message,
             Err(_) => break,
@@ -688,7 +817,7 @@ async fn websocket_with_connection(mut socket: WebSocket, mut connection: Connec
             Message::Text(text) => connection.handle_text(text.as_str()).await.map(Some),
             Message::Binary(frame) => connection.handle_binary(frame.as_ref()).await,
             Message::Ping(payload) => {
-                if socket.send(Message::Pong(payload)).await.is_err() {
+                if sink.send(Message::Pong(payload)).await.is_err() {
                     break;
                 }
                 Ok(None)
@@ -703,7 +832,7 @@ async fn websocket_with_connection(mut socket: WebSocket, mut connection: Connec
                     break;
                 };
 
-                if socket.send(Message::Text(text.into())).await.is_err() {
+                if sink.send(Message::Text(text.into())).await.is_err() {
                     break;
                 }
             }
@@ -713,10 +842,10 @@ async fn websocket_with_connection(mut socket: WebSocket, mut connection: Connec
                     break;
                 };
 
-                let _ = socket.send(Message::Text(text.into())).await;
+                let _ = sink.send(Message::Text(text.into())).await;
 
                 if failure.close {
-                    let _ = socket.send(Message::Close(None)).await;
+                    let _ = sink.send(Message::Close(None)).await;
                     break;
                 }
             }
