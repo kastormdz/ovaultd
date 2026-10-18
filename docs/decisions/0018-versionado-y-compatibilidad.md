@@ -44,8 +44,12 @@ server y plugin, que se sepa cuándo son compatibles, y poder publicar releases.
 
 ### Releases en GitHub
 
-- Tags por artefacto: `server-v0.2.0` y `plugin-v0.2.0` (el tag ES la versión declarada; un
-  preflight falla si `Cargo.toml`/`manifest.json` no coinciden con el tag).
+- Tags por artefacto: el server usa `server-v0.2.0` en su repo. El plugin usa **la versión
+  pelada** (`0.2.0`) porque el directorio de la comunidad de Obsidian descarga
+  `main.js`/`manifest.json`/`styles.css` del release cuyo tag coincide exactamente con el
+  `version` del manifest — y esos tres archivos van **sueltos** como adjuntos binarios, más
+  una atestación de provenance (`actions/attest`). El preflight verifica tag ↔ `manifest.json`
+  ↔ `package.json` ↔ `versions.json`.
 - Workflows (nuevos, `.github/` está vacío hoy):
   - `release-server.yml` (on `server-v*`): gates completos (cargo test) → binario
     `x86_64-unknown-linux-musl` + tar.gz + SHA-256 → imagen `ghcr.io/kastormdz/ovaultd`

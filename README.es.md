@@ -94,7 +94,13 @@ printf '%s\n' 'una-password-larga' | docker compose exec -T ovaultd \
 
 La password se lee **siempre** de stdin, nunca como argumento. `ovaultd-admin` también responde `health` e `inspect` sin descifrar nada.
 
-### 3. Primer vault, desde el CLI
+### 3. Tu primer vault
+
+Abrí los ajustes del plugin (**oVaultd Plugin**), entrá con tu cuenta y creá el vault desde ahí: un nombre y una **password de cifrado que inventás vos**. La recovery key se muestra exactamente una vez — guardala en un lugar seguro. Ese es todo el flujo: el plugin corre el mismo núcleo cripto que todo lo demás, y el server nunca ve tu password ni tus notas.
+
+#### Headless y automatización
+
+El repo también trae un **CLI** (`packages/cli`) que maneja ese mismo núcleo, para servidores sin escritorio y para scripts. Es el cliente que usan los tests end-to-end para hablarle a un server, y está documentado acá y no en la puesta en marcha porque el camino pensado es el plugin:
 
 ```bash
 npm install
@@ -111,10 +117,6 @@ node packages/cli/dist/main.js status
 ```
 
 `create-remote` genera el material del vault. `setup` vincula una carpeta local a un vault remoto existente y verifica tu password contra el material. `list-remote` muestra lo que la cuenta tiene.
-
-### 4. O desde Obsidian
-
-Instalá el [plugin](https://github.com/kastormdz/ovaultd-plugin) y vinculalo desde sus ajustes: URL del server, email y password de la cuenta (una sola vez), y después elegí tu vault de la lista — o creá uno nuevo ahí mismo. De ahí en más el sync es por eventos y no pide nada más.
 
 ## Detrás de un proxy reverso
 
