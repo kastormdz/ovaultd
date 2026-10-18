@@ -5,6 +5,30 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y e
 [semver](https://semver.org/lang/es/): server y plugin viajan en un **release train** (mismo
 `MAJOR.MINOR` = pareja probada junta; ver ADR-0018 y la sección «Compatibilidad» del README).
 
+## [0.2.1] — 2026-10-18
+
+Parche de corrección sobre la 0.2.0, más la primera pieza del sync en vivo: el server avisa a los
+demás dispositivos del vault apenas alguien commitea.
+
+### Added
+
+- **Aviso entre dispositivos (`notify` por WebSocket)**: al commitear un lote, el server reenvía el
+  registro a las demás conexiones del mismo vault. El aviso sale del oplog recién commiteado, así
+  que no puede mentir sobre lo que hay, y es **sólo una señal**: quien lo recibe hace un pull con su
+  `since`, de modo que un aviso perdido no pierde ningún dato. Cubierto por un test con dos
+  dispositivos reales del mismo vault.
+
+### Fixed
+
+- **`/setup` sin estilos**: la pantalla de la primera cuenta se armaba como HTML a mano, con estilos
+  inline, y salía pelada (ni siquiera pedía el CSS del panel). Ahora usa la plantilla
+  `base_centrado.html`, la misma de login y registro, y sus textos viven en `admin/textos.rs`, como
+  el resto de la interfaz.
+- **Los botones del panel tenían el texto pegado a la izquierda**: `.boton` es `inline-flex` y no
+  declaraba `justify-content`, así que el `text-align` del navegador no aplicaba.
+- **Verificación de leaks**: la etiqueta de interfaz «Password de la cuenta» se veta por nombre,
+  como el resto del glosario de textos de UI.
+
 ## [0.2.0] — 2026-10-17
 
 Primera release publicada: el server sale del «funciona en mi lab» y pasa a tener panel de
