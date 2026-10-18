@@ -1,31 +1,64 @@
 /**
  * SyncFilter — qué NO es contenido sincronizable (plan fase 3, paso 5; versión del
- * corte del motor).
+ * corte del motor, con la lista blanca de configuración portable).
  *
  * Es POLÍTICA ÚNICA del núcleo: el CLI y el plugin excluyen exactamente lo mismo, y el
- * escaneo la aplica en un solo lugar (`escanearVault`). Dos reglas de oro:
+ * escaneo la aplica en un solo lugar (`escanearVault`). Tres reglas de oro:
  *
  *  - **Excluir NO significa borrar el remoto**: si un path excluido ya estuviera en la
  *    base, el diff no propone su `del`. La exclusión empieza "hacia adelante".
- *  - La lista BLANCA selectiva de configuración portable (`.obsidian` con appearance,
- *    snippets, themes, plugins/ * /manifest|data) NO vive acá todavía: llega en el corte
- *    de filtros, porque primero hay que decidir qué hacer con `data.json` de plugins de
- *    terceros (puede contener credenciales de otros servicios) — no se sincroniza "porque sí".
+ *  - **De `configDir` sólo se sincroniza la lista blanca de abajo.** El resto de la
+ *    configuración (los `data.json` de los plugins, los workspaces, los logs) se queda
+ *    local: esto viaja a TODOS los dispositivos y queda en un servidor ajeno a los
+ *    servicios que esas credenciales usan. No se sincroniza "porque sí".
+ *  - **Los `workspace*.json` son por dispositivo**: sincronizarlos desordena los paneles
+ *    del otro lado.
  */
 
 const PREFIJO_TEMPORAL = '.ovaultd-tmp-';
 
 /** Carpetas vetadas por segmento exacto (en cualquier nivel del vault). */
 const CARPETAS_VETADAS: ReadonlyMap<string, string> = new Map([
-  ['.obsidian', 'configuración del vault (excluida entera hasta la lista blanca)'],
   ['.trash', 'papelera local del vault'],
   ['.git', 'repositorio git anidado'],
   ['node_modules', 'dependencias de node'],
 ]);
 
-/** ¿Por qué este path NO se sincroniza? `null` = es contenido. */
-export function motivoDeExclusion(path: string): string | null {
-  for (const segmento of path.split('/')) {
+/**
+ * La lista BLANCA de configuración portable: lo único que sale de `configDir`.
+ *
+ * Deliberadamente NO está:
+ *  - el `data.json` de NINGÚN plugin (ni el nuestro): puede tener tokens de otros servicios;
+ *  - `estado-local.json`, `sesion-cuenta.json` ni `motor.log`: son credenciales y estado del
+ *    propio ovaultd, que se rearman solos con el login;
+ *  - `workspace*.json`: son por dispositivo.
+ *
+ * Cada entrada es un path RELATIVO dentro de `configDir`.
+ */
+const CONFIG_PORTABLE: readonly RegExp[] = [
+  /^appearance(\.json)?$/, // tema, tamaño de letra, acentos visuales
+  /^community-plugins\.json$/, // qué plugins de la comunidad están habilitados
+  /^core-plugins\.json$/, // qué plugins del núcleo están habilitados
+  /^hotkeys\.json$/, // atajos de teclado (portables: no llevan rutas absolutas)
+  /^snippets\/.+/, // CSS propio del vault
+  /^themes\/.+/, // temas instalados como archivos
+  /^plugins\/[^/]+\/manifest\.json$/, // la identidad de cada plugin, NO su data.json
+];
+
+/** ¿Este path relativo dentro de `configDir` es configuración portable? */
+export function esConfigPortable(dentroDelConfig: string): boolean {
+  return CONFIG_PORTABLE.some((patron) => patron.test(dentroDelConfig));
+}
+
+/**
+ * ¿Por qué este path NO se sincroniza? `null` = es contenido.
+ *
+ * `configDir` es el del vault (no siempre `.obsidian`): el usuario puede cambiarlo.
+ */
+export function motivoDeExclusion(path: string, configDir = '.obsidian'): string | null {
+  const segmentos = path.split('/');
+
+  for (const segmento of segmentos) {
     if (segmento.startsWith(PREFIJO_TEMPORAL)) {
       return 'temporal del motor';
     }
@@ -34,13 +67,22 @@ export function motivoDeExclusion(path: string): string | null {
     if (motivo !== undefined) return motivo;
   }
 
-  const nombre = path.slice(path.lastIndexOf('/') + 1);
+  const nombre = segmentos[segmentos.length - 1];
   if (/^workspace(-mobile)?\.json$/.test(nombre)) {
     return 'workspace por dispositivo';
+  }
+
+  const i = segmentos.indexOf(configDir);
+  if (i !== -1) {
+    const dentro = segmentos.slice(i + 1).join('/');
+    return esConfigPortable(dentro)
+      ? null
+      : 'configuración del vault (fuera de la lista blanca)';
   }
 
   return null;
 }
 
 /** Atajo booleano para los llamadores que no muestran el motivo. */
-export const estaExcluido = (path: string): boolean => motivoDeExclusion(path) !== null;
+export const estaExcluido = (path: string, configDir = '.obsidian'): boolean =>
+  motivoDeExclusion(path, configDir) !== null;

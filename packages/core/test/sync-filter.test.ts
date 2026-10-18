@@ -1,12 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
-import { estaExcluido, motivoDeExclusion } from '../src/SyncFilter.js';
+import { esConfigPortable, estaExcluido, motivoDeExclusion } from '../src/SyncFilter.js';
 
 describe('SyncFilter', () => {
   const excluidos: Array<[string, string]> = [
-    ['.obsidian/app.json', 'configuración del vault'],
-    ['.obsidian/plugins/comunidad/data.json', 'configuración del vault'],
-    ['.obsidian/themes/Obsidianite/theme.css', 'configuración del vault'],
     ['.trash/nota-vieja.md', 'papelera'],
     ['.git/config', 'git'],
     ['proyecto/node_modules/lib/index.js', 'dependencias'],
@@ -14,6 +11,16 @@ describe('SyncFilter', () => {
     ['.ovaultd-tmp-92966fd551ea05a1', 'temporal'],
     ['workspace.json', 'workspace por dispositivo'],
     ['Carpeta/workspace-mobile.json', 'workspace por dispositivo'],
+    // De configDir: lo que NO está en la lista blanca.
+    ['.obsidian/workspace.json', 'workspace por dispositivo'],
+    ['.obsidian/app.json', 'fuera de la lista blanca'],
+    ['.obsidian/graph.json', 'fuera de la lista blanca'],
+    ['.obsidian/plugins/comunidad/data.json', 'fuera de la lista blanca'],
+    ['.obsidian/plugins/ovaultd/data.json', 'fuera de la lista blanca'],
+    ['.obsidian/plugins/ovaultd/estado-local.json', 'fuera de la lista blanca'],
+    ['.obsidian/plugins/ovaultd/sesion-cuenta.json', 'fuera de la lista blanca'],
+    ['.obsidian/plugins/ovaultd/motor.log', 'fuera de la lista blanca'],
+    ['.obsidian/plugins/ovaultd/main.js', 'fuera de la lista blanca'],
   ];
 
   for (const [path, aguja] of excluidos) {
@@ -23,6 +30,41 @@ describe('SyncFilter', () => {
     });
   }
 
+  // La lista blanca: lo único de configDir que viaja a los otros dispositivos.
+  const configPortable = [
+    '.obsidian/appearance.json',
+    '.obsidian/community-plugins.json',
+    '.obsidian/core-plugins.json',
+    '.obsidian/hotkeys.json',
+    '.obsidian/snippets/mi-estilo.css',
+    '.obsidian/themes/Obsidianite/theme.css',
+    '.obsidian/themes/Obsidianite/manifest.json',
+    '.obsidian/plugins/comunidad/manifest.json',
+    '.obsidian/plugins/ovaultd/manifest.json',
+  ];
+
+  for (const path of configPortable) {
+    it(`deja pasar la config portable ${path}`, () => {
+      expect(estaExcluido(path)).toBe(false);
+      expect(motivoDeExclusion(path)).toBeNull();
+    });
+  }
+
+  it('el configDir del vault puede no llamarse .obsidian', () => {
+    // Un vault con el configDir cambiado: la política es la misma adentro.
+    expect(estaExcluido('mi-config/appearance.json', 'mi-config')).toBe(false);
+    expect(estaExcluido('mi-config/plugins/x/data.json', 'mi-config')).toBe(true);
+    // Y un `.obsidian/` anidado en una carpeta común NO es configDir del vault.
+    expect(estaExcluido('Carpeta/.obsidian/appearance.json', 'mi-config')).toBe(false);
+  });
+
+  it('la lista blanca es explícita: esConfigPortable no acepta prefijos', () => {
+    expect(esConfigPortable('appearance.json')).toBe(true);
+    expect(esConfigPortable('appearance-otro.json')).toBe(false);
+    expect(esConfigPortable('plugins/x/data.json')).toBe(false);
+    expect(esConfigPortable('snippets/')).toBe(false); // un directorio vacío no aporta nada
+  });
+
   const contenido = [
     'Notas/uno.md',
     'diario/2026-10-17.md',
@@ -31,6 +73,7 @@ describe('SyncFilter', () => {
     'carpeta.d/nota.md',
     'mi-node_modules-nota.md',
     'workspace-teoria.md',
+    '.obsidianite/nota.md',
   ];
 
   for (const path of contenido) {
