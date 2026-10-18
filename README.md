@@ -94,7 +94,7 @@ The password is always read from stdin, never passed as an argument. `ovaultd-ad
 
 ### 3. Your first vault
 
-Open the plugin's settings (**oVaultd Plugin**), sign in with your account, and create the vault from there: a name and a **vault password you invent**. The recovery key is shown exactly once — store it somewhere safe. That's the whole flow: the plugin runs the same crypto core as everything else, and the server never sees your password or your notes.
+Open the plugin's settings (**oVaultd Sync**), sign in with your account, and create the vault from there: a name and a **vault password you invent**. The recovery key is shown exactly once — store it somewhere safe. That's the whole flow: the plugin runs the same crypto core as everything else, and the server never sees your password or your notes.
 
 #### Headless and automation
 

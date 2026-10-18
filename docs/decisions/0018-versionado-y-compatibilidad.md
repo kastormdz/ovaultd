@@ -15,7 +15,7 @@ server y plugin, que se sepa cuándo son compatibles, y poder publicar releases.
 
 ### Semver por artefacto, release train por pareja
 
-- `ovaultd` (Rust, `Cargo.toml`) y `oVaultd Plugin` (`manifest.json`) versionan con semver.
+- `ovaultd` (Rust, `Cargo.toml`) y `oVaultd Sync` (`manifest.json`) versionan con semver.
 - **Release train**: mismo `MAJOR.MINOR` en ambos = pareja probada junta (los patches son
   independientes). Ej.: server `0.2.x` ↔ plugin `0.2.x`. El wire (`sync2`/protocolo v2) NO
   cambia con esto: su versión sigue siendo la del formato.

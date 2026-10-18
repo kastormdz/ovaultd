@@ -96,7 +96,7 @@ La password se lee **siempre** de stdin, nunca como argumento. `ovaultd-admin` t
 
 ### 3. Tu primer vault
 
-Abrí los ajustes del plugin (**oVaultd Plugin**), entrá con tu cuenta y creá el vault desde ahí: un nombre y una **password de cifrado que inventás vos**. La recovery key se muestra exactamente una vez — guardala en un lugar seguro. Ese es todo el flujo: el plugin corre el mismo núcleo cripto que todo lo demás, y el server nunca ve tu password ni tus notas.
+Abrí los ajustes del plugin (**oVaultd Sync**), entrá con tu cuenta y creá el vault desde ahí: un nombre y una **password de cifrado que inventás vos**. La recovery key se muestra exactamente una vez — guardala en un lugar seguro. Ese es todo el flujo: el plugin corre el mismo núcleo cripto que todo lo demás, y el server nunca ve tu password ni tus notas.
 
 #### Headless y automatización
 
