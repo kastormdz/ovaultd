@@ -64,11 +64,14 @@ export function prepareOutboxEntry(req: EnqueueRequest): OutboxEntry {
 
   const esArchivo = req.folder !== true;
   if (req.kind === 'add' || req.kind === 'mod') {
-    if (esArchivo && (!req.contentB64 || !req.contentHash)) {
+    // La comparación es contra `undefined`/`null` A PROPÓSITO: `contentB64 === ""` es un
+    // archivo vacío, que es contenido legítimo. Con un chequeo de truthiness, un archivo de
+    // 0 bytes (un .md en blanco) hacía fallar el encolado y abortaba el ciclo completo.
+    if (esArchivo && (req.contentB64 == null || req.contentHash == null)) {
       throw new Error(`outbox ${req.kind}: un archivo necesita contentB64 y contentHash (snapshot recuperable)`);
     }
   }
-  if (req.kind === 'del' && (req.contentB64 || req.contentHash)) {
+  if (req.kind === 'del' && (req.contentB64 != null || req.contentHash != null)) {
     throw new Error('outbox del: no lleva contenido');
   }
   if (req.kind === 'move' && !req.prevPathId) {
@@ -76,7 +79,7 @@ export function prepareOutboxEntry(req: EnqueueRequest): OutboxEntry {
   }
 
   let snapshot: Blob | null = null;
-  if (req.contentB64) {
+  if (req.contentB64 != null) {
     const bytes = b64Decode(req.contentB64);
     const real = toHex(cryptoProvider().sha256(bytes));
     if (real !== req.contentHash) {
