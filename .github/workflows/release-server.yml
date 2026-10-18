@@ -18,7 +18,7 @@ env:
 
 jobs:
   preflight:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       version: ${{ steps.tag.outputs.version }}
     steps:
@@ -38,14 +38,14 @@ jobs:
             echo "✗ el CHANGELOG no tiene una sección para $version" >&2
             exit 1
           fi
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: notas-release
           path: notas-release.md
 
   gates:
     needs: preflight
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -72,7 +72,7 @@ jobs:
 
   binario:
     needs: [preflight, gates]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -93,14 +93,14 @@ jobs:
           tar -C dist -czf "dist/$base.tar.gz" ovaultd ovaultd-admin
           (cd dist && sha256sum "$base.tar.gz" > SHA256SUMS)
           ls -la dist/
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: binario
           path: dist/*
 
   imagen:
     needs: [preflight, gates]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -128,7 +128,7 @@ jobs:
           # build del job `gates`, así no se compilan dos veces las mismas dependencias.
           OVAULTD_CI_CACHE: "1"
         run: bash tests/scripts/container-e2e.sh
-      - uses: docker/login-action@v3
+      - uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -136,7 +136,7 @@ jobs:
       # Docker Hub además de GHCR. Condicional vía env: los `secrets` no se pueden evaluar en un
       # `if` de step, pero sí pasarse por env. Sin el secret el release publica sólo en GHCR (una
       # integración sin configurar no puede tumbar la release).
-      - uses: docker/login-action@v3
+      - uses: docker/login-action@v4
         env:
           DOCKERHUB_USER: ${{ secrets.DOCKERHUB_USERNAME }}
         if: env.DOCKERHUB_USER != ''
@@ -167,9 +167,9 @@ jobs:
 
   release:
     needs: [preflight, binario, imagen]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: assets
       - name: Publicar la GitHub Release
