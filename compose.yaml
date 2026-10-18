@@ -40,6 +40,11 @@ services:
     read_only: true
     tmpfs:
       - /tmp
+    # El contenedor corre como 10001 (no root). Con volumen nombrado no hace falta nada; con
+    # BIND MOUNT el directorio lo crea el operador y pertenece a otro uid: SQLite falla al
+    # abrirlo ("unable to open database file", code 14). En ese caso poné OVAULTD_UID/GID al
+    # dueño real del directorio (por ejemplo el usuario que corre el stack).
+    user: "${OVAULTD_UID:-10001}:${OVAULTD_GID:-10001}"
     cap_drop:
       - ALL
     security_opt:

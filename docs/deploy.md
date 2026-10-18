@@ -21,6 +21,17 @@ defecto y no necesita proxy para funcionar.
 Distribución: `OVAULTD_IMAGE=repositorio@sha256:<digest>` de una imagen **publicada real** (nunca
 un digest inventado) y `docker compose -f compose.yaml up -d`, sin el overlay de desarrollo.
 
+### Dos cosas que rompen en la primera puesta en producción
+
+- **Bind mount:** el contenedor corre como `10001`. Con volumen nombrado no hay problema, pero un
+  directorio que creás vos pertenece a tu uid → SQLite falla con `unable to open database file`
+  (code 14) y el contenedor entra en restart-loop. Solución: `OVAULTD_UID`/`OVAULTD_GID` con tu
+  `id -u`/`id -g`.
+- **Borde en OTRO contenedor:** `OVAULTD_ADDR=127.0.0.1` publica en el loopback del host, y un
+  contenedor (Nginx Proxy Manager, Caddy en Docker) **no puede alcanzarlo**: el proxy devuelve
+  **502** aunque el TLS y el redirect estén perfectos. Usá `OVAULTD_ADDR=0.0.0.0` (el server no
+  trae TLS: que el puerto lo cierre el firewall del host, no el loopback).
+
 ## Cuentas
 
 No hay registro público (ADR-0011). La **primera** cuenta se crea por la web en
