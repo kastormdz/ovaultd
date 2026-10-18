@@ -60,6 +60,7 @@ Everything that matters happens on your device.
 - Blob IDs are SHA-256 of the stored (encrypted) bytes. Identical content deduplicates inside a vault, and because the nonce derivation is keyed, deduplication is not an external oracle.
 - Paths are encrypted as well; the server keeps them as opaque IDs plus ciphertext.
 - Revision records are signed (Ed25519) and chained by `expected_rev`.
+- **Login is rate-limited**: 5 attempts per minute per `ip+email`, and the next one gets a `429` with `Retry-After` — attempts against non-existent accounts count too, so password spraying dies the same way. Proxy headers (`X-Forwarded-For`, `X-Real-IP`, `X-Forwarded-Proto`) are honored **only** when you declare a trusted edge (`OVAULTD_TRUST_PROXY=1`); by default the client IP is the real TCP peer, which a client cannot forge.
 
 What the server can see: account email, device names, revision numbers, blob sizes and hashes, timing metadata. What it cannot see: file contents, file paths, keys, your password. Details in `docs/crypto.md` and `docs/decisions/`.
 
@@ -125,15 +126,16 @@ node packages/cli/dist/main.js status
 
 ## Behind a reverse proxy
 
-The container publishes on loopback and speaks plain HTTP; TLS belongs to the proxy. Three things a proxy has to get right (examples for nginx, Nginx Proxy Manager and Caddy in `docs/deploy.md`):
+The container publishes on loopback and speaks plain HTTP; TLS belongs to the proxy. Four things a proxy has to get right (examples for nginx, Nginx Proxy Manager and Caddy in `docs/deploy.md`):
 
 1. **Preserve `Host`.** Clients learn the server host from `POST /access`; a rewritten Host makes them store an unreachable URL.
 2. **Allow WebSocket upgrades** on `/api/v1/ws`, with long read timeouts.
 3. **Raise the body limit to 40 MB and disable request buffering.** Resumable upload blocks go up to 32 MiB, and the nginx default of 1 MB kills them with a 413.
+4. **Declare the edge with `OVAULTD_TRUST_PROXY=1`** so the server honors the identity headers the proxy sets (client IP for the rate limit and the audit trail, `Secure` on the panel cookie). Keep it off when the server is exposed directly.
 
 ## Compatibility
 
-Server and plugin travel on a **release train**: the same `MAJOR.MINOR` on both sides is a pair that was tested together. Patches are independent, so `0.2.5` of the server works with `0.2.1` of the plugin.
+Server and plugin travel on a **release train**: the same `MAJOR.MINOR` on both sides is a pair that was tested together. Patches are independent, so `0.2.3` of the server works with `0.2.13` of the plugin.
 
 | Server | Plugin | Wire |
 |---|---|---|
@@ -146,7 +148,7 @@ Server and plugin travel on a **release train**: the same `MAJOR.MINOR` on both 
 Releases are cut by tag. `server-vX.Y.Z` runs the full gates — TypeScript suites, Rust suites, the server smoke test (live crypto and WebSocket) and the encryption canary — then builds a static `x86_64-unknown-linux-musl` binary plus `ovaultd-admin`, publishes the container image to GHCR (`X.Y.Z` and `latest`), and attaches the tarball with its `SHA256SUMS` to the GitHub Release. The tag *is* the declared version: the workflow fails if `Cargo.toml` disagrees, before publishing anything.
 
 ```bash
-tar xzf ovaultd-0.2.0-x86_64-unknown-linux-musl.tar.gz
+tar xzf ovaultd-0.2.3-x86_64-unknown-linux-musl.tar.gz
 sha256sum -c SHA256SUMS
 OVAULTD_BIND=127.0.0.1:8080 OVAULTD_DB=./datos/metadata.db OVAULTD_CAS=./datos/cas ./ovaultd
 ```
@@ -155,16 +157,15 @@ Or the image, which is the deployment path the project targets:
 
 ```bash
 docker run -d --name ovaultd -p 127.0.0.1:8080:8080 -v ovaultd-data:/data \
-  ghcr.io/kastormdz/ovaultd:0.2.1
+  ghcr.io/kastormdz/ovaultd:0.2.3
 ```
 
-The same tested build is published to both registries — identical digest, because the release
-re-tags the image the end-to-end suite just verified instead of rebuilding it:
+The image on GHCR is the exact build the end-to-end suite verified — the release re-tags it
+instead of rebuilding, so the digest is the tested one:
 
 | Registry | Image |
 | --- | --- |
-| GitHub Container Registry | `ghcr.io/kastormdz/ovaultd:0.2.1` |
-| Docker Hub | `docker.io/kastormdz/ovaultd:0.2.1` |
+| GitHub Container Registry | `ghcr.io/kastormdz/ovaultd:0.2.3` |
 
 What changed in each version lives in [CHANGELOG.md](CHANGELOG.md), and the release notes are taken from there — never generated prose.
 

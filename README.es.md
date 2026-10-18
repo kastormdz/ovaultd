@@ -62,6 +62,7 @@ Todo lo que importa pasa en tu dispositivo.
 - Los `blob_id` son SHA-256 de los bytes **almacenados** (cifrados). Contenido idéntico deduplica dentro del vault y, como la derivación del nonce es keyed, la deduplicación no es un oráculo externo.
 - Los paths también van cifrados; el server los guarda como IDs opacos más ciphertext.
 - Los registros de revisión van firmados (Ed25519) y encadenados por `expected_rev`.
+- **El login está frenado**: 5 intentos por minuto por `ip+email`, y el siguiente recibe un `429` con `Retry-After` — los intentos contra cuentas inexistentes también cuentan, así el password spraying muere igual. Los headers de proxy (`X-Forwarded-For`, `X-Real-IP`, `X-Forwarded-Proto`) se obedecen **solo** cuando declarás el borde de confianza (`OVAULTD_TRUST_PROXY=1`); por defecto la IP del cliente es la del peer TCP real, que un cliente no puede falsear.
 
 Qué puede ver el server: el email de la cuenta, los nombres de los devices, los números de revisión, tamaños y hashes de blobs, y metadatos de tiempos. Qué no puede ver: contenido, paths, claves, ni tu password. El detalle está en `docs/crypto.md` y `docs/decisions/`.
 
@@ -127,15 +128,16 @@ node packages/cli/dist/main.js status
 
 ## Detrás de un proxy reverso
 
-El contenedor publica en loopback y habla HTTP plano; el TLS es del proxy. Tres cosas que el proxy tiene que hacer bien (ejemplos para nginx, Nginx Proxy Manager y Caddy en `docs/deploy.md`):
+El contenedor publica en loopback y habla HTTP plano; el TLS es del proxy. Cuatro cosas que el proxy tiene que hacer bien (ejemplos para nginx, Nginx Proxy Manager y Caddy en `docs/deploy.md`):
 
 1. **Preservar el `Host`.** Los clientes aprenden el host del server desde `POST /access`; si el proxy lo reescribe, guardan una URL que después no resuelve.
 2. **Permitir el upgrade de WebSocket** en `/api/v1/ws`, con timeouts de lectura largos.
 3. **Subir el límite de body a 40 MB y desactivar el buffering de request.** Los bloques de subida reanudable llegan hasta 32 MiB, y el default de nginx (1 MB) los corta con 413.
+4. **Declarar el borde con `OVAULTD_TRUST_PROXY=1`** para que el server obedezca los headers de identidad que setea el proxy (IP del cliente para el freno y la auditoría, `Secure` en la cookie del panel). Dejalo apagado si el server está expuesto directo.
 
 ## Compatibilidad
 
-Server y plugin viajan en un **release train**: el mismo `MAJOR.MINOR` de los dos lados es una pareja probada junta. Los patches son independientes: el `0.2.5` del server anda con el `0.2.1` del plugin.
+Server y plugin viajan en un **release train**: el mismo `MAJOR.MINOR` de los dos lados es una pareja probada junta. Los patches son independientes: el `0.2.3` del server anda con el `0.2.13` del plugin.
 
 | Server | Plugin | Wire |
 |---|---|---|
@@ -148,7 +150,7 @@ Server y plugin viajan en un **release train**: el mismo `MAJOR.MINOR` de los do
 Las releases se cortan con un tag. `server-vX.Y.Z` corre los gates completos — suites TypeScript, suites Rust, el smoke del server (cripto viva y WebSocket) y la canaria de cifrado — después construye un binario estático `x86_64-unknown-linux-musl` más `ovaultd-admin`, publica la imagen del contenedor en GHCR (`X.Y.Z` y `latest`) y adjunta el tar.gz con su `SHA256SUMS` a la GitHub Release. El tag **es** la versión declarada: si `Cargo.toml` no coincide, el workflow falla antes de publicar nada.
 
 ```bash
-tar xzf ovaultd-0.2.0-x86_64-unknown-linux-musl.tar.gz
+tar xzf ovaultd-0.2.3-x86_64-unknown-linux-musl.tar.gz
 sha256sum -c SHA256SUMS
 OVAULTD_BIND=127.0.0.1:8080 OVAULTD_DB=./datos/metadata.db OVAULTD_CAS=./datos/cas ./ovaultd
 ```
@@ -157,16 +159,15 @@ O la imagen, que es la vía de despliegue que el proyecto apunta:
 
 ```bash
 docker run -d --name ovaultd -p 127.0.0.1:8080:8080 -v ovaultd-data:/data \
-  ghcr.io/kastormdz/ovaultd:0.2.1
+  ghcr.io/kastormdz/ovaultd:0.2.3
 ```
 
-La misma imagen probada se publica en los dos registries — digest idéntico, porque la release
-re-taggea la imagen que el E2E acaba de verificar en vez de reconstruirla:
+La imagen de GHCR es exactamente el build que verificó el E2E — la release la re-taggea en vez
+de reconstruirla, así que el digest es el probado:
 
 | Registry | Imagen |
 | --- | --- |
-| GitHub Container Registry | `ghcr.io/kastormdz/ovaultd:0.2.1` |
-| Docker Hub | `docker.io/kastormdz/ovaultd:0.2.1` |
+| GitHub Container Registry | `ghcr.io/kastormdz/ovaultd:0.2.3` |
 
 Lo que cambió en cada versión vive en [CHANGELOG.md](CHANGELOG.md), y las notas de la release salen de ahí — nunca de prosa generada.
 
