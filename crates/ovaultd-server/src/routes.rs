@@ -89,6 +89,18 @@ pub fn router(estado: EstadoServidor) -> Router {
             get(changes),
         )
         .route(
+            "/api/v1/vaults/{id}/history",
+            get(historial),
+        )
+        .route(
+            "/api/v1/vaults/{id}/snapshots",
+            get(listar_snapshots).post(crear_snapshot),
+        )
+        .route(
+            "/api/v1/vaults/{id}/snapshots/{snap}",
+            get(obtener_snapshot).delete(borrar_snapshot),
+        )
+        .route(
             "/api/v1/vaults/{id}/blobs/{hash}",
             put(put_blob).get(get_blob),
         )
@@ -1135,25 +1147,115 @@ async fn changes(
     ))
 }
 
-fn parse_blob_hash(value: &str) -> Result<BlobId> {
+#[derive(Debug, Deserialize)]
+struct HistoryQuery {
+    path_id: String,
+    #[serde(default)]
+    before: Option<i64>,
+    #[serde(default)]
+    limit: Option<i64>,
+}
+
+async fn historial(
+    State(state): State<EstadoServidor>,
+    autenticado: Autenticado,
+    Path(vault_id): Path<i64>,
+    Query(query): Query<HistoryQuery>,
+) -> Result<Json<crate::history::Historial>> {
+    resolve_vault(&state.pool, autenticado.account_id, vault_id).await?;
+
+    let path_id = parse_hex_32(&query.path_id, "path_id")?;
+    let limit = query.limit.unwrap_or(50).clamp(1, 500);
+
+    Ok(Json(
+        crate::history::listar(&state.pool, vault_id, &path_id, query.before, limit).await?,
+    ))
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+struct SnapshotRequest {
+    rev: Option<i64>,
+    label: Option<String>,
+}
+
+async fn crear_snapshot(
+    State(state): State<EstadoServidor>,
+    autenticado: Autenticado,
+    Path(vault_id): Path<i64>,
+    cuerpo: Option<Json<SnapshotRequest>>,
+) -> Result<(StatusCode, Json<crate::history::Snapshot>)> {
+    resolve_vault(&state.pool, autenticado.account_id, vault_id).await?;
+
+    let cuerpo = cuerpo.map(|Json(cuerpo)| cuerpo).unwrap_or_default();
+
+    let snapshot =
+        crate::history::crear_snapshot(&state.pool, vault_id, cuerpo.rev, cuerpo.label).await?;
+
+    Ok((StatusCode::CREATED, Json(snapshot)))
+}
+
+async fn listar_snapshots(
+    State(state): State<EstadoServidor>,
+    autenticado: Autenticado,
+    Path(vault_id): Path<i64>,
+) -> Result<Json<Vec<crate::history::Snapshot>>> {
+    resolve_vault(&state.pool, autenticado.account_id, vault_id).await?;
+
+    Ok(Json(
+        crate::history::listar_snapshots(&state.pool, vault_id).await?,
+    ))
+}
+
+async fn obtener_snapshot(
+    State(state): State<EstadoServidor>,
+    autenticado: Autenticado,
+    Path((vault_id, snap)): Path<(i64, i64)>,
+) -> Result<Json<crate::history::Snapshot>> {
+    resolve_vault(&state.pool, autenticado.account_id, vault_id).await?;
+
+    Ok(Json(
+        crate::history::obtener_snapshot(&state.pool, vault_id, snap).await?,
+    ))
+}
+
+async fn borrar_snapshot(
+    State(state): State<EstadoServidor>,
+    autenticado: Autenticado,
+    Path((vault_id, snap)): Path<(i64, i64)>,
+) -> Result<StatusCode> {
+    resolve_vault(&state.pool, autenticado.account_id, vault_id).await?;
+
+    if crate::history::borrar_snapshot(&state.pool, vault_id, snap).await? {
+        Ok(StatusCode::NO_CONTENT)
+    } else {
+        Err(ServerError::NotFound)
+    }
+}
+
+fn parse_hex_32(value: &str, etiqueta: &str) -> Result<[u8; 32]> {
     if value.len() != 64
         || !value
             .chars()
             .all(|character| character.is_ascii_hexdigit() && !character.is_ascii_uppercase())
     {
-        return Err(ServerError::Invalid(
-            "el hash debe ser hexadecimal minúsculo de 64 caracteres".to_owned(),
-        ));
+        return Err(ServerError::Invalid(format!(
+            "{etiqueta} debe ser hexadecimal minúsculo de 64 caracteres"
+        )));
     }
 
     let mut bytes = [0u8; 32];
 
     for index in 0..32 {
         bytes[index] = u8::from_str_radix(&value[index * 2..index * 2 + 2], 16)
-            .map_err(|_| ServerError::Invalid("hash inválido".to_owned()))?;
+            .map_err(|_| ServerError::Invalid(format!("{etiqueta} inválido")))?;
     }
 
-    Ok(BlobId::new(bytes))
+    Ok(bytes)
+}
+
+fn parse_blob_hash(value: &str) -> Result<BlobId> {
+    parse_hex_32(value, "el hash").map(BlobId::new)
 }
 
 async fn blob_limit(pool: &SqlitePool, vault_id: i64) -> Result<i64> {

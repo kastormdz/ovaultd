@@ -389,8 +389,18 @@ una variante ni un código nuevo acá.
 | GET | `/api/v1/devices` | sí | lista de devices de la cuenta |
 | POST | `/api/v1/devices` | sí | enrolar otro device -> `{device_id, token}` |
 | DELETE | `/api/v1/devices/{id}` | sí | revocar -> 204 |
+| GET | `/api/v1/vaults/{id}/history?path_id=&before=&limit=` | sí | historia de un archivo: oplog por `path_id` (hex), más nueva primero, con la cadena de renames (`prev_path_id`) resuelta por CTE recursivo; `{items, next_before, min_rev}` |
+| GET | `/api/v1/vaults/{id}/snapshots` | sí | snapshots etiquetados del vault (más nuevo primero) |
+| POST | `/api/v1/vaults/{id}/snapshots` | sí | `{rev?, label?}` (corte clampeado al head) -> 201 con `manifest` `{path_id: blob_id}` |
+| GET | `/api/v1/vaults/{id}/snapshots/{snap}` | sí | detalle con el manifest completo |
+| DELETE | `/api/v1/vaults/{id}/snapshots/{snap}` | sí | borra y DEVUELVE las referencias del manifest -> 204 (404 si no existe) |
 
-**Fuera de esta fase (declarado, no implementar):** `history`, `restore`, `snapshots`, `tree`, `members`, `leave`,
+La **historia** es el oplog de `revisions` (índice `idx_rev_path`): el server no descifra nada y el cliente resuelve
+nombres con su `k_path`/`path_enc`. Los **snapshots** etiquetan un corte coherente en `rev` y su manifest cuenta como
+referencia viva de blobs: el alta y el borrado ajustan `blobs.refs` en la MISMA transacción (el invariante que el GC
+respeta).
+
+**Fuera de esta fase (declarado, no implementar):** `restore`, `tree`, `members`, `leave`,
 `config`. El WS tampoco va acá: va en `ws.rs`.
 
 ### Auth: extractor `Autenticado`
