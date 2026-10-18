@@ -42,3 +42,6 @@ scripts/leaks.local
 *.bak.*
 *.respfragmento.md
 notas-release.md
+
+# scripts de trabajo (capturas, diagnósticos): nunca al repo
+*.tmp.mjs

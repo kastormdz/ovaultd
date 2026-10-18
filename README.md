@@ -81,16 +81,23 @@ To run a published image later, set `OVAULTD_IMAGE` to a real `repository@sha256
 
 ### 2. Create your account
 
-The **first** account is created in the browser: open `http://127.0.0.1:8080/setup`. That page exists only while the server has zero accounts and disables itself the moment one exists — no public registration (ADR-0011/0016). Set `OVAULTD_SETUP_TOKEN` if the server may be exposed before you finish this step.
+The **first** account is created in the browser and it is born **admin**:
 
-For **further accounts** (another person — a second laptop is just another device, added with `login`), an admin can create them from the panel, or use the admin tool inside the image:
+![First account setup](docs/img/setup-primera-cuenta.png)
 
-```bash
-printf '%s\n' 'a-long-password' | docker compose exec -T ovaultd \
-  ovaultd-admin create-account --email them@example.com
-```
+Open `http://127.0.0.1:8080/setup` and pick an email and a password. That page exists only while the server has zero accounts and disables itself the moment one exists — there is no public registration (ADR-0011/0016). If the server may be reachable before you finish this step, set `OVAULTD_SETUP_TOKEN` and the page will additionally require `?token=...`.
 
-The password is always read from stdin, never passed as an argument. `ovaultd-admin` also answers `health` and `inspect` without ever decrypting anything.
+That account's home is the **web panel** at `/admin`:
+
+![Panel](docs/img/panel-dashboard.png)
+
+**Every further account** is created from the panel too — no admin tooling required. An admin opens **Cuentas**, fills in an email, an initial password and the role, and hands the password over (there is no email delivery):
+
+![Creating an account](docs/img/panel-cuentas.png)
+
+From that same panel an admin changes roles, disables an account, resets its password (one-time link) or deletes it, and everything that happens lands in **Auditoría**. Note that a second laptop is **not** a new account: it is another **device** of the same account, and it joins by signing in from there. `ovaultd-admin` still exists inside the image as the break-glass path (create an account, `health`, `inspect`) for when there is no browser at hand.
+
+<sub>Screenshots come from a throwaway demo server: every account there is `@example.com`.</sub>
 
 ### 3. Your first vault
 
@@ -153,33 +160,13 @@ docker run -d --name ovaultd -p 127.0.0.1:8080:8080 -v ovaultd-data:/data \
 
 What changed in each version lives in [CHANGELOG.md](CHANGELOG.md), and the release notes are taken from there — never generated prose.
 
-## Development
-
-```bash
-npm install
-npm run build            # TS packages + the core runtime bundle
-npm test                 # TS suites (crypto vectors, wire conformance, CLI)
-npm run test:browser     # durability specs against a real Chromium
-cargo test --workspace   # Rust suites
-cargo xtask protocol-check          # the SAME conformance fixture, both sides
-bash tests/scripts/server-smoke.sh  # full server flow, live crypto + WebSocket
-bash tests/scripts/scan-canary.sh   # no plaintext anywhere in server storage
-bash tests/scripts/container-e2e.sh # everything: real build + smoke + persistence
-(cd spikes/crypto-interop && ./run.sh --check)   # interop against frozen vectors
-```
-
-Rules worth knowing:
-
-- The spec is frozen before code. Protocol or crypto changes land as a new ADR, never as a silent edit.
-- Golden vectors are regenerated only through the sanctioned freeze path (`run.sh --freeze`), after review, and never in CI. The protocol conformance fixture is executed by both Rust and TS; that is the anti-drift gate.
-- `scripts/scan-leaks.sh` checks the repo for accidentally committed infrastructure details and credentials, in the worktree and in history. Personal patterns (your hostnames, users, subnets) go in the gitignored `scripts/leaks.local` — see `scripts/leaks.local.example`. Wire it as a pre-commit hook with `git config core.hooksPath .githooks`.
-
 ## Docs
 
 - `docs/protocol.md` — wire protocol v2 (control, data plane, algorithms)
 - `docs/crypto.md` — the `sync2` crypto spec and golden vectors
 - `docs/server-interfaces.md` — the server contract
 - `docs/deploy.md` — Docker and reverse proxy, backups
+- `docs/development.md` — building, testing and the contribution rules
 - `docs/runbook.md` — operating a server: backups, restore, recovery
 - `docs/decisions/` — architecture decision records
 

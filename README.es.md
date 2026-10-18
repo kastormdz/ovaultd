@@ -83,16 +83,23 @@ Para correr una imagen ya publicada, seteá `OVAULTD_IMAGE` con un digest real `
 
 ### 2. Crear tu cuenta
 
-La **primera** cuenta se crea desde el navegador: abrí `http://127.0.0.1:8080/setup`. Esa página existe solo mientras el servidor no tenga ninguna cuenta y se desactiva al crearla — no hay registro público (ADR-0011/0016). Si el server puede quedar expuesto antes de completarla, seteá `OVAULTD_SETUP_TOKEN`.
+La **primera** cuenta se crea desde el navegador y nace **admin**:
 
-Para las cuentas **siguientes** (otra persona — una segunda laptop es solo otro dispositivo, y se suma con `login`), un admin las crea desde el panel, o se usa el CLI de administración que viene dentro de la imagen:
+![Primera cuenta](docs/img/setup-primera-cuenta.png)
 
-```bash
-printf '%s\n' 'una-password-larga' | docker compose exec -T ovaultd \
-  ovaultd-admin create-account --email otro@ejemplo.com
-```
+Abrí `http://127.0.0.1:8080/setup` y elegí un email y una password. Esa página existe solo mientras el servidor no tenga ninguna cuenta y se desactiva apenas exista una — no hay registro público (ADR-0011/0016). Si el server puede quedar al alcance antes de completarla, seteá `OVAULTD_SETUP_TOKEN` y además va a pedir `?token=...`.
 
-La password se lee **siempre** de stdin, nunca como argumento. `ovaultd-admin` también responde `health` e `inspect` sin descifrar nada.
+La casa de esa cuenta es el **panel web**, en `/admin`:
+
+![Panel](docs/img/panel-dashboard.png)
+
+Las cuentas **siguientes** también se crean desde el panel — sin herramientas de línea de comandos. Un admin entra a **Cuentas**, completa email, password inicial y rol, y le pasa la password a la persona (no hay envío de mails):
+
+![Crear una cuenta](docs/img/panel-cuentas.png)
+
+Desde ese mismo panel un admin cambia roles, deshabilita una cuenta, restablece su password (con un link de un solo uso) o la borra, y todo lo que pasa queda en **Auditoría**. Ojo con el modelo: una segunda laptop **no** es una cuenta nueva, es otro **dispositivo** de la misma cuenta, y se suma ingresando desde ahí. `ovaultd-admin` sigue existiendo dentro de la imagen como camino de emergencia (crear una cuenta, `health`, `inspect`) para cuando no haya un navegador a mano.
+
+<sub>Las capturas son de un servidor de demostración descartable: ahí todas las cuentas son `@example.com`.</sub>
 
 ### 3. Tu primer vault
 
@@ -155,33 +162,13 @@ docker run -d --name ovaultd -p 127.0.0.1:8080:8080 -v ovaultd-data:/data \
 
 Lo que cambió en cada versión vive en [CHANGELOG.md](CHANGELOG.md), y las notas de la release salen de ahí — nunca de prosa generada.
 
-## Desarrollo
-
-```bash
-npm install
-npm run build            # paquetes TS + el bundle del runtime del núcleo
-npm test                 # suites TS (vectores cripto, conformidad del wire, CLI)
-npm run test:browser     # specs de durabilidad contra un Chromium real
-cargo test --workspace   # suites Rust
-cargo xtask protocol-check          # el MISMO fixture de conformidad, en ambos lados
-bash tests/scripts/server-smoke.sh  # flujo completo del server, cripto viva + WebSocket
-bash tests/scripts/scan-canary.sh   # nada de plaintext en el almacenamiento del server
-bash tests/scripts/container-e2e.sh # todo: build real + smoke + persistencia
-(cd spikes/crypto-interop && ./run.sh --check)   # interop contra los vectores congelados
-```
-
-Reglas que vale la pena conocer:
-
-- La spec se congela antes de codear. Un cambio de protocolo o cripto aterriza como un ADR nuevo, nunca como un edit silencioso.
-- Los vectores dorados se regeneran solo por la vía sancionada (`run.sh --freeze`), después de revisar, y jamás en CI. El fixture de conformidad del protocolo lo ejecutan Rust y TS: ese es el gate anti-drift.
-- `scripts/scan-leaks.sh` revisa que no se cuelen datos de infraestructura o credenciales, en el árbol y en la historia. Los patrones personales (tus hostnames, usuarios, subredes) van en `scripts/leaks.local`, que no se versiona — ver `scripts/leaks.local.example`. Para activarlo como hook de pre-commit: `git config core.hooksPath .githooks`.
-
 ## Documentación
 
 - `docs/protocol.md` — protocolo de wire v2 (control, plano de datos, algoritmos)
 - `docs/crypto.md` — la spec cripto `sync2` + vectores dorados
 - `docs/server-interfaces.md` — el contrato del server
 - `docs/deploy.md` — Docker y proxy reverso, backups
+- `docs/development.md` — compilar, testear y las reglas de contribución
 - `docs/runbook.md` — operar un server: backups, restore, recuperación
 - `docs/decisions/` — registros de decisión de arquitectura
 
