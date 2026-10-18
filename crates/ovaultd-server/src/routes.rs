@@ -22,7 +22,10 @@ use sqlx::{FromRow, SqlitePool};
 use ovaultd_protocol::BlobId;
 use tower_http::cors::{Any, CorsLayer};
 
+use askama::Template;
+
 use crate::{
+    admin::{panel, textos::Textos},
     auth,
     config::Config,
     delta,
@@ -193,35 +196,6 @@ async fn contar_cuentas(pool: &SqlitePool) -> Result<i64> {
         .await?)
 }
 
-/// Página HTML mínima. El cuerpo es SIEMPRE una constante de este archivo: nunca se interpola
-/// input del usuario, así que acá no hay superficie de XSS.
-fn pagina(status: StatusCode, titulo: &str, cuerpo: &str) -> Response {
-    let html = format!(
-        "<!doctype html>\n\
-         <html lang=\"es\">\n\
-         <head>\n\
-         <meta charset=\"utf-8\">\n\
-         <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n\
-         <title>ovaultd — {titulo}</title>\n\
-         </head>\n\
-         <body style=\"font-family: system-ui, sans-serif; max-width: 28rem; margin: 3rem auto; padding: 0 1rem; line-height: 1.6\">\n\
-         <h1 style=\"font-size: 1.25rem\">{titulo}</h1>\n\
-         {cuerpo}\n\
-         </body>\n\
-         </html>\n"
-    );
-
-    (
-        status,
-        [
-            ("content-type", "text/html; charset=utf-8"),
-            ("cache-control", "no-store"),
-        ],
-        html,
-    )
-        .into_response()
-}
-
 /// ¿El pedido de setup trae la autorización correcta? Sin `OVAULTD_SETUP_TOKEN` el formulario
 /// queda abierto (existe solo mientras no haya cuentas); con token, se exige.
 fn setup_autorizado(config: &Config, token: Option<&str>) -> bool {
@@ -235,28 +209,6 @@ fn setup_autorizado(config: &Config, token: Option<&str>) -> bool {
 
 // `tokens_iguales` vive en `auth` (una sola fuente en tiempo constante): la comparten el
 // setup_token del bootstrap y el CSRF del panel (ADR-0017).
-
-/// Escape mínimo para interpolar el token (que viene de la config) en un atributo HTML.
-fn escapar(texto: &str) -> String {
-    let mut salida = String::with_capacity(texto.len());
-    for caracter in texto.chars() {
-        match caracter {
-            '&' => salida.push_str("&amp;"),
-            '<' => salida.push_str("&lt;"),
-            '>' => salida.push_str("&gt;"),
-            '"' => salida.push_str("&quot;"),
-            '\'' => salida.push_str("&#39;"),
-            _ => salida.push(caracter),
-        }
-    }
-    salida
-}
-
-const SETUP_CERRADO: (&str, &str) = (
-    "Configuración cerrada",
-    "<p>Este servidor ya tiene cuentas. Pedile al admin que te cree la tuya con \
-     <code>ovaultd-admin create-account</code>.</p>",
-);
 
 /// `GET /` — raíz web: sin cuentas lleva al bootstrap; con cuentas, página mínima.
 async fn raiz(State(state): State<EstadoServidor>) -> Result<Response> {
@@ -282,6 +234,45 @@ struct FormularioSetup {
     token: Option<String>,
 }
 
+/// La pantalla del bootstrap. Los textos salen de `textos::t()` (la regla de i18n del panel: ningún
+/// string visible vive fuera de `admin/textos.rs`) y el CSS entra por `base_centrado.html`, el mismo
+/// de login/register: la primera pantalla que ve un usuario tiene que ser la del producto.
+#[derive(Template)]
+#[template(path = "admin/setup.html")]
+struct PlantillaSetup {
+    t: &'static Textos,
+    token: Option<String>,
+    cerrado: bool,
+    token_falta: bool,
+    error: Option<String>,
+    hecho: bool,
+}
+
+impl PlantillaSetup {
+    fn nueva() -> Self {
+        Self {
+            t: textos(),
+            token: None,
+            cerrado: false,
+            token_falta: false,
+            error: None,
+            hecho: false,
+        }
+    }
+}
+
+/// Renderiza el bootstrap preservando el status (410 cerrado, 403 sin token, 400 datos inválidos):
+/// los códigos son parte del contrato, no un detalle del cuerpo.
+fn render_setup(status: StatusCode, plantilla: PlantillaSetup) -> Response {
+    let mut respuesta = panel::render(|| plantilla.render(), "setup");
+    *respuesta.status_mut() = status;
+    respuesta
+}
+
+fn textos() -> &'static Textos {
+    crate::admin::textos::t()
+}
+
 /// `GET /setup` — bootstrap del primer usuario (ADR-0016): existe solo mientras el servidor no
 /// tenga NINGUNA cuenta. Con cuentas, 410 Gone para siempre.
 async fn setup_form(
@@ -289,45 +280,32 @@ async fn setup_form(
     Query(consulta): Query<ConsultaSetup>,
 ) -> Result<Response> {
     if contar_cuentas(&state.pool).await? > 0 {
-        return Ok(pagina(StatusCode::GONE, SETUP_CERRADO.0, SETUP_CERRADO.1));
-    }
-
-    let token = consulta.token.as_deref();
-    if !setup_autorizado(&state.config, token) {
-        return Ok(pagina(
-            StatusCode::FORBIDDEN,
-            "Falta el token de instalación",
-            "<p>Este servidor espera su primera cuenta, pero pide un token de instalación. \
-             Abrí <code>/setup?token=…</code> con el valor de <code>OVAULTD_SETUP_TOKEN</code>.</p>",
+        return Ok(render_setup(
+            StatusCode::GONE,
+            PlantillaSetup {
+                cerrado: true,
+                ..PlantillaSetup::nueva()
+            },
         ));
     }
 
-    let oculto = match token {
-        Some(token) => format!(
-            "<input type=\"hidden\" name=\"token\" value=\"{}\">",
-            escapar(token)
-        ),
-        None => String::new(),
-    };
+    let token = consulta.token.clone();
+    if !setup_autorizado(&state.config, token.as_deref()) {
+        return Ok(render_setup(
+            StatusCode::FORBIDDEN,
+            PlantillaSetup {
+                token_falta: true,
+                ..PlantillaSetup::nueva()
+            },
+        ));
+    }
 
-    Ok(pagina(
+    Ok(render_setup(
         StatusCode::OK,
-        "Primera cuenta",
-        &format!(
-            "<p>Este servidor todavía no tiene cuentas. Creá la primera: esta página se \
-             desactiva sola apenas exista una.</p>\
-             <form method=\"post\" action=\"/setup\">\
-             {oculto}\
-             <label>Email<br><input name=\"email\" type=\"email\" required \
-             autocomplete=\"username\" style=\"width:100%\"></label><br><br>\
-             <label>Password de la cuenta<br><input name=\"password\" type=\"password\" \
-             required minlength=\"8\" autocomplete=\"new-password\" style=\"width:100%\"></label>\
-             <p style=\"font-size:.85rem;color:#666\">Es la password de INGRESO (login y \
-             dispositivos). Cada vault tiene su password de cifrado aparte: se define en el \
-             cliente y este servidor nunca la ve.</p>\
-             <button type=\"submit\">Crear cuenta</button>\
-             </form>"
-        ),
+        PlantillaSetup {
+            token,
+            ..PlantillaSetup::nueva()
+        },
     ))
 }
 
@@ -338,49 +316,66 @@ async fn setup_crear(
     Form(formulario): Form<FormularioSetup>,
 ) -> Result<Response> {
     if contar_cuentas(&state.pool).await? > 0 {
-        return Ok(pagina(StatusCode::GONE, SETUP_CERRADO.0, SETUP_CERRADO.1));
-    }
-
-    if !setup_autorizado(&state.config, formulario.token.as_deref()) {
-        return Ok(pagina(
-            StatusCode::FORBIDDEN,
-            "Falta el token de instalación",
-            "<p>Mandá el <code>token</code> que corresponde a <code>OVAULTD_SETUP_TOKEN</code>.</p>",
+        return Ok(render_setup(
+            StatusCode::GONE,
+            PlantillaSetup {
+                cerrado: true,
+                ..PlantillaSetup::nueva()
+            },
         ));
     }
 
-    let email = formulario.email.trim();
-    if !email.contains('@') || email.len() > 254 {
-        return Ok(pagina(
+    if !setup_autorizado(&state.config, formulario.token.as_deref()) {
+        return Ok(render_setup(
+            StatusCode::FORBIDDEN,
+            PlantillaSetup {
+                token_falta: true,
+                ..PlantillaSetup::nueva()
+            },
+        ));
+    }
+
+    if formulario.email.trim().is_empty() || !formulario.email.contains('@') || formulario.email.len() > 254 {
+        return Ok(render_setup(
             StatusCode::BAD_REQUEST,
-            "Email inválido",
-            "<p>Ese email no parece válido: volvé atrás y corregilo.</p>",
+            PlantillaSetup {
+                error: Some(textos().setup_email_invalido.to_string()),
+                ..PlantillaSetup::nueva()
+            },
         ));
     }
 
     if formulario.password.chars().count() < 8 {
-        return Ok(pagina(
+        return Ok(render_setup(
             StatusCode::BAD_REQUEST,
-            "Password muy corta",
-            "<p>Usá al menos 8 caracteres para la password de la cuenta.</p>",
+            PlantillaSetup {
+                error: Some(textos().setup_password_corta.to_string()),
+                ..PlantillaSetup::nueva()
+            },
         ));
     }
 
-    match auth::crear_cuenta_si_vacio(&state.pool, email, &formulario.password).await {
+    let email = formulario.email.trim().to_string();
+
+    match auth::crear_cuenta_si_vacio(&state.pool, &email, &formulario.password).await {
         Ok(cuenta) => {
             tracing::info!(cuenta = cuenta.id, "bootstrap: primera cuenta creada por /setup");
-            Ok(pagina(
+            Ok(render_setup(
                 StatusCode::OK,
-                "Cuenta creada",
-                "<p>Listo. Entrá con tu cliente (email + esta password) y creá tu primer vault: \
-                 la password de cifrado la definís ahí, no acá.</p>\
-                 <p>Esta página queda desactivada.</p>",
+                PlantillaSetup {
+                    hecho: true,
+                    ..PlantillaSetup::nueva()
+                },
             ))
         }
         // Carrera perdida: otro POST creó la cuenta entre el conteo y el INSERT.
-        Err(ServerError::Invalid(_)) => {
-            Ok(pagina(StatusCode::GONE, SETUP_CERRADO.0, SETUP_CERRADO.1))
-        }
+        Err(ServerError::Invalid(_)) => Ok(render_setup(
+            StatusCode::GONE,
+            PlantillaSetup {
+                cerrado: true,
+                ..PlantillaSetup::nueva()
+            },
+        )),
         Err(error) => Err(error),
     }
 }

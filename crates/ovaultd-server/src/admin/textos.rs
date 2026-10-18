@@ -232,6 +232,15 @@ pub struct Textos {
     pub setup_titulo: &'static str,
     pub setup_ayuda: &'static str,
     pub setup_cerrado: &'static str,
+    pub setup_password: &'static str,
+    pub setup_password_ayuda: &'static str,
+    pub setup_crear: &'static str,
+    pub setup_token_falta: &'static str,
+    pub setup_token_falta_ayuda: &'static str,
+    pub setup_ok: &'static str,
+    pub setup_ok_ayuda: &'static str,
+    pub setup_email_invalido: &'static str,
+    pub setup_password_corta: &'static str,
 }
 
 /// Español (rioplatense) — idioma por defecto.
@@ -444,6 +453,15 @@ pub static ES: Textos = Textos {
     setup_titulo: "Primera cuenta",
     setup_ayuda: "Este servidor todavía no tiene cuentas. Creá la primera: va a ser la administradora.",
     setup_cerrado: "Configuración cerrada: este servidor ya tiene cuentas.",
+    setup_password: "Password de la cuenta",
+    setup_password_ayuda: "Es la password de INGRESO (login y dispositivos). Cada vault tiene su password de cifrado aparte: se define en el cliente y este servidor nunca la ve.",
+    setup_crear: "Crear cuenta",
+    setup_token_falta: "Falta el token de instalación",
+    setup_token_falta_ayuda: "Este servidor espera su primera cuenta, pero pide un token de instalación: abrí /setup?token=… con el valor de OVAULTD_SETUP_TOKEN.",
+    setup_ok: "Cuenta creada",
+    setup_ok_ayuda: "Entrá con tu cliente (email + esta password) y creá tu primer vault: la password de cifrado la definís ahí, no acá. Esta página queda desactivada.",
+    setup_email_invalido: "Ese email no parece válido: volvé atrás y corregilo.",
+    setup_password_corta: "Usá al menos 8 caracteres para la password de la cuenta.",
 };
 
 /// Devuelve los textos del idioma configurado (hoy: siempre español).

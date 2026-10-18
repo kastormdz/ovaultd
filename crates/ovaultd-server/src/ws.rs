@@ -760,7 +760,7 @@ async fn autenticar_upgrade(
     Err(ServerError::Unauthorized)
 }
 
-async fn websocket_with_connection(mut socket: WebSocket, mut connection: Connection) {
+async fn websocket_with_connection(socket: WebSocket, mut connection: Connection) {
     // Dos cosas despiertan esta conexión: su propio socket, y la señal de que OTRA conexión del
     // mismo vault commiteó. El aviso se reenvía tal cual y el cliente que lo recibe hace un pull,
     // así que el aviso nunca es fuente de verdad (si se pierde, el pull lo recupera).

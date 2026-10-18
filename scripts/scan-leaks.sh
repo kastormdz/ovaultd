@@ -34,7 +34,7 @@ cd "$REPO" || exit 2
 # («Cambiar password»), no un secreto. Las etiquetas sueltas del glosario se
 # vetan por nombre, igual que los falsos de los tests.
 SECRETS='(password|passwd|secret|token|api[_-]?key)["'"'"']?[[:space:]]*[:=][[:space:]]*["'"'"'][^"'"'"'[:space:]]{8,}'
-SECRETS_VETADOS='password-de-prueba|token-de-prueba|contrase|\{PASSWORD\}|reset\?token=|"Password"|"Contraseña"'
+SECRETS_VETADOS='password-de-prueba|token-de-prueba|contrase|\{PASSWORD\}|reset\?token=|"Password"|"Password de la cuenta"|"Contraseña"'
 # `X="$(cmd)"` es una sustitución de shell, no un secreto literal.
 # `X="${VAR}"` / `X: "${VAR:-default}"` es una expansión de variable, tampoco.
 SECRETS_EXPANSION='[:=][[:space:]]*"\$\{'

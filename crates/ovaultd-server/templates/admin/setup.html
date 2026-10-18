@@ -1,0 +1,43 @@
+{% extends "admin/base_centrado.html" %}
+{% block titulo %}{{ t.setup_titulo }} — {{ t.marca }}{% endblock %}
+{% block contenido %}
+<section class="tarjeta estrecha">
+  <h1 class="titulo-form">{{ t.setup_titulo }}</h1>
+
+  {% if cerrado %}
+  <div class="alerta error">
+    <p><strong>{{ t.setup_cerrado }}</strong></p>
+    <p>{{ t.register_cerrado_ayuda }}</p>
+  </div>
+  <a class="boton primario" href="/admin/login">{{ t.login_entrar }}</a>
+
+  {% else if hecho %}
+  <div class="alerta bien">
+    <p><strong>{{ t.setup_ok }}</strong></p>
+    <p>{{ t.setup_ok_ayuda }}</p>
+  </div>
+  <a class="boton primario" href="/admin/login">{{ t.login_entrar }}</a>
+
+  {% else if token_falta %}
+  <div class="alerta error">
+    <p><strong>{{ t.setup_token_falta }}</strong></p>
+    <p>{{ t.setup_token_falta_ayuda }}</p>
+  </div>
+
+  {% else %}
+  {% if let Some(texto) = error %}<div class="alerta error">{{ texto }}</div>{% endif %}
+  <p class="ayuda sin-margen-abajo">{{ t.setup_ayuda }}</p>
+  <form method="post" action="/setup" class="formulario">
+    {% if let Some(valor) = token %}<input type="hidden" name="token" value="{{ valor }}">{% endif %}
+    <label>{{ t.login_email }}
+      <input type="email" name="email" required autofocus autocomplete="username">
+    </label>
+    <label>{{ t.setup_password }}
+      <input type="password" name="password" required minlength="8" autocomplete="new-password">
+    </label>
+    <p class="ayuda sin-margen-arriba">{{ t.setup_password_ayuda }}</p>
+    <button class="boton primario" type="submit">{{ t.setup_crear }}</button>
+  </form>
+  {% endif %}
+</section>
+{% endblock %}

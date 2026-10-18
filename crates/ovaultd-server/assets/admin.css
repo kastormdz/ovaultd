@@ -248,7 +248,7 @@ input[type="checkbox"] { accent-color: var(--acento); width: 15px; height: 15px;
 /* ── botones ──────────────────────────────────────────────────────────── */
 .boton {
   font: inherit; font-size: var(--t2); font-weight: 500;
-  display: inline-flex; align-items: center; gap: 6px;
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
   background: var(--panel2); color: var(--tx);
   border: 1px solid var(--linea); border-radius: 8px;
   padding: 6px 13px; cursor: pointer; text-decoration: none;
