@@ -19,4 +19,5 @@ export * from './reconcile.js';
 export * from './SyncClient.js';
 export * from './vault-path.js';
 export * from './SyncFilter.js';
+export * from './merge.js';
 export * from './export.js';
