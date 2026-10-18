@@ -5,6 +5,33 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y e
 [semver](https://semver.org/lang/es/): server y plugin viajan en un **release train** (mismo
 `MAJOR.MINOR` = pareja probada junta; ver ADR-0018 y la sección «Compatibilidad» del README).
 
+## [0.2.5] — 2026-10-18
+
+Fase 5, cortes 5a+5b: historia por archivo y snapshots (server) + el cliente de historia
+(núcleo y CLI).
+
+### Added
+
+- **API de historia** (`GET /vaults/{id}/history`): el oplog por `path_id` (hex), más nueva
+  primero, paginado (`before`), con la cadena de renames (`prev_path_id`) resuelta por el
+  server (CTE recursivo acotado). El server sigue ciego: `path_id`/`blob_hash` viajan en hex,
+  `path_enc`/`sig`/`t_mac` en base64.
+- **Snapshots etiquetados** (`GET/POST /vaults/{id}/snapshots`, `GET/DELETE .../{snap}`):
+  corte coherente en `rev` (clampeado al head), manifest `{path_id: blob_id}` armado desde
+  `files` vivos, y contabilidad de `blobs.refs` en la MISMA transacción (el invariante que el
+  GC de la fase 5 va a respetar; borrar un snapshot devuelve sus referencias).
+- **`ovaultd history <path>`**: cada revisión (op, fecha, dispositivo, tamaño), con
+  paginación (`--before`/`--limit`); funciona para archivos borrados y nombres anteriores a
+  un rename.
+- **`ovaultd preview <path> --rev N [--diff]`**: descarga, VERIFICA (sha256 del blob contra
+  su `blob_id` antes de descifrar) y muestra una revisión sin escribir en el vault; `--diff`
+  la compara contra el archivo local.
+
+### Changed
+
+- El runtime del núcleo pasa a `0.6.0` (métodos `history.list`, `history.preview`,
+  `history.diff`).
+
 ## [0.2.4] — 2026-10-18
 
 Segundo bloque del plan de remediación (P1 de la auditoría del 2026-10-18): higiene de la
