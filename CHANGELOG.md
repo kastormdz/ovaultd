@@ -5,6 +5,19 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y e
 [semver](https://semver.org/lang/es/): server y plugin viajan en un **release train** (mismo
 `MAJOR.MINOR` = pareja probada junta; ver ADR-0018 y la sección «Compatibilidad» del README).
 
+## [0.2.3] — 2026-10-18
+
+Corrección del P0 sobre la 0.2.2, cazada por la verificación del deploy en producción.
+
+### Fixed
+
+- **La IP del cliente con `TRUST_PROXY=1` tomaba el PRIMER valor del `X-Forwarded-For`**: los
+  bordes APPENDEAN (nginx y NPM Plus: `$proxy_add_x_forwarded_for`), así que el primer valor lo
+  controla el cliente y rotarlo seguía esquivando el freno de login — el mismo vector que la
+  0.2.2 quiso cerrar. Ahora vale el ÚLTIMO valor del XFF (el que agregó el borde) y `X-Real-IP`
+  gana si está (los bordes que lo setean lo pisan). Cazado EN VIVO contra producción: con el
+  spoof en el primer valor, la auditoría guardaba la IP inventada en lugar de la real.
+
 ## [0.2.2] — 2026-10-18
 
 Parche de seguridad sobre la 0.2.1 (primer bloque del plan de remediación de la auditoría del

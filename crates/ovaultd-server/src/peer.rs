@@ -9,6 +9,9 @@
 //! Política (fix de la auditoría 2026-10-18):
 //!  - Los headers `X-Real-IP` / `X-Forwarded-For` son de CUALQUIERA que pueda hablarle al
 //!    server: solo se obedecen con `trust_proxy` activo (hay un borde de confianza adelante).
+//!  - Con `trust_proxy`, del `X-Forwarded-For` vale su ÚLTIMO valor (los bordes appendean:
+//!    el primero lo controla el cliente, el último lo agregó el borde); `X-Real-IP`, si
+//!    está, gana (el borde lo pisa explícito).
 //!  - Sin `trust_proxy`, la IP sale del peer TCP real (la del socket), que el cliente no
 //!    puede falsear. Si el server no está montado con connect info (tests con `oneshot`),
 //!    queda `None` y la clave del freno usa `"-"`.
@@ -72,12 +75,32 @@ pub fn ip_del_cliente(
 }
 
 fn de_los_headers(headers: &HeaderMap) -> Option<String> {
-    headers
+    // `X-Real-IP` (si el borde lo setea, lo pisa él) manda; si no, el `X-Forwarded-For`.
+    if let Some(ip) = headers
         .get("x-real-ip")
-        .or_else(|| headers.get("x-forwarded-for"))
         .and_then(|valor| valor.to_str().ok())
-        .map(|valor| valor.split(',').next().unwrap_or(valor).trim().to_owned())
+        .map(str::trim)
         .filter(|ip| !ip.is_empty())
+    {
+        return Some(ip.to_owned());
+    }
+
+    // Del XFF, el ÚLTIMO valor: los bordes APENDEAN (nginx y NPM Plus:
+    // `$proxy_add_x_forwarded_for`), así que el PRIMERO lo controla el cliente y el que
+    // agregó el borde —la IP de la que viene el request— es el último. Con una cadena de
+    // varios proxies de confianza el último es el borde más cercano; para eso está
+    // `X-Real-IP` (que se pisa explícito en el borde).
+    headers
+        .get("x-forwarded-for")
+        .and_then(|valor| valor.to_str().ok())
+        .and_then(|valor| {
+            valor
+                .split(',')
+                .map(str::trim)
+                .filter(|parte| !parte.is_empty())
+                .next_back()
+        })
+        .map(str::to_owned)
 }
 
 /// La IP resuelta del request actual (None si el middleware no corrió o no había IP).
@@ -119,14 +142,28 @@ mod tests {
     }
 
     #[test]
-    fn con_confianza_manda_el_header() {
-        let headers = headers_con(("x-forwarded-for", "203.0.113.7, 198.51.100.1"));
+    fn con_confianza_toma_el_ultimo_del_xff() {
+        // El cliente puede MANDAR un XFF ("198.51.100.1"); el borde que appendea deja su
+        // propio valor AL FINAL. La IP del cliente es la última, no la primera.
+        let headers = headers_con(("x-forwarded-for", "198.51.100.1, 203.0.113.7"));
         let peer = Some(IpAddr::from([127, 0, 0, 1]));
 
-        // El primero de la lista (el cliente original), como documenta el borde.
         assert_eq!(
             ip_del_cliente(&headers, true, peer).as_deref(),
             Some("203.0.113.7")
+        );
+    }
+
+    #[test]
+    fn con_confianza_x_real_ip_le_gana_al_xff() {
+        // Si el borde setea X-Real-IP (pisado, no spoofeable), esa manda.
+        let mut headers = headers_con(("x-forwarded-for", "198.51.100.1"));
+        headers.insert("x-real-ip", HeaderValue::from_static("192.0.2.50"));
+        let peer = Some(IpAddr::from([127, 0, 0, 1]));
+
+        assert_eq!(
+            ip_del_cliente(&headers, true, peer).as_deref(),
+            Some("192.0.2.50")
         );
     }
 
