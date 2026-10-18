@@ -6,6 +6,8 @@ name: release-server
 on:
   push:
     tags: ['server-v*']
+  # Permite re-verificar el pipeline (o re-publicar) sin taggear de nuevo.
+  workflow_dispatch:
 
 permissions:
   contents: write # crear la GitHub Release
@@ -20,7 +22,7 @@ jobs:
     outputs:
       version: ${{ steps.tag.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - id: tag
         run: |
           version="${GITHUB_REF_NAME#server-v}"
@@ -45,10 +47,10 @@ jobs:
     needs: preflight
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: '22'
           cache: npm
@@ -72,7 +74,7 @@ jobs:
     needs: [preflight, gates]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-unknown-linux-musl
@@ -100,8 +102,8 @@ jobs:
     needs: [preflight, gates]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: '22'
           cache: npm
