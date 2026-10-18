@@ -83,8 +83,14 @@ fn cookie_de(headers: &HeaderMap, nombre: &str) -> Option<String> {
     None
 }
 
-/// ¿Este request llegó por HTTPS? (el borde setea `X-Forwarded-Proto`).
-pub(crate) fn es_https(headers: &HeaderMap) -> bool {
+/// ¿Este request llegó por HTTPS? El `X-Forwarded-Proto` del borde se obedece SOLO con
+/// `trust_proxy` activo: si no, no hay señal de TLS confiable (el server habla HTTP detrás
+/// del borde) y la respuesta es `false`.
+pub(crate) fn es_https(headers: &HeaderMap, confiar_en_proxy: bool) -> bool {
+    if !confiar_en_proxy {
+        return false;
+    }
+
     headers
         .get("x-forwarded-proto")
         .and_then(|valor| valor.to_str().ok())
@@ -96,7 +102,7 @@ fn cookie_segura(estado: &EstadoServidor, headers: &HeaderMap) -> bool {
     match estado.config.secure_cookies {
         ModoSecureCookies::Siempre => true,
         ModoSecureCookies::Nunca => false,
-        ModoSecureCookies::Auto => es_https(headers),
+        ModoSecureCookies::Auto => es_https(headers, estado.config.trust_proxy),
     }
 }
 
@@ -119,14 +125,10 @@ fn cookie_expirada(segura: bool) -> String {
     cookie
 }
 
-/// IP del cliente tal como la ve el borde (`X-Real-IP` o el primer `X-Forwarded-For`).
+/// IP del cliente ya resuelta por el middleware (peer TCP; `X-Real-IP`/`X-Forwarded-For`
+/// SOLO con `trust_proxy` activo — la decisión y la lógica viven en `crate::peer`).
 pub(crate) fn ip_del_cliente(headers: &HeaderMap) -> Option<String> {
-    headers
-        .get("x-real-ip")
-        .or_else(|| headers.get("x-forwarded-for"))
-        .and_then(|valor| valor.to_str().ok())
-        .map(|valor| valor.split(',').next().unwrap_or(valor).trim().to_owned())
-        .filter(|ip| !ip.is_empty())
+    crate::peer::ip_de(headers)
 }
 
 fn user_agent_de(headers: &HeaderMap) -> Option<&str> {

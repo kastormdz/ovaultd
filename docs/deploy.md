@@ -114,8 +114,11 @@ Dos formas, ambas válidas:
 
 4. *SSL*: el certificado de la pestaña SSL (Let's Encrypt o propio). NPM ya preserva el
    `Host` y setea `X-Forwarded-Proto` por default.
+5. **`OVAULTD_TRUST_PROXY=1`** en el entorno del server (compose/`.env`): el server solo
+   obedece los headers `X-Forwarded-*` con ese flag (default `0`); sin él, la IP del freno
+   de login y el `Secure` de la cookie quedan en el modo conservador.
 
-### Los tres puntos que cualquier borde tiene que respetar
+### Los cuatro puntos que cualquier borde tiene que respetar
 
 1. **Preservar el `Host`**: `POST /access` devuelve el `Host` que **ve el server** (`{host, rev}`)
    y los clientes lo usan para subir. Si el proxy lo reescribe (`proxy_set_header Host $host;`
@@ -124,6 +127,11 @@ Dos formas, ambas válidas:
    larga (`proxy_read_timeout 1h`): la conexión queda abierta escuchando revisiones.
 3. **Tamaño y streaming**: `client_max_body_size 40m` y `proxy_request_buffering off` (los
    bloques llegan hasta `MAX_FILE_BYTES` = 32 MiB; el default de nginx, 1 MB, los corta con 413).
+4. **Los headers de identidad** (`X-Real-IP`, `X-Forwarded-For`, `X-Forwarded-Proto` — el
+   ejemplo de abajo ya los setea): se obedecen SOLO con `OVAULTD_TRUST_PROXY=1`. Activalo
+   únicamente si el server está detrás de tu borde: sin borde, esos headers los puede mandar
+   cualquiera y falsearían la IP del freno de login y el `Secure` de la cookie. El borde
+   tiene que pisarlos SIEMPRE (el ejemplo usa `$remote_addr`, que ignora los del cliente).
 
 nginx mínimo de referencia:
 

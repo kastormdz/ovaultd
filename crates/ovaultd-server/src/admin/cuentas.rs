@@ -425,7 +425,7 @@ async fn cuentas_accion(
                 .get("host")
                 .and_then(|valor| valor.to_str().ok())
                 .unwrap_or("localhost");
-            let esquema = if panel::es_https(&headers) { "https" } else { "http" };
+            let esquema = if panel::es_https(&headers, estado.config.trust_proxy) { "https" } else { "http" };
             let link = format!("{esquema}://{host}/reset?token={token}");
 
             // El link se muestra UNA vez: render directo, sin PRG.

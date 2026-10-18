@@ -49,6 +49,10 @@ pub fn router(estado: EstadoServidor) -> Router {
     // Marca de arranque para `/metrics` (idempotente: el primer router montado manda).
     let _ = ARRANQUE.set(std::time::Instant::now());
 
+    // El middleware de la IP del cliente lleva su propia copia del estado (el router se
+    // queda con la otra en `with_state`).
+    let estado_para_ip = estado.clone();
+
     Router::new()
         .route("/healthz", get(healthz))
         .route("/metrics", get(metrics))
@@ -93,6 +97,12 @@ pub fn router(estado: EstadoServidor) -> Router {
         .route("/api/v1/devices/{id}", delete(revocar_device))
         .route("/api/v1/ws", axum::routing::get(crate::ws::authenticated_handler))
         .with_state(estado)
+        // La IP del cliente (peer TCP; headers SOLO con `trust_proxy`) queda anotada para
+        // todos los handlers: el freno de login y la auditoría dejan de creerle a cualquiera.
+        .layer(axum::middleware::from_fn_with_state(
+            estado_para_ip,
+            crate::peer::resolver_ip_de_cliente,
+        ))
         .layer(
             // CORS para los clientes browser (runtime del núcleo / plugin de Obsidian):
             // hacen fetch cross-origin al server. El API es token-based (sin cookies):
@@ -481,6 +491,7 @@ struct SigninResponse {
 
 async fn signin(
     State(state): State<EstadoServidor>,
+    headers: HeaderMap,
     Json(request): Json<SigninRequest>,
 ) -> Result<Json<SigninResponse>> {
     if request.mfa.is_some() {
@@ -489,16 +500,52 @@ async fn signin(
         ));
     }
 
-    let (token, device_id) = auth::iniciar_sesion(
+    // Freno de fuerza bruta (mismo limitador y misma clave `ip|email` que el panel web).
+    // La IP ya es confiable (peer TCP; headers solo con `trust_proxy`): rotar
+    // `X-Forwarded-For` ya no esquiva el freno.
+    let ip = crate::peer::ip_de(&headers);
+    let clave = format!(
+        "{}|{}",
+        ip.as_deref().unwrap_or("-"),
+        request.email.trim().to_ascii_lowercase()
+    );
+
+    if !state.limitador_login.permitir(&clave) {
+        crate::admin::sesiones::auditar(
+            &state.pool,
+            None,
+            "login_frenado",
+            Some("demasiados intentos de signin"),
+            ip.as_deref(),
+        )
+        .await;
+
+        return Err(ServerError::Frenado);
+    }
+
+    match auth::iniciar_sesion(
         &state.pool,
         &request.email,
         &request.password,
         request.name.as_deref().unwrap_or("default"),
         request.platform.as_deref(),
     )
-    .await?;
-
-    Ok(Json(SigninResponse { token, device_id }))
+    .await
+    {
+        Ok((token, device_id)) => {
+            state.limitador_login.limpiar(&clave);
+            Ok(Json(SigninResponse { token, device_id }))
+        }
+        Err(error) => {
+            // Cualquier fallo de credenciales cuenta para la ventana — la cuenta
+            // INEXISTENTE incluida (es el caso que más prueba un password spraying); un
+            // error interno del server no (no es señal de fuerza bruta).
+            if !matches!(error, ServerError::Db(_) | ServerError::Io(_)) {
+                state.limitador_login.registrar(&clave);
+            }
+            Err(error)
+        }
+    }
 }
 
 async fn signout(

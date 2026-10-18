@@ -18,6 +18,12 @@ pub struct Config {
     /// Cookie `Secure` del panel web (ADR-0017): `auto` la marca cuando el request llega por
     /// HTTPS (X-Forwarded-Proto del borde), `on`/`off` la fuerzan.
     pub secure_cookies: ModoSecureCookies,
+    /// Confiar en los headers de un proxy inverso (`X-Forwarded-Proto`, `X-Real-IP`,
+    /// `X-Forwarded-For`). Default `false`: los headers de CUALQUIERA no se obedecen — la IP
+    /// del cliente sale del peer TCP (y sin borde no hay señal de HTTPS). Activalo SOLO
+    /// cuando hay un borde de confianza adelante (ej. NPM/nginx en el mismo host): si no,
+    /// la IP del cliente y el `Secure` de la cookie quedan a merced de quien mande el header.
+    pub trust_proxy: bool,
 }
 
 /// Modo de la marca `Secure` de la cookie de sesión del panel.
@@ -79,6 +85,16 @@ impl Config {
             }
         };
 
+        let trust_proxy = match valor(&get, "OVAULTD_TRUST_PROXY").as_deref() {
+            None | Some("0") | Some("false") | Some("off") => false,
+            Some("1") | Some("true") | Some("on") => true,
+            Some(otro) => {
+                return Err(ServerError::Invalid(format!(
+                    "OVAULTD_TRUST_PROXY tiene un valor inválido: {otro:?} (0|1)"
+                )))
+            }
+        };
+
         Ok(Self {
             bind_addr,
             database_path,
@@ -88,6 +104,7 @@ impl Config {
             upload_ttl_hours,
             setup_token,
             secure_cookies,
+            trust_proxy,
         })
     }
 }
@@ -96,7 +113,7 @@ impl fmt::Display for Config {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             formatter,
-            "bind_addr={}, database_path={}, cas_root={}, token_ttl_hours={}, challenge_ttl_seconds={}, upload_ttl_hours={}, setup_token={}, secure_cookies={:?}",
+            "bind_addr={}, database_path={}, cas_root={}, token_ttl_hours={}, challenge_ttl_seconds={}, upload_ttl_hours={}, setup_token={}, secure_cookies={:?}, trust_proxy={}",
             self.bind_addr,
             self.database_path,
             self.cas_root.display(),
@@ -105,6 +122,7 @@ impl fmt::Display for Config {
             self.upload_ttl_hours,
             if self.setup_token.is_some() { "set" } else { "unset" },
             self.secure_cookies,
+            self.trust_proxy,
         )
     }
 }
@@ -155,6 +173,8 @@ mod tests {
         assert_eq!(config.upload_ttl_hours, 24);
         assert!(config.setup_token.is_none());
         assert_eq!(config.secure_cookies, ModoSecureCookies::Auto);
+        // Seguro por defecto: sin borde declarado, los headers de un proxy NO se obedecen.
+        assert!(!config.trust_proxy);
     }
 
     #[test]
@@ -239,5 +259,39 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("OVAULTD_SECURE_COOKIES"));
+    }
+
+    #[test]
+    fn trust_proxy_se_lee_y_valida() {
+        // Default: no se confía en headers de un proxy.
+        let por_defecto = Config::construir(|_| None).unwrap();
+        assert!(!por_defecto.trust_proxy);
+
+        for valor in ["1", "true", "on"] {
+            let activo = Config::construir(|name| match name {
+                "OVAULTD_TRUST_PROXY" => Some(valor.to_owned()),
+                _ => None,
+            })
+            .unwrap();
+            assert!(activo.trust_proxy, "{valor} debe activarlo");
+        }
+
+        for valor in ["0", "false", "off"] {
+            let inactivo = Config::construir(|name| match name {
+                "OVAULTD_TRUST_PROXY" => Some(valor.to_owned()),
+                _ => None,
+            })
+            .unwrap();
+            assert!(!inactivo.trust_proxy, "{valor} debe desactivarlo");
+        }
+
+        let malo = Config::construir(|name| match name {
+            "OVAULTD_TRUST_PROXY" => Some("quizas".to_owned()),
+            _ => None,
+        });
+        assert!(malo
+            .unwrap_err()
+            .to_string()
+            .contains("OVAULTD_TRUST_PROXY"));
     }
 }

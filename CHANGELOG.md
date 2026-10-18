@@ -5,6 +5,28 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y e
 [semver](https://semver.org/lang/es/): server y plugin viajan en un **release train** (mismo
 `MAJOR.MINOR` = pareja probada junta; ver ADR-0018 y la sección «Compatibilidad» del README).
 
+## [0.2.2] — 2026-10-18
+
+Parche de seguridad sobre la 0.2.1 (primer bloque del plan de remediación de la auditoría del
+2026-10-18).
+
+### Fixed
+
+- **Freno de fuerza bruta en el API de login**: `POST /api/v1/auth/signin` no tenía límite (solo
+  el panel web lo tenía). Ahora usa el mismo freno (5 intentos por minuto y por `ip|email`, `429`
+  con `Retry-After`, auditado), y los intentos contra cuentas inexistentes también cuentan: el
+  password spraying y la quema de CPU por Argon2 quedan cortados sin afectar los usos legítimos
+  (el plugin y el CLI hacen signin de baja frecuencia).
+- **Los headers de un proxy ya no son de cualquiera**: `X-Real-IP` / `X-Forwarded-For` /
+  `X-Forwarded-Proto` se obedecen SOLO con el nuevo `OVAULTD_TRUST_PROXY=1` (default `0`); sin el
+  flag, la IP del cliente sale del peer TCP real y el `Secure` de la cookie no depende de un
+  header. Antes, rotar `X-Forwarded-For` esquivaba el freno de login y un
+  `X-Forwarded-Proto: http` abría la cookie del panel.
+
+  **Si el server está detrás de un borde (NPM/nginx/Caddy), activá `OVAULTD_TRUST_PROXY=1`**
+  (ver `docs/deploy.md`): sin el flag el freno sigue funcionando por cuenta, pero pierde la IP
+  real del cliente y la cookie queda conservadora (sin `Secure`).
+
 ## [0.2.1] — 2026-10-18
 
 Parche de corrección sobre la 0.2.0, más la primera pieza del sync en vivo: el server avisa a los

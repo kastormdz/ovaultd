@@ -73,7 +73,12 @@ async fn iniciar_servidor() -> Result<(), String> {
 
     tracing::info!(bind_addr = %bind_addr, "ovaultd escuchando");
 
-    axum::serve(listener, app)
-        .await
-        .map_err(|error| format!("el servidor terminó con un error: {error}"))
+    // Con connect info: cada request lleva la IP real del peer TCP (la usa el freno de
+    // login y la auditoría cuando NO hay un proxy de confianza adelante).
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+    )
+    .await
+    .map_err(|error| format!("el servidor terminó con un error: {error}"))
 }

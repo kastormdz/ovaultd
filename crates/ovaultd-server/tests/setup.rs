@@ -51,6 +51,7 @@ impl Contexto {
             upload_ttl_hours: 24,
             setup_token: setup_token.map(str::to_owned),
             secure_cookies: ovaultd_server::config::ModoSecureCookies::Auto,
+            trust_proxy: true,
         };
         let cas = Arc::new(CasStore::new(cas_dir.path().to_path_buf())?);
 

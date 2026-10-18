@@ -33,6 +33,11 @@ pub enum ServerError {
     #[error("entrada inválida: {0}")]
     Invalid(String),
 
+    /// Freno de login (429): demasiados intentos en la ventana. El `Retry-After` viaja en
+    /// el `IntoResponse`; acá no lleva datos (el detalle es fijo).
+    #[error("demasiados intentos")]
+    Frenado,
+
     /// El offset de un PATCH no sigue al confirmado (hueco o repetición): 409 con el offset
     /// actual en el header `Upload-Offset` para que el cliente reanude sin adivinar (ADR-0012).
     #[error("offset no sigue: actual {actual}, pedido {requested}")]
@@ -53,6 +58,7 @@ impl ServerError {
             Self::Conflict { .. } => None,
             Self::Protocol(code) => Some(*code),
             Self::Invalid(_) => Some(ErrorCode::BadRequest),
+            Self::Frenado => Some(ErrorCode::Unauthorized),
             Self::UploadOffset { .. } => Some(ErrorCode::BadRequest),
             Self::Db(_) | Self::Io(_) => Some(ErrorCode::Internal),
         }
@@ -66,6 +72,7 @@ impl ServerError {
             Self::Conflict { .. } => StatusCode::CONFLICT,
             Self::Protocol(code) => status_for_error_code(*code),
             Self::Invalid(_) => StatusCode::BAD_REQUEST,
+            Self::Frenado => StatusCode::TOO_MANY_REQUESTS,
             Self::UploadOffset { .. } => StatusCode::CONFLICT,
             Self::Db(_) | Self::Io(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
@@ -125,6 +132,18 @@ impl IntoResponse for ServerError {
             )
                 .into_response(),
 
+            // Freno de login (429): `Retry-After` + el formato de error del protocolo.
+            Self::Frenado => (
+                StatusCode::TOO_MANY_REQUESTS,
+                [(axum::http::header::RETRY_AFTER, "60")],
+                Json(ProtocolError {
+                    t: "error".to_owned(),
+                    code: ErrorCode::Unauthorized,
+                    detail: "demasiados intentos: esperá un minuto".to_owned(),
+                }),
+            )
+                .into_response(),
+
             error => {
                 let status = error.status_code();
                 let code = error
@@ -139,6 +158,7 @@ impl IntoResponse for ServerError {
                     Self::Invalid(detail) => detail,
                     Self::Conflict { .. }
                     | Self::UploadOffset { .. }
+                    | Self::Frenado
                     | Self::Db(_)
                     | Self::Io(_) => "error interno del servidor".to_owned(),
                 };

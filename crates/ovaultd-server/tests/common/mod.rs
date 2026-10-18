@@ -107,6 +107,9 @@ impl TestContext {
             upload_ttl_hours: 24,
             setup_token: None,
             secure_cookies: ovaultd_server::config::ModoSecureCookies::Auto,
+            // Los tests simulan el deploy real (detrás de un borde de confianza); los tests
+            // del modelo "sin borde" apagan `contexto.config.trust_proxy` a mano.
+            trust_proxy: true,
         };
         let cas = Arc::new(CasStore::new(cas_dir.path().to_path_buf())?);
 
