@@ -76,6 +76,14 @@ export interface TransferEntry {
   part?: Blob | null;
 }
 
+/** Estado remoto de una fusión aplicada (ver `IntentEntry.mergeBase`). */
+export interface IntentMergeBase {
+  rev: number;
+  blobId: string | null;
+  contentHash: string | null;
+  oursHash: string;
+}
+
 /** Intención de aplicación (journal IndexedDB↔filesystem). */
 export interface IntentEntry {
   intentId: string;
@@ -92,6 +100,15 @@ export interface IntentEntry {
   kind?: 'file' | 'folder';
   /** sha256 hex del PLAINTEXT esperado: permite recuperar sin el server. */
   contentHash?: string | null;
+  /**
+   * Fusión 3-vías aplicada (el intent nació de un merge automático): guarda el estado
+   * REMOTO con el que quedó sincronizado el path y el hash del local que se fusionó.
+   * El commit escribe base/índice con el `contentHash` REMOTO (no el de la fusión): así
+   * el scan ve que el archivo difiere del índice y el push sube la fusión como revisión
+   * nueva. `oursHash` es el control del recovery: si el destino ya no es ni el local
+   * que se fusionó, se bloquea en vez de pisar.
+   */
+  mergeBase?: IntentMergeBase | null;
   /** Nombre del archivo temporal en el vault (relativo). */
   tempName?: string;
   /** Por qué quedó bloqueada (si state === 'blocked'). */

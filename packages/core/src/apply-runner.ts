@@ -21,6 +21,7 @@ import { toHex } from '@ovaultd/protocol';
 
 import { createIntent } from './apply.js';
 import type { FileSystemPort } from './file-port.js';
+import { esMergeablePorTipo, mergeDeTexto } from './merge.js';
 import type { IntentEntry, StateStore } from './StateStore.js';
 import type { SyncConnection } from './SyncConnection.js';
 import { colisionDeCase, nombreBase, validarRutaDeVault } from './vault-path.js';
@@ -44,9 +45,15 @@ export interface ApplyDeps {
   port: FileSystemPort;
   /** Subclaves `sync2` del vault (incluye la de contenido). */
   keys: SubKeys;
+  /**
+   * Conexión con el server. Opcional: sin ella no hay fusión 3-vías (el bloqueo por
+   * "ambos cambiaron" queda igual de explícito que siempre), pero el camino normal de
+   * pull la pasa siempre. Se usa SOLO para bajar el blob de la revisión base del CAS.
+   */
+  conn?: SyncConnection;
 }
 
-export type ApplyStatus = 'applied' | 'blocked' | 'noop';
+export type ApplyStatus = 'applied' | 'merged' | 'blocked' | 'noop';
 
 export interface ApplyOutcome {
   status: ApplyStatus;
@@ -119,6 +126,100 @@ async function evaluarGuard(
   return { verdict: 'blocked', reason: 'hay una edición local posterior a la base' };
 }
 
+/**
+ * Intenta una fusión 3-vías para el bloqueo "edición local posterior a la base" — el
+ * único caso que es realmente de TRES versiones (base ≠ local, base ≠ remoto,
+ * local ≠ remoto). Devuelve la fusión, el hash del local usado y el hash remoto; o
+ * null, que significa "conflicto real" (o falta algo para fusionar) y deja el bloqueo
+ * explícito de siempre. Acá no se escribe NADA: publicar es de `publicarFusion`.
+ *
+ * El fuzzy no decide: `mergeDeTexto` es conservador por construcción (proyecta sobre la
+ * base y cualquier solapamiento o duda es conflicto).
+ */
+async function intentarFusionar(
+  deps: ApplyDeps,
+  revision: ApplyRevision,
+  plaintextRemoto: Uint8Array | null,
+  hashRemoto: string | null,
+  reason: string,
+): Promise<{ fusion: Uint8Array; oursHash: string; hashRemoto: string } | null> {
+  const { store, port, keys, conn } = deps;
+
+  // Solo el caso de tres versiones. Los demás bloqueos (ruta, colisión, sin base,
+  // dos creaciones) no son fusionables por definición.
+  if (reason !== 'hay una edición local posterior a la base') return null;
+  if (conn === undefined || plaintextRemoto === null || hashRemoto === null) return null;
+  if (revision.kind !== 'file' || revision.deleted) return null;
+  if (!esMergeablePorTipo(revision.path)) return null;
+
+  const base = await store.getBase(revision.pathId);
+  if (!base?.blobId) return null;
+
+  try {
+    // La base: la última revisión sincronizada del path, del CAS y descifrada acá.
+    const storedBase = await conn.getBlob(base.blobId);
+    if (sha256Hex(storedBase) !== base.blobId) return null; // integridad de transporte
+
+    const dec = new TextDecoder('utf-8', { fatal: true });
+    const textoBase = dec.decode(decryptBlob(keys, storedBase));
+    const bytesOurs = await port.read(revision.path);
+    const oursHash = sha256Hex(bytesOurs);
+    const textoOurs = dec.decode(bytesOurs);
+    const textoTheirs = dec.decode(plaintextRemoto);
+
+    const resultado = mergeDeTexto(textoBase, textoOurs, textoTheirs);
+    if (resultado.tipo === 'conflicto') return null;
+
+    return { fusion: new TextEncoder().encode(resultado.texto), oursHash, hashRemoto };
+  } catch {
+    // Bytes que no son UTF-8, base ilegible: fallback conservador (bloqueo explícito).
+    return null;
+  }
+}
+
+/**
+ * Publica la fusión y cierra la aplicación. La clave está en QUÉ queda de cada lado:
+ *  - el archivo local queda con la FUSIÓN (los cambios de los dos dispositivos);
+ *  - base/índice avanzan a la revisión remota, con el hash REMOTO;
+ *  - como el archivo difiere del índice, el scan lo ve sucio y el push siguiente sube
+ *    la fusión como revisión NUEVA (expected_rev = la remota), que el otro dispositivo
+ *    recibe como cualquier mod.
+ */
+async function publicarFusion(
+  deps: ApplyDeps,
+  intent: IntentEntry,
+  revision: ApplyRevision,
+  fusion: { fusion: Uint8Array; oursHash: string; hashRemoto: string },
+): Promise<ApplyOutcome> {
+  const { store, port } = deps;
+  const dir = dirVault(revision.path);
+  if (dir !== '.') await port.mkdirp(dir);
+
+  const { tempName } = await port.writeTemp(dir, fusion.fusion);
+  intent = {
+    ...intent,
+    tempName,
+    contentHash: sha256Hex(fusion.fusion),
+    state: 'verified',
+    mergeBase: {
+      rev: revision.rev,
+      blobId: revision.blobId,
+      contentHash: fusion.hashRemoto,
+      oursHash: fusion.oursHash,
+    },
+  };
+  await store.putIntent(intent);
+  await port.rename(tempName, revision.path);
+
+  // El commit usa `mergeBase`: base/índice quedan con el hash REMOTO (ver commitDesdeIntento).
+  await commitDesdeIntento(deps, intent);
+  return {
+    status: 'merged',
+    intentId: intent.intentId,
+    reason: 'se fusionaron las ediciones de los dos dispositivos',
+  };
+}
+
 /** Aplica una revisión remota. `stored` es el blob almacenado (nonce incluido) o null. */
 export async function applyRevision(
   deps: ApplyDeps,
@@ -182,6 +283,13 @@ export async function applyRevision(
   let verdict = guard.verdict;
   if (guard.verdict === 'blocked') {
     if (opciones.forzar !== true) {
+      // Antes de declarar el conflicto: si es texto y las ediciones NO se pisan, se
+      // fusionan acá mismo — la resolución es el archivo con las dos, y el push
+      // siguiente sube esa fusión como revisión NUEVA.
+      const fusion = await intentarFusionar(deps, revision, plaintext, hashVerificado, guard.reason);
+      if (fusion !== null) {
+        return publicarFusion(deps, intent, revision, fusion);
+      }
       intent = { ...intent, state: 'blocked', reason: guard.reason };
       await store.putIntent(intent);
       return { status: 'blocked', intentId: intent.intentId, reason: guard.reason };
@@ -261,22 +369,31 @@ export async function applyRevision(
 async function commitDesdeIntento(deps: ApplyDeps, intent: IntentEntry): Promise<void> {
   const { store, port } = deps;
   const stat = intent.path ? await port.stat(intent.path).catch(() => null) : null;
+
+  // Una fusión cierra contra el REMOTO (`mergeBase`), no contra el contenido del intent:
+  // base/índice guardan la revisión remota y su hash, y el archivo local (la fusión)
+  // queda "sucio" a propósito — el scan lo detecta y el push lo publica como revisión nueva.
+  const destino = intent.mergeBase
+    ? {
+        rev: intent.mergeBase.rev,
+        blobId: intent.mergeBase.blobId,
+        contentHash: intent.mergeBase.contentHash,
+      }
+    : {
+        rev: intent.rev,
+        blobId: intent.blobId === '' ? null : intent.blobId,
+        contentHash: intent.deleted ? null : (intent.contentHash ?? null),
+      };
+
   await store.completeApply({
     intentId: intent.intentId,
-    base: {
-      pathId: intent.pathId,
-      rev: intent.rev,
-      blobId: intent.blobId === '' ? null : intent.blobId,
-      contentHash: intent.deleted ? null : (intent.contentHash ?? null),
-    },
+    base: { pathId: intent.pathId, ...destino },
     index: {
       pathId: intent.pathId,
-      path: intent.path,
+      path: intent.path ?? '',
       kind: intent.kind ?? 'file',
       deleted: intent.deleted === true,
-      rev: intent.rev,
-      blobId: intent.blobId === '' ? null : intent.blobId,
-      contentHash: intent.deleted ? null : (intent.contentHash ?? null),
+      ...destino,
       size: stat?.size ?? null,
       mtime: null,
     },
@@ -331,10 +448,15 @@ export async function recoverApplies(deps: ApplyDeps): Promise<RecoveryReport> {
         reporte.blocked += 1;
         continue;
       }
-      // Publicar es seguro SOLO si el destino no cambió respecto de la base.
+      // Publicar es seguro SOLO si el destino no cambió desde que se decidió publicar.
+      // En una FUSIÓN el destino esperado es el local que se fusionó (`oursHash`): la
+      // fusión fue deliberada al crear el intent, no se re-compara contra la base.
       const base = await store.getBase(intent.pathId);
-      const destinoOk =
-        hashDestino === null ? base === null : base?.contentHash != null && hashDestino === base.contentHash;
+      const destinoOk = intent.mergeBase
+        ? hashDestino === intent.mergeBase.oursHash
+        : hashDestino === null
+          ? base === null
+          : base?.contentHash != null && hashDestino === base.contentHash;
       if (!destinoOk) {
         await store.putIntent({ ...intent, state: 'blocked', reason: 'destino con cambios locales: no se pisa' });
         reporte.blocked += 1;
