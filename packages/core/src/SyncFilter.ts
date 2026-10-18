@@ -51,6 +51,24 @@ export function esConfigPortable(dentroDelConfig: string): boolean {
 }
 
 /**
+ * ¿`dentro` es un CONTENEDOR del configDir (una carpeta que sólo cuelga configuración)?
+ *
+ * Excluir una carpeta la saca del escaneo ENTERA (no se recursa), así que las carpetas que
+ * existen para colgar contenido portable no pueden excluirse como si fueran archivos:
+ *  - `''` — la raíz del configDir (`esConfigPortable('')` no matchea nada y excluía TODO).
+ *  - `snippets` / `themes` / `plugins` — las carpetas de la lista blanca.
+ *  - `plugins/<id>` — el directorio de cada plugin (su `manifest.json` es portable).
+ *
+ * Un `plugins/<id>/data.json` NO es contenedor: es un archivo vetado y se excluye.
+ */
+function esContenedorDeConfig(dentro: string): boolean {
+  if (dentro === '') return true;
+  if (dentro === 'snippets' || dentro === 'themes' || dentro === 'plugins') return true;
+  const partes = dentro.split('/');
+  return partes.length === 2 && partes[0] === 'plugins';
+}
+
+/**
  * ¿Por qué este path NO se sincroniza? `null` = es contenido.
  *
  * `configDir` es el del vault (no siempre `.obsidian`): el usuario puede cambiarlo.
@@ -75,6 +93,10 @@ export function motivoDeExclusion(path: string, configDir = '.obsidian'): string
   const i = segmentos.indexOf(configDir);
   if (i !== -1) {
     const dentro = segmentos.slice(i + 1).join('/');
+    // Los contenedores se recursan (sus archivos se deciden uno a uno): la raíz del
+    // configDir y las carpetas de la lista blanca NO pueden excluirse o el contenido
+    // portable queda inalcanzable (el bug que dejó de sincronizar los themes).
+    if (esContenedorDeConfig(dentro)) return null;
     return esConfigPortable(dentro)
       ? null
       : 'configuración del vault (fuera de la lista blanca)';

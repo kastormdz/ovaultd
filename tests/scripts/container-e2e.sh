@@ -22,8 +22,14 @@ export OVAULTD_ADDR="127.0.0.1"
 export OVAULTD_DATA="$DIR/datos"
 export E2E_UID="$(id -u)"
 export E2E_GID="$(id -g)"
+# El E2E verifica el endpoint /metrics, así que lo prende explícito; el default `off` tiene su
+# propio test (routes/tests.rs).
+export OVAULTD_METRICS="on"
 
-COMPOSE=(docker compose -f compose.yaml -f docker/compose.dev.yaml -f tests/scripts/container-e2e.compose.yaml)
+# Project name PROPIO: sin esto el compose del E2E comparte el proyecto `ovaultd` del stack
+# de producción y su `down` inicial BORRA el contenedor de prod (pasó el 2026-10-18: el E2E
+# local se llevó el server en vivo). Con `-p`, el ciclo del E2E vive en su namespace.
+COMPOSE=(docker compose -p ovaultd-e2e -f compose.yaml -f docker/compose.dev.yaml -f tests/scripts/container-e2e.compose.yaml)
 # El overlay de CI agrega la caché de layers de GHA al build: sólo tiene sentido en el runner
 # (ahí `setup-buildx-action` deja el builder docker-container que entiende `type=gha`). En local
 # la variable no está y el E2E corre exactamente igual.

@@ -37,6 +37,8 @@ services:
       # X-Forwarded-Proto (docs/deploy.md). Default 0: los headers de cualquiera NO cuentan
       # (la IP sale del peer TCP y el esquema no habilita el Secure de la cookie).
       OVAULTD_TRUST_PROXY: "${OVAULTD_TRUST_PROXY:-0}"
+      # /metrics: off (default) | localhost | on (ver docs/deploy.md).
+      OVAULTD_METRICS: "${OVAULTD_METRICS:-off}"
     volumes:
       # Default: volumen nombrado. Para un bind mount (backups con rsync, NFS, etc.):
       # OVAULTD_DATA=/ruta/absoluta/en/el/host

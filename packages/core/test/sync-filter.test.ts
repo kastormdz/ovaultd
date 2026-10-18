@@ -82,4 +82,32 @@ describe('SyncFilter', () => {
       expect(motivoDeExclusion(path)).toBeNull();
     });
   }
+
+  // Los CONTENEDORES del configDir se recursan: una carpeta excluida no se escanea (ni se
+  // baja a ella), así que excluir la raíz o las carpetas de la lista blanca dejaba su
+  // contenido portable inalcanzable — el bug que dejó de sincronizar los themes.
+  const contenedores = [
+    '.obsidian',
+    '.obsidian/themes',
+    '.obsidian/snippets',
+    '.obsidian/plugins',
+    '.obsidian/plugins/dataview',
+  ];
+  for (const path of contenedores) {
+    it(`no excluye el contenedor ${path}`, () => {
+      expect(estaExcluido(path)).toBe(false);
+      expect(motivoDeExclusion(path)).toBeNull();
+    });
+  }
+
+  it('lo NO portable del configDir sigue excluido (los contenedores no filtran vetados)', () => {
+    expect(motivoDeExclusion('.obsidian/data.json')).toContain('fuera de la lista blanca');
+    expect(motivoDeExclusion('.obsidian/plugins/dataview/data.json')).toContain(
+      'fuera de la lista blanca',
+    );
+    expect(motivoDeExclusion('.obsidian/plugins/dataview/sub/cache.bin')).toContain(
+      'fuera de la lista blanca',
+    );
+    expect(motivoDeExclusion('.obsidian/escenario.json')).toContain('fuera de la lista blanca');
+  });
 });
