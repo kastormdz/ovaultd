@@ -101,14 +101,22 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Construir la imagen de release
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      # El E2E del contenedor no es solo docker: el paso de sync real corre el runtime en
+      # Chromium contra el server del contenedor, así que hacen falta las dependencias del
+      # repo y el browser. Sin esto, `npx playwright` se baja cualquier versión y revienta
+      # con ERR_MODULE_NOT_FOUND.
+      - name: Dependencias del cliente (el E2E usa Chromium de verdad)
         run: |
-          docker build -f docker/Dockerfile \
-            -t "ghcr.io/${{ github.repository }}:${{ needs.preflight.outputs.version }}" \
-            -t "ghcr.io/${{ github.repository }}:latest" .
-      # El E2E del contenedor construye la imagen real, la levanta detrás de un proxy y
-      # verifica el flujo completo + la persistencia tras un recreate. Es el gate que
-      # justifica publicar: se corre contra lo que se va a publicar, no contra otra cosa.
+          npm ci
+          npm run build
+          npx playwright install --with-deps chromium
+      # Construye la imagen del compose, la levanta, corre el smoke completo (HTTP +
+      # WebSocket, cripto viva) + el sync real en Chromium, y verifica que la base
+      # sobreviva a un recreate.
       - name: E2E del contenedor (flujo completo + persistencia)
         run: bash tests/scripts/container-e2e.sh
       - uses: docker/login-action@v3
@@ -116,10 +124,16 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Publicar en GHCR
+      - name: Publicar en GHCR la imagen que PASÓ el E2E
         run: |
-          docker push "ghcr.io/${{ github.repository }}:${{ needs.preflight.outputs.version }}"
+          vers="${{ needs.preflight.outputs.version }}"
+          # No se construye una imagen nueva para publicar: se re-taggea exactamente la que
+          # el E2E levantó y verificó. Lo que se publica es lo que se probó.
+          docker tag ovaultd:dev "ghcr.io/${{ github.repository }}:$vers"
+          docker tag ovaultd:dev "ghcr.io/${{ github.repository }}:latest"
+          docker push "ghcr.io/${{ github.repository }}:$vers"
           docker push "ghcr.io/${{ github.repository }}:latest"
+          docker image inspect "ghcr.io/${{ github.repository }}:$vers" --format 'imagen publicada: {{.Id}} ({{.Size}} bytes)'
 
   release:
     needs: [preflight, binario, imagen]
