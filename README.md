@@ -155,8 +155,16 @@ Or the image, which is the deployment path the project targets:
 
 ```bash
 docker run -d --name ovaultd -p 127.0.0.1:8080:8080 -v ovaultd-data:/data \
-  ghcr.io/kastormdz/ovaultd:0.2.0
+  ghcr.io/kastormdz/ovaultd:0.2.1
 ```
+
+The same tested build is published to both registries — identical digest, because the release
+re-tags the image the end-to-end suite just verified instead of rebuilding it:
+
+| Registry | Image |
+| --- | --- |
+| GitHub Container Registry | `ghcr.io/kastormdz/ovaultd:0.2.1` |
+| Docker Hub | `docker.io/kastormdz/ovaultd:0.2.1` |
 
 What changed in each version lives in [CHANGELOG.md](CHANGELOG.md), and the release notes are taken from there — never generated prose.
 

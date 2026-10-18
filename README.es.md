@@ -157,8 +157,16 @@ O la imagen, que es la vía de despliegue que el proyecto apunta:
 
 ```bash
 docker run -d --name ovaultd -p 127.0.0.1:8080:8080 -v ovaultd-data:/data \
-  ghcr.io/kastormdz/ovaultd:0.2.0
+  ghcr.io/kastormdz/ovaultd:0.2.1
 ```
+
+La misma imagen probada se publica en los dos registries — digest idéntico, porque la release
+re-taggea la imagen que el E2E acaba de verificar en vez de reconstruirla:
+
+| Registry | Imagen |
+| --- | --- |
+| GitHub Container Registry | `ghcr.io/kastormdz/ovaultd:0.2.1` |
+| Docker Hub | `docker.io/kastormdz/ovaultd:0.2.1` |
 
 Lo que cambió en cada versión vive en [CHANGELOG.md](CHANGELOG.md), y las notas de la release salen de ahí — nunca de prosa generada.
 
