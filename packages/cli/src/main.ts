@@ -8,12 +8,12 @@
  */
 
 import { hostname } from 'node:os';
-import { chmodSync, readFileSync, writeFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
 
 import { Command } from 'commander';
 
-import { backoffMs, diffDeTextos, type RevisionResumen } from '@ovaultd/core';
+import { backoffMs, diffDeTextos, validarRutaDeVault, type RevisionResumen } from '@ovaultd/core';
 import {
   KDF_DEFAULTS,
   deriveKek,
@@ -624,6 +624,83 @@ programa
         }
         const diff = diffDeTextos(actual, texto);
         console.log(diff === '' ? 'sin diferencias con el archivo local' : diff);
+      });
+    },
+  );
+
+programa
+  .command('restore <vault-path>')
+  .description(
+    'restaura una versión de la historia en el vault local (sube como revisión NUEVA; sin --yes solo muestra el diff)',
+  )
+  .requiredOption('--rev <n>', 'revisión a restaurar')
+  .option('--yes', 'aplica el restore (sin esto, solo muestra qué cambiaría)')
+  .option('--vault <n>', 'número de vault (si hay más de uno vinculado)')
+  .option('--password-stdin', 'lee la password de stdin (para scripts)')
+  .action(
+    async (
+      vaultPath: string,
+      opciones: { rev: string; yes?: boolean; vault?: string; passwordStdin?: boolean },
+    ) => {
+      const rev = Number.parseInt(opciones.rev, 10);
+      if (!Number.isInteger(rev) || rev <= 0) throw new Error(`revisión inválida: ${opciones.rev}`);
+
+      // La ruta se valida ANTES de tocar el disco (misma política portable que el apply).
+      const validez = validarRutaDeVault(vaultPath);
+      if (!validez.ok) {
+        throw new Error(`ruta inválida para el vault: ${validez.motivo ?? 'sin detalle'}`);
+      }
+
+      await conVaultEnLectura(opciones, async (abierto, call) => {
+        const resultado = (await call('history.list', {
+          ruta: vaultPath,
+          before: rev + 1,
+          limit: 1,
+        })) as { items: RevisionResumen[] };
+
+        const item = resultado.items[0];
+        if (!item || item.rev !== rev) {
+          throw new Error(
+            item
+              ? `no existe la rev ${rev} para «${vaultPath}» (la más cercana hacia abajo es la ${item.rev})`
+              : `sin historia para «${vaultPath}» hasta la rev ${rev}`,
+          );
+        }
+        if (!item.blobId) {
+          throw new Error(`la rev ${rev} no tiene contenido (fue un «${item.op}»)`);
+        }
+
+        const { texto } = (await call('history.preview', { blobId: item.blobId })) as {
+          texto: string;
+        };
+
+        const destino = join(abierto.vault.dir!, ...vaultPath.split('/'));
+        let actual: string | null = null;
+        try {
+          actual = readFileSync(destino, 'utf8');
+        } catch {
+          actual = null;
+        }
+
+        if (!opciones.yes) {
+          console.log(
+            `restore de «${vaultPath}» a la rev ${rev} (${item.ts}, ${item.op}, ${item.size ?? 0} B)`,
+          );
+          if (actual === null) {
+            console.log('el archivo NO existe localmente: se crearía con el contenido de esa revisión');
+            console.log(texto);
+          } else {
+            const diff = diffDeTextos(actual, texto);
+            console.log(diff === '' ? 'sin diferencias: el archivo local ya coincide' : diff);
+          }
+          console.log('— nada se escribió: volvé a correr con --yes para aplicar');
+          return;
+        }
+
+        mkdirSync(dirname(destino), { recursive: true });
+        writeFileSync(destino, texto, 'utf8');
+        console.log(`restaurado «${vaultPath}» a la rev ${rev} (${item.size ?? 0} B → ${destino})`);
+        console.log('el próximo «ovaultd sync» lo sube como revisión NUEVA (la historia no se reescribe)');
       });
     },
   );
