@@ -65,6 +65,12 @@ export interface SyncConnectionOptions {
   vault: number;
   device: number;
   keys: SubKeys;
+  /**
+   * Se llama cuando el server avisa que hay revisiones nuevas (`notify`). Es una **señal**, no un
+   * dato: quien la recibe tiene que hacer un pull con su `since`. El server no avisa al dispositivo
+   * que produjo el lote, así que un aviso siempre significa que hay algo que bajar.
+   */
+  alRecibirAviso?: () => void;
 }
 
 interface Espera {
@@ -235,6 +241,7 @@ export class SyncConnection {
     if (tipo === 'notify' || tipo === 'ack') {
       this.notificaciones.push(mensaje as ServerMessageWire);
       if (this.notificaciones.length > 100) this.notificaciones.shift();
+      if (tipo === 'notify') this.opciones.alRecibirAviso?.();
       return;
     }
 
