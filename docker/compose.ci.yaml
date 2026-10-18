@@ -1,0 +1,19 @@
+# Overlay de CI: sólo agrega la caché de layers al build de la imagen.
+#
+# Por qué existe aparte del overlay de dev: el driver por defecto de compose (`docker`) NO soporta
+# `type=gha`, y el overlay de dev lo usa el E2E que corre cualquier persona en su máquina, donde
+# GitHub Actions no existe. Acá va sólo lo que necesita el runner.
+#
+# El workflow llama a `docker/setup-buildx-action` antes, que deja un builder `docker-container`
+# como default: ese es el que entiende `type=gha`, y la clave de caché la comparte con cualquier
+# otro build del mismo repo — incluido el de `gates`.
+#
+# Sin esto, el job `imagen` recompila las ~400 dependencias de Rust que el job `gates` ya compiló:
+# es la mayor parte del tiempo del release.
+services:
+  ovaultd:
+    build:
+      cache_from:
+        - type=gha
+      cache_to:
+        - type=gha,mode=max

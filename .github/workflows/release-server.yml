@@ -119,7 +119,14 @@ jobs:
       # Construye la imagen del compose, la levanta, corre el smoke completo (HTTP +
       # WebSocket, cripto viva) + el sync real en Chromium, y verifica que la base
       # sobreviva a un recreate.
+      # El driver por defecto de compose (`docker`) no soporta cache_from/cache_to de GHA: esta
+      # action deja un builder docker-container como default, que es el que entiende `type=gha`.
+      - uses: docker/setup-buildx-action@v3
       - name: E2E del contenedor (flujo completo + persistencia)
+        env:
+          # Activa el overlay docker/compose.ci.yaml (caché de layers). Comparte la clave con el
+          # build del job `gates`, así no se compilan dos veces las mismas dependencias.
+          OVAULTD_CI_CACHE: "1"
         run: bash tests/scripts/container-e2e.sh
       - uses: docker/login-action@v3
         with:

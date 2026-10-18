@@ -24,6 +24,12 @@ export E2E_UID="$(id -u)"
 export E2E_GID="$(id -g)"
 
 COMPOSE=(docker compose -f compose.yaml -f docker/compose.dev.yaml -f tests/scripts/container-e2e.compose.yaml)
+# El overlay de CI agrega la caché de layers de GHA al build: sólo tiene sentido en el runner
+# (ahí `setup-buildx-action` deja el builder docker-container que entiende `type=gha`). En local
+# la variable no está y el E2E corre exactamente igual.
+if [[ -n "${OVAULTD_CI_CACHE:-}" ]]; then
+  COMPOSE+=(-f docker/compose.ci.yaml)
+fi
 
 paso() { printf '\n== %s\n' "$*"; }
 nota() { printf '   %s\n' "$*"; }
