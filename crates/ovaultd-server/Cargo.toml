@@ -1,6 +1,6 @@
 [package]
 name = "ovaultd-server"
-version = "0.2.6"
+version = "0.2.7"
 edition = "2024"
 
 [[bin]]
@@ -38,3 +38,4 @@ tempfile = "3.27.0"
 tokio-tungstenite = "0.30.0"
 futures = "0.3.34"
 tower = { version = "0.5.3", features = ["util"] }
+sha2 = "0.11.0"

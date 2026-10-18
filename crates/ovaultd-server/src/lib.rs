@@ -14,6 +14,7 @@ pub mod delta;
 pub mod error;
 pub mod failpoints;
 pub mod history;
+pub mod maintenance;
 pub mod peer;
 pub mod routes;
 pub mod storage;

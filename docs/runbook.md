@@ -139,6 +139,33 @@ docker inspect ovaultd-ovaultd-1 --format '{{.State.Health.Status}}'
 - **Después de cada incidente**: un backup manual + restore de verificación antes de
   seguir operando.
 
+## GC de blobs huérfanos
+
+Un blob queda huérfano cuando se publicó (upload o `blob_head`) y ningún batch lo
+referenció, o cuando su única referencia era un snapshot que se borró. El GC los limpia
+desde `ovaultd-admin` (el `--db` va ANTES del subcomando):
+
+```bash
+docker exec ovaultd-ovaultd-1 ovaultd-admin --db /data/metadata.db gc            # dry-run (default)
+docker exec ovaultd-ovaultd-1 ovaultd-admin --db /data/metadata.db gc --verify   # audita el invariante
+# El borrado, con el server PARADO (el conteo no debe moverse mientras corre):
+docker compose stop ovaultd
+docker compose run --rm --entrypoint ovaultd-admin ovaultd --db /data/metadata.db gc --delete
+docker compose up -d
+```
+
+- `gc` (sin flags) es **dry-run**: lista los candidatos con tamaño y fecha, no escribe
+  NADA. La gracia por defecto es de 24 h (`--gracia-minutos N`): un blob recién publicado
+  puede tener su batch en vuelo (su `refs` es 0 hasta el commit).
+- `gc --verify` **audita** el invariante `refs = revisiones con blob + snapshots`,
+  recontando las fuentes y comparándolas en ambos sentidos. Solo lee.
+- `gc --delete` borra de verdad (filas + archivos del CAS), en una transacción, y
+  **excluye los uploads en curso**.
+- `--vault N` limita cualquier modo a un vault.
+
+Si `--verify` reporta discrepancias, es un bug de un camino que ajusta referencias: NO
+borres hasta entender la diferencia (`refs` vs `esperado` dicen para dónde mirar).
+
 ## Failpoints (simulación de crash — SOLO builds debug)
 
 El server inyecta fallas con `OVAULTD_FAILPOINT=<punto>` y el modo con

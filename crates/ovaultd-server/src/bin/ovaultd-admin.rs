@@ -34,6 +34,21 @@ enum Comando {
     Health,
     /// Inspección operacional: conteos y tamaños. Nada de esto descifra contenido.
     Inspect,
+    /// GC de blobs huérfanos (fase 5): sin flags es dry-run (solo reporta).
+    Gc {
+        /// Audita el invariante de referencias contra las fuentes (no escribe).
+        #[arg(long)]
+        verify: bool,
+        /// Borra de verdad: filas + archivos del CAS. Corré el server PARADO.
+        #[arg(long)]
+        delete: bool,
+        /// Limita a un vault (por id).
+        #[arg(long)]
+        vault: Option<i64>,
+        /// Gracia en minutos para blobs recién publicados (default: 1440 = 24 h).
+        #[arg(long, default_value_t = ovaultd_server::maintenance::gc::GRACIA_MINUTOS_POR_DEFECTO)]
+        gracia_minutos: i64,
+    },
 }
 
 #[tokio::main]
@@ -45,6 +60,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Comando::CreateAccount { email } => create_account(&pool, &email, &cli.db).await?,
         Comando::Health => health(&pool, &cli.db).await?,
         Comando::Inspect => inspect(&pool).await?,
+        Comando::Gc {
+            verify,
+            delete,
+            vault,
+            gracia_minutos,
+        } => comando_gc(&pool, verify, delete, vault, gracia_minutos).await?,
     }
 
     Ok(())
@@ -123,5 +144,65 @@ async fn inspect(pool: &SqlitePool) -> Result<(), Box<dyn std::error::Error>> {
     println!("entradas en files:  {entradas}");
     println!("blobs en el índice: {blobs} ({bytes_blob} B físicos)");
     println!("uploads pendientes: {uploads_pendientes} ({bytes_pendientes} B por confirmar)");
+    Ok(())
+}
+
+async fn comando_gc(
+    pool: &SqlitePool,
+    verify: bool,
+    delete: bool,
+    vault: Option<i64>,
+    gracia_minutos: i64,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use ovaultd_server::maintenance::gc;
+    use ovaultd_server::storage::CasStore;
+
+    if verify {
+        let discrepancias = gc::verificar(pool, vault).await?;
+        if discrepancias.is_empty() {
+            println!("verify: invariante sano (refs = revisiones con blob + snapshots)");
+        } else {
+            println!("verify: {} discrepancia(s):", discrepancias.len());
+            for d in &discrepancias {
+                println!(
+                    "  vault #{} {} refs={} esperado={}",
+                    d.vault_id,
+                    d.hash_hex(),
+                    d.refs,
+                    d.esperado
+                );
+            }
+        }
+        return Ok(());
+    }
+
+    let candidatos = gc::planificar(pool, vault, gracia_minutos).await?;
+    let bytes: i64 = candidatos.iter().map(|c| c.size).sum();
+    println!(
+        "gc: {} candidato(s), {bytes} B {}",
+        candidatos.len(),
+        if delete {
+            "(borrando)"
+        } else {
+            "(dry-run: solo reporte)"
+        }
+    );
+    for c in &candidatos {
+        println!(
+            "  vault #{} {} {} B {}",
+            c.vault_id,
+            c.hash_hex(),
+            c.size,
+            c.created_at
+        );
+    }
+
+    if delete {
+        let ruta_cas = std::env::var("OVAULTD_CAS").unwrap_or_else(|_| "/data/cas".to_owned());
+        let cas = CasStore::new(ruta_cas.into())?;
+        let (borrados, bytes) = gc::borrar(pool, &cas, &candidatos).await?;
+        println!("gc: borrados {borrados} blob(s), {bytes} B liberados");
+    }
+
     Ok(())
 }

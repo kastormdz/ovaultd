@@ -5,6 +5,33 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y e
 [semver](https://semver.org/lang/es/): server y plugin viajan en un **release train** (mismo
 `MAJOR.MINOR` = pareja probada junta; ver ADR-0018 y la sección «Compatibilidad» del README).
 
+## [0.2.7] — 2026-10-18
+
+Fase 5, corte 5e: GC de blobs huérfanos, con auditoría del invariante de referencias.
+
+### Added
+
+- **`ovaultd-admin gc`** (`crates/ovaultd-server/src/maintenance/gc.rs`): limpia los
+  blobs que nadie referencia — publicados sin batch que los commitee, o cuyo único
+  dueño era un snapshot ya borrado. Tres modos:
+  - `gc` (dry-run, el default): lista candidatos con tamaño y fecha; no escribe nada.
+    La gracia (24 h, `--gracia-minutos`) protege a los blobs recién publicados, cuyo
+    `refs` todavía es 0 hasta que aterrice su commit.
+  - `gc --verify`: audita el invariante `refs = revisiones con blob + snapshots`
+    recontando las fuentes y comparando en ambos sentidos (detecta drift del contador
+    y referencias colgadas). Solo lectura.
+  - `gc --delete`: borra filas + archivos del CAS, en una transacción, excluyendo los
+    uploads en curso (`offset < total`). Con el server parado.
+- `--vault N` limita cualquier modo a un vault.
+
+### Tests
+
+- `tests/history_gc.rs` (6 casos): huérfano viejo → borrado real de fila y CAS
+  (idempotente); gracia protege al recién publicado; una revisión retiene al blob para
+  siempre; `snapshot_only_reference_survives_gc` (y borrar el snapshot devuelve la
+  referencia sin romper el invariante); el borrado saltea uploads en curso; `--verify`
+  detecta drift y referencias colgadas.
+
 ## [0.2.6] — 2026-10-18
 
 Fix de una carrera del handshake: dos conexiones paralelas del mismo dispositivo ya no se pisan.
