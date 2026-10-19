@@ -1,0 +1,23 @@
+[Unit]
+Description=ovaultd sync (continuous)
+Documentation=https://github.com/kastormdz/ovaultd/blob/main/docs/cli.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# El comando es un shim sobre el dist del checkout (ver scripts/instalar-cli.sh).
+# Requiere que el vault esté vinculado y con las subclaves cacheadas: el primer
+# `ovaultd sync` se corre a mano (pide la password del vault una vez).
+ExecStart=%h/.local/bin/ovaultd sync --continuous --interval 5
+Environment=OVAULTD_CONFIG_DIR=%h/.config/ovaultd
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+# Si el server o la red se caen, reintenta sin intervención.
+Restart=on-failure
+RestartSec=10
+# El runtime abre un Chromium headless: no necesita sesión gráfica.
+Nice=10
+IOSchedulingClass=idle
+
+[Install]
+WantedBy=default.target

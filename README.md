@@ -106,23 +106,44 @@ Open the plugin's settings (**oVaultd Sync**), sign in with your account, and cr
 
 #### Headless and automation
 
-The repository also ships a **CLI** (`packages/cli`) that drives the same core, for servers without a desktop and for scripts. It's the client the end-to-end tests use to talk to a server, and it's documented here rather than in the quickstart because the plugin is the intended way in:
+The repository also ships a **CLI** (`packages/cli`) that drives the same core, for
+servers without a desktop, for scripts and for agents. Install the `ovaultd` command from
+the checkout (the package is private, it is not on npm):
 
 ```bash
 npm install
 npm run build
+bash scripts/instalar-cli.sh            # → ~/.local/bin/ovaultd
 
-printf '%s\n' 'a-long-password' | node packages/cli/dist/main.js \
-  login http://127.0.0.1:8080 --email you@example.com --password-stdin
-
-node packages/cli/dist/main.js create-remote my-vault
-# prints the recovery key ONCE — store it somewhere safe.
-# For scripts: --recovery-out <file> writes it 0600 instead.
-
-node packages/cli/dist/main.js status
+ovaultd login https://obs.example.com --email you@example.com
+ovaultd list-remote
+ovaultd setup <ID> --dir ~/Obsidian     # asks the vault password once
+ovaultd sync
 ```
 
-`create-remote` generates the vault material. `setup` links a local folder to an existing remote vault and checks your password against the material. `list-remote` shows what the account owns.
+`create-remote` generates the vault material. `setup` links a local folder to an existing
+remote vault and checks your password against the material. `list-remote` shows what the
+account owns.
+
+### Automatic sync
+
+With the folder linked, the CLI is an agent's hands: `ovaultd cat`, `write`, `ls` and
+`rm` operate on the decrypted vault (paths are confined to it) and `sync` publishes the
+changes as signed revisions. Keep it current with the continuous sync as a systemd
+**user** service — the unit ships in `contrib/systemd/ovaultd-sync.service`:
+
+```bash
+mkdir -p ~/.config/systemd/user
+cp contrib/systemd/ovaultd-sync.service ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now ovaultd-sync
+loginctl enable-linger "$USER"          # keep it running without an open session
+journalctl --user -u ovaultd-sync -f    # watch it
+```
+
+The first `ovaultd sync` caches the derived vault subkeys (`0600`) so the service never
+needs the password or a TTY; `ovaultd olvidar-clave` drops the cache. Full command
+reference: [docs/cli.md](docs/cli.md). Agent playbook: `skills/ovaultd-cli/SKILL.md`.
 
 ## Behind a reverse proxy
 
@@ -175,6 +196,7 @@ What changed in each version lives in [CHANGELOG.md](CHANGELOG.md), and the rele
 - `docs/crypto.md` — the `sync2` crypto spec and golden vectors
 - `docs/server-interfaces.md` — the server contract
 - `docs/deploy.md` — Docker and reverse proxy, backups
+- `docs/cli.md` — the `ovaultd` CLI: install, sync, notes CRUD, history
 - `docs/development.md` — building, testing and the contribution rules
 - `docs/runbook.md` — operating a server: backups, restore, recovery
 - `docs/decisions/` — architecture decision records

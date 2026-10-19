@@ -44,6 +44,52 @@ ovaultd list-local           # scan + hash-diff, no network
 ovaultd status
 ```
 
+## Automatic sync (systemd)
+
+`sync --continuous` keeps the folder current and is meant to run as a **user** service.
+The unit ships in `contrib/systemd/ovaultd-sync.service`:
+
+```ini
+[Unit]
+Description=ovaultd sync (continuous)
+Documentation=https://github.com/kastormdz/ovaultd/blob/main/docs/cli.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/ovaultd sync --continuous --interval 5
+Environment=OVAULTD_CONFIG_DIR=%h/.config/ovaultd
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+Restart=on-failure
+RestartSec=10
+Nice=10
+IOSchedulingClass=idle
+
+[Install]
+WantedBy=default.target
+```
+
+```bash
+mkdir -p ~/.config/systemd/user
+cp contrib/systemd/ovaultd-sync.service ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now ovaultd-sync
+loginctl enable-linger "$USER"          # keep it running without an open session
+journalctl --user -u ovaultd-sync -f    # watch it
+```
+
+The service never asks for the vault password: run `ovaultd sync` once by hand first (it
+caches the subkeys, `0600`). If the server or the network is down, systemd restarts the
+process (`RestartSec=10`) and the loop retries with backoff.
+
+If you prefer a periodic pass over a long-running process, use a oneshot timer instead:
+
+```ini
+# ~/.config/systemd/user/ovaultd-sync.service → Type=oneshot, ExecStart=… sync
+# ~/.config/systemd/user/ovaultd-sync.timer   → OnBootSec=1min, OnUnitActiveSec=5min
+```
+
 ## The vault password is asked once
 
 The first command that needs the vault key (the first `sync`, `history`, `preview` or
