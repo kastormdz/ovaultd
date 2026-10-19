@@ -98,13 +98,13 @@ nota "delta: $(jq -c '[.items[].op]' <<<"$DELTA")"
 jq -e '(.items | length) == 2 and [.items[].op] == ["add","add"]' <<<"$DELTA" > /dev/null \
     || fallo "delta inesperada tras el primer sync"
 
-paso "sync 2 (mod + del + add → rev 3..5)"
+paso "sync 2 (mod + del + add → rev 2)"
 printf '# Nota uno\nEditada por la CLI\n' > "$D/vault/Notas/uno.md"
 rm "$D/vault/Notas/dos.md"
 printf 'nueva\n' > "$D/vault/tres.md"
 echo 'password-vault-cli' | "${CLI[@]}" sync 1 --password-stdin
 
-DELTA2="$(curl -sf "http://127.0.0.1:$PUERTO/api/v1/vaults/1/changes?since=2&limit=100" -H "authorization: Bearer $TOKEN")"
+DELTA2="$(curl -sf "http://127.0.0.1:$PUERTO/api/v1/vaults/1/changes?since=1&limit=100" -H "authorization: Bearer $TOKEN")"
 nota "delta nueva: $(jq -c '[.items[].op]' <<<"$DELTA2")"
 jq -e '(.items | length) == 3' <<<"$DELTA2" > /dev/null || fallo "delta inesperada tras el segundo sync"
 jq -e '[.items[].op] | sort == ["add","del","mod"]' <<<"$DELTA2" > /dev/null \
@@ -115,41 +115,41 @@ SALIDA="$(echo 'password-vault-cli' | "${CLI[@]}" list-local 1 --password-stdin)
 echo "$SALIDA" | head -4
 echo "$SALIDA" | grep -q "sinCambios=2" || fallo "list-local no ve todo sincronizado"
 
-paso "history (lectura pura: revs 2 y 4 de Notas/uno.md)"
-# Las revisiones del vault son POR PATH y el push va 1 op por lote: dos.md fue la rev 1,
-# uno.md nació en la 2 y su edición quedó en la 4 (la historia de un archivo muestra solo las suyas).
+paso "history (lectura pura: revs 1 y 2 de Notas/uno.md)"
+# Las revisiones del vault son POR PATH y el push agrupa el lote: dos.md y uno.md son la rev 1,
+# uno.md nació en la 1 y su edición quedó en la 2 (la historia de un archivo muestra solo las suyas).
 HIST="$(echo 'password-vault-cli' | "${CLI[@]}" history Notas/uno.md --password-stdin)"
 echo "$HIST" | head -4
-echo "$HIST" | grep -qE '^rev +4 +mod ' || fallo "history no lista la rev 4 (mod)"
-echo "$HIST" | grep -qE '^rev +2 +add ' || fallo "history no lista la rev 2 (add)"
+echo "$HIST" | grep -qE '^rev +2 +mod ' || fallo "history no lista la rev 2 (mod)"
+echo "$HIST" | grep -qE '^rev +1 +add ' || fallo "history no lista la rev 1 (add)"
 
-paso "preview de la rev 2: el contenido viejo, sin tocar el vault"
+paso "preview de la rev 1: el contenido viejo, sin tocar el vault"
 MD5_ANTES="$(md5sum "$D/vault/Notas/uno.md" | awk '{print $1}')"
-PREV="$(echo 'password-vault-cli' | "${CLI[@]}" preview Notas/uno.md --rev 2 --password-stdin)"
+PREV="$(echo 'password-vault-cli' | "${CLI[@]}" preview Notas/uno.md --rev 1 --password-stdin)"
 echo "$PREV" | head -3
-echo "$PREV" | grep -q 'Nota uno' || fallo "preview no muestra el contenido de la rev 2"
-if echo "$PREV" | grep -q 'Editada por la CLI'; then fallo "preview mostró el contenido NUEVO para la rev 2"; fi
+echo "$PREV" | grep -q 'Nota uno' || fallo "preview no muestra el contenido de la rev 1"
+if echo "$PREV" | grep -q 'Editada por la CLI'; then fallo "preview mostró el contenido NUEVO para la rev 1"; fi
 grep -q 'Editada por la CLI' "$D/vault/Notas/uno.md" || fallo "preview MUTÓ el archivo del vault"
 if [ "$(md5sum "$D/vault/Notas/uno.md" | awk '{print $1}')" != "$MD5_ANTES" ]; then fallo "preview cambió el archivo (md5)"; fi
 
 paso "restore sin --yes: solo muestra qué cambiaría (no aplica)"
-DRY="$(echo 'password-vault-cli' | "${CLI[@]}" restore Notas/uno.md --rev 2 --password-stdin)"
+DRY="$(echo 'password-vault-cli' | "${CLI[@]}" restore Notas/uno.md --rev 1 --password-stdin)"
 echo "$DRY" | head -4
 if [ "$(md5sum "$D/vault/Notas/uno.md" | awk '{print $1}')" != "$MD5_ANTES" ]; then fallo "restore sin --yes tocó el archivo"; fi
 
-paso "restore --yes de la rev 2 + sync: la vuelta al pasado sube como revisión NUEVA (rev 6)"
-echo 'password-vault-cli' | "${CLI[@]}" restore Notas/uno.md --rev 2 --yes --password-stdin
+paso "restore --yes de la rev 1 + sync: la vuelta al pasado sube como revisión NUEVA (rev 3)"
+echo 'password-vault-cli' | "${CLI[@]}" restore Notas/uno.md --rev 1 --yes --password-stdin
 grep -q 'Nota uno' "$D/vault/Notas/uno.md" || fallo "el archivo no quedó con el contenido de la rev 1"
 if grep -q 'Editada por la CLI' "$D/vault/Notas/uno.md"; then fallo "el restore no reemplazó la edición"; fi
 echo 'password-vault-cli' | "${CLI[@]}" sync 1 --password-stdin
 
-DELTA3="$(curl -sf "http://127.0.0.1:$PUERTO/api/v1/vaults/1/changes?since=5&limit=100" -H "authorization: Bearer $TOKEN")"
+DELTA3="$(curl -sf "http://127.0.0.1:$PUERTO/api/v1/vaults/1/changes?since=2&limit=100" -H "authorization: Bearer $TOKEN")"
 nota "delta del restore: $(jq -c '[.items[] | {rev, op}]' <<<"$DELTA3")"
-jq -e '(.items | length) == 1 and .items[0].op == "mod" and .items[0].rev == 6' <<<"$DELTA3" > /dev/null \
+jq -e '(.items | length) == 1 and .items[0].op == "mod" and .items[0].rev == 3' <<<"$DELTA3" > /dev/null \
     || fallo "el restore no quedó como revisión NUEVA (rev 6 mod)"
 
-PREV6="$(echo 'password-vault-cli' | "${CLI[@]}" preview Notas/uno.md --rev 6 --password-stdin)"
-echo "$PREV6" | grep -q 'Nota uno' || fallo "la rev 6 no tiene el contenido restaurado"
+PREV6="$(echo 'password-vault-cli' | "${CLI[@]}" preview Notas/uno.md --rev 3 --password-stdin)"
+echo "$PREV6" | grep -q 'Nota uno' || fallo "la rev 3 no tiene el contenido restaurado"
 
 paso "config"
 "${CLI[@]}" config | head -8
