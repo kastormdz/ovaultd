@@ -5,7 +5,7 @@ mod common;
 
 use axum::{
     body::Body,
-    http::{Method, StatusCode},
+    http::{header, Method, Request, StatusCode},
 };
 use common::{hex_lower, response_json, TestContext, EMAIL, PASSWORD};
 use ovaultd_server::{auth, ServerError};
@@ -195,6 +195,43 @@ async fn token_basura_no_verifica() -> Result<(), Box<dyn std::error::Error>> {
         .request_con_token("no-es-un-token", Method::GET, "/api/v1/me", Body::empty())
         .await?;
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn el_signin_persiste_el_nombre_y_la_plataforma_del_cliente() -> Result<(), Box<dyn std::error::Error>> {
+    let contexto = TestContext::new().await?;
+
+    // El name/platform del signin es lo que el panel muestra para distinguir máquinas
+    // (el plugin manda el hostname en escritorio o el modelo del equipo en Android): el
+    // server tiene que persistir EXACTAMENTE lo que le manda el cliente.
+    let respuesta = contexto
+        .request(
+            Request::post("/api/v1/auth/signin")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "email": EMAIL,
+                        "password": PASSWORD,
+                        "name": "SM-S918B",
+                        "platform": "android",
+                    })
+                    .to_string(),
+                ))?,
+        )
+        .await?;
+    assert_eq!(respuesta.status(), StatusCode::OK);
+    let cuerpo = response_json(respuesta).await?;
+    let device_id = cuerpo["device_id"].as_i64().expect("device_id en la respuesta");
+
+    let (nombre, plataforma): (String, Option<String>) =
+        sqlx::query_as("SELECT name, platform FROM devices WHERE id = ?")
+            .bind(device_id)
+            .fetch_one(&contexto.pool)
+            .await?;
+    assert_eq!(nombre, "SM-S918B", "el nombre viaja tal cual");
+    assert_eq!(plataforma.as_deref(), Some("android"), "la plataforma viaja tal cual");
 
     Ok(())
 }
