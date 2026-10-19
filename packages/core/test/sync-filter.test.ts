@@ -15,12 +15,17 @@ describe('SyncFilter', () => {
     ['.obsidian/workspace.json', 'workspace por dispositivo'],
     ['.obsidian/app.json', 'fuera de la lista blanca'],
     ['.obsidian/graph.json', 'fuera de la lista blanca'],
+    // La lista de habilitados depende de qué plugins están INSTALADOS en cada dispositivo:
+    // sincronizarla generaba conflictos de bajo valor (cada toggle la reescribe).
+    ['.obsidian/community-plugins.json', 'fuera de la lista blanca'],
     ['.obsidian/plugins/comunidad/data.json', 'fuera de la lista blanca'],
     ['.obsidian/plugins/ovaultd/data.json', 'fuera de la lista blanca'],
     ['.obsidian/plugins/ovaultd/estado-local.json', 'fuera de la lista blanca'],
     ['.obsidian/plugins/ovaultd/sesion-cuenta.json', 'fuera de la lista blanca'],
     ['.obsidian/plugins/ovaultd/motor.log', 'fuera de la lista blanca'],
     ['.obsidian/plugins/ovaultd/main.js', 'fuera de la lista blanca'],
+    // La identidad del propio plugin de sync es local: la versión la mueve la tienda.
+    ['.obsidian/plugins/ovaultd/manifest.json', 'la tienda'],
   ];
 
   for (const [path, aguja] of excluidos) {
@@ -33,14 +38,12 @@ describe('SyncFilter', () => {
   // La lista blanca: lo único de configDir que viaja a los otros dispositivos.
   const configPortable = [
     '.obsidian/appearance.json',
-    '.obsidian/community-plugins.json',
     '.obsidian/core-plugins.json',
     '.obsidian/hotkeys.json',
     '.obsidian/snippets/mi-estilo.css',
     '.obsidian/themes/Obsidianite/theme.css',
     '.obsidian/themes/Obsidianite/manifest.json',
     '.obsidian/plugins/comunidad/manifest.json',
-    '.obsidian/plugins/ovaultd/manifest.json',
   ];
 
   for (const path of configPortable) {

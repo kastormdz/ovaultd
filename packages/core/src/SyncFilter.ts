@@ -17,6 +17,12 @@
 
 const PREFIJO_TEMPORAL = '.ovaultd-tmp-';
 
+/**
+ * El id del plugin de sync (permanente: de él cuelgan sus archivos locales). El filtro lo
+ * conoce para excluir SU manifest: la identidad del plugin es local, no config portable.
+ */
+const ID_DEL_PLUGIN_DE_SYNC = 'ovaultd';
+
 /** Carpetas vetadas por segmento exacto (en cualquier nivel del vault). */
 const CARPETAS_VETADAS: ReadonlyMap<string, string> = new Map([
   ['.trash', 'papelera local del vault'],
@@ -31,13 +37,17 @@ const CARPETAS_VETADAS: ReadonlyMap<string, string> = new Map([
  *  - el `data.json` de NINGÚN plugin (ni el nuestro): puede tener tokens de otros servicios;
  *  - `estado-local.json`, `sesion-cuenta.json` ni `motor.log`: son credenciales y estado del
  *    propio ovaultd, que se rearman solos con el login;
+ *  - `community-plugins.json`: la lista de habilitados depende de qué plugins están
+ *    INSTALADOS en cada dispositivo (el teléfono no tiene los mismos que la desktop), así
+ *    que sincronizarla solo traía conflictos de bajo valor — cada toggle la reescribe;
+ *  - el `manifest.json` del PROPIO ovaultd: su versión la actualiza la tienda en cada
+ *    dispositivo (el binario no viaja), y el manifest sincronizado "mentía" la versión;
  *  - `workspace*.json`: son por dispositivo.
  *
  * Cada entrada es un path RELATIVO dentro de `configDir`.
  */
 const CONFIG_PORTABLE: readonly RegExp[] = [
   /^appearance(\.json)?$/, // tema, tamaño de letra, acentos visuales
-  /^community-plugins\.json$/, // qué plugins de la comunidad están habilitados
   /^core-plugins\.json$/, // qué plugins del núcleo están habilitados
   /^hotkeys\.json$/, // atajos de teclado (portables: no llevan rutas absolutas)
   /^snippets\/.+/, // CSS propio del vault
@@ -97,6 +107,11 @@ export function motivoDeExclusion(path: string, configDir = '.obsidian'): string
     // configDir y las carpetas de la lista blanca NO pueden excluirse o el contenido
     // portable queda inalcanzable (el bug que dejó de sincronizar los themes).
     if (esContenedorDeConfig(dentro)) return null;
+    // El manifest del PROPIO plugin de sync es local por diseño: lo actualiza la tienda en
+    // cada dispositivo (el binario no viaja) y sincronizarlo "mentía" la versión.
+    if (dentro === `plugins/${ID_DEL_PLUGIN_DE_SYNC}/manifest.json`) {
+      return 'manifest del plugin de sync (lo actualiza la tienda en cada dispositivo)';
+    }
     return esConfigPortable(dentro)
       ? null
       : 'configuración del vault (fuera de la lista blanca)';

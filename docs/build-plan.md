@@ -1155,9 +1155,11 @@ _generado: gpt-6-astra - effort=high - 339s - tokens: in=29293 out=18498 (reason
 ### 7.2 Decisiones que se cierran acá
 
 1. **`/.obsidian` — sincronización selectiva.** Se sincroniza la configuración **portable** (`appearance.json`,
-   `community-plugins.json`, `core-plugins.json`, `hotkeys.json`, `snippets/`, `themes/`, `plugins/*/manifest.json` y
-   `plugins/*/data.json`); **no** se sincronizan los volátiles por dispositivo (`workspace*.json`, `.trash/`, cachés).
-   Política inicial, ajustable con el uso real.
+   `core-plugins.json`, `hotkeys.json`, `snippets/`, `themes/` y `plugins/*/manifest.json`); **no** se sincronizan los
+   volátiles por dispositivo (`workspace*.json`, `.trash/`, cachés), el `data.json` de ningún plugin (puede tener
+   tokens de otros servicios), `community-plugins.json` (qué plugins están habilitados depende de cuáles están
+   INSTALADOS en cada dispositivo — sincronizarla solo traía conflictos) ni el `manifest.json` del propio plugin de
+   sync (su versión la mueve la tienda en cada dispositivo). Política ajustada con el uso real (2026-10-18).
 2. **Acceso de agentes (Fase 4).** Con E2E el servidor **no puede leer**: el agente es **un dispositivo más** —un
    cliente sin UI (CLI/servicio local) que tiene la passphrase y descifra **localmente**, con su propio par de claves
    registrado en el vault—. El servidor sigue sin ver texto plano.
