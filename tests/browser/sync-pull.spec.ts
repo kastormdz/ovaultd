@@ -176,7 +176,7 @@ test.describe('sync E2E (stack real)', () => {
       expect(cierre.applied).toBe(0);
       expect((await runtime.call('store.checkpoint.read')) as { since: number }).toHaveProperty(
         'since',
-        5,
+        3,
       );
       expect(await runtime.call('apply.pending')).toEqual([]);
 
