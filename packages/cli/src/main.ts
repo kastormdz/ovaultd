@@ -7,7 +7,7 @@
  * recovery. Lo que queda en disco es material PÚBLICO + el token del device.
  */
 
-import { hostname } from 'node:os';
+import { homedir, hostname } from 'node:os';
 import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 
@@ -45,7 +45,7 @@ import {
 } from '@ovaultd/protocol';
 
 import { ApiError, OvaultdClient, normalizeServer } from './api.js';
-import { resolvePassword } from './credentials.js';
+import { preguntarVisible, resolvePassword } from './credentials.js';
 import { abrirVaultLocal, purgarRuntimeDir, runtimeDirDe, type VaultAbierto } from './local-runtime.js';
 import {
   clearSession,
@@ -89,15 +89,18 @@ const kdfWire = (): KdfParamsWire => ({
 programa
   .command('login <server>')
   .description('inicia sesión (token de device; la password no se guarda)')
-  .requiredOption('--email <email>', 'email de la cuenta')
+  .option('--email <email>', 'email de la cuenta (se pregunta si falta)')
   .option('--password-stdin', 'lee la password de stdin (para scripts)')
   .option('--device-name <name>', 'nombre del device', hostname())
   .option('--platform <platform>', 'plataforma del device', 'cli')
-  .action(async (server: string, opciones: { email: string; passwordStdin?: boolean; deviceName: string; platform: string }) => {
+  .action(async (server: string, opciones: { email?: string; passwordStdin?: boolean; deviceName: string; platform: string }) => {
+    const email = opciones.email ?? (await preguntarVisible('Email'));
+    if (!email.includes('@')) throw new Error(`email inválido: ${email}`);
     const cliente = new OvaultdClient(server);
     const password = await resolvePassword({ passwordStdin: opciones.passwordStdin });
 
-    const sesion = await cliente.signin(opciones.email, password, opciones.deviceName, opciones.platform);
+    console.log(`conectando a ${server} como ${email}...`);
+    const sesion = await cliente.signin(email, password, opciones.deviceName, opciones.platform);
     cliente.setToken(sesion.token);
     const me = await cliente.me();
 
@@ -232,14 +235,16 @@ programa
 programa
   .command('setup <vault>')
   .description('vincula una carpeta local a un vault remoto (verifica tu password contra el material)')
-  .requiredOption('--dir <dir>', 'carpeta local del vault')
+  .option('--dir <dir>', 'carpeta local del vault (se pregunta si falta; default ~/Obsidian)')
   .option('--password-stdin', 'lee la password de stdin (para scripts)')
-  .action(async (vaultTexto: string, opciones: { dir: string; passwordStdin?: boolean }) => {
+  .action(async (vaultTexto: string, opciones: { dir?: string; passwordStdin?: boolean }) => {
+    const dir = opciones.dir ?? (await preguntarVisible('Carpeta local del vault', join(homedir(), 'Obsidian')));
     const sesion = exigirSesion();
     const vault = Number.parseInt(vaultTexto, 10);
     if (!Number.isInteger(vault) || vault <= 0) throw new Error(`vault inválido: ${vaultTexto}`);
 
     const cliente = clienteDe(sesion);
+    console.log(`bajando el material del vault #${vault} desde ${sesion.server}...`);
     const material = await cliente.material(vault);
     if (!material.vault_id) {
       throw new Error('el vault no tiene vault_id (material incompleto: no se puede derivar la clave)');
@@ -271,11 +276,11 @@ programa
       wrapped_key_pw: material.wrapped_key_pw,
       wrapped_key_rc: material.wrapped_key_rc,
       vault_pubkey: material.vault_pubkey,
-      dir: resolve(opciones.dir),
+      dir: resolve(dir),
       saved_at: new Date().toISOString(),
     });
 
-    console.log(`vault #${vault} «${material.name}» vinculado a ${resolve(opciones.dir)}`);
+    console.log(`vault #${vault} «${material.name}» vinculado a ${resolve(dir)}`);
     console.log('password verificada contra el material del vault ✓ (la clave no se guardó)');
   });
 
