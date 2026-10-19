@@ -175,7 +175,7 @@ test.describe('orquestación de apply', () => {
     }
   });
 
-  test('tercera versión: la edición local posterior a la base NO se pisa', async () => {
+  test('tercera versión: la edición local posterior a la base se CONSERVA en una copia', async () => {
     const vault = nuevoVault();
     const { runtime, dataDir } = await abrir(18_948, vault);
     try {
@@ -189,19 +189,20 @@ test.describe('orquestación de apply', () => {
       const v2 = revisionDe('Notas/uno.md', new TextEncoder().encode('remoto v2\n'), 2, v1.revision.pathId);
       const out = (await runtime.call('apply.run', { revision: v2.revision, storedB64: b64(v2.stored) })) as {
         status: string;
-        reason?: string;
+        copia?: string;
       };
-      expect(out.status).toBe('blocked');
-      expect(out.reason).toMatch(/edición local/);
+      // Política por defecto (la de Obsidian Sync): el remoto va al path y la edición
+      // local a una copia; NADA se pierde y el ciclo SIGUE.
+      expect(out.status).toBe('conflicted-copy');
+      expect(out.copia).toBeTruthy();
 
-      // La edición local sigue intacta, sin temporales, y el estado no avanzó:
-      expect(readFileSync(join(vault, 'Notas/uno.md'), 'utf8')).toBe('edición local\n');
-      expect(readdirSync(join(vault, 'Notas'))).toEqual(['uno.md']);
-      const pendientes = (await runtime.call('apply.pending')) as Array<{ state: string; reason?: string }>;
-      expect(pendientes).toHaveLength(1);
-      expect(pendientes[0]!.state).toBe('blocked');
-      expect((await runtime.call('store.base.get', { pathId: v2.revision.pathId })) as { rev: number }).toHaveProperty('rev', 1);
-      expect(((await runtime.call('store.checkpoint.read')) as { since: number }).since).toBe(1);
+      expect(readFileSync(join(vault, 'Notas/uno.md'), 'utf8')).toBe('remoto v2\n');
+      expect(readFileSync(join(vault, out.copia!), 'utf8')).toBe('edición local\n');
+      // Sin nada bloqueado y el estado avanzó hasta la revisión aplicada:
+      const pendientes = (await runtime.call('apply.pending')) as Array<{ state: string }>;
+      expect(pendientes).toHaveLength(0);
+      expect((await runtime.call('store.base.get', { pathId: v2.revision.pathId })) as { rev: number }).toHaveProperty('rev', 2);
+      expect(((await runtime.call('store.checkpoint.read')) as { since: number }).since).toBe(2);
     } finally {
       await runtime.close();
       rmSync(vault, { recursive: true, force: true });
