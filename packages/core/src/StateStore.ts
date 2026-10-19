@@ -63,6 +63,8 @@ export interface OutboxEntry {
   snapshotHash?: string | null;
   /** Estado de publicación: pending → sent (ack) → confirmed. */
   state: 'pending' | 'sent' | 'confirmed';
+  /** mtime del archivo al encolar: alimenta el cache del escaneo incremental. */
+  mtimeMs?: number | null;
 }
 
 /** Transferencia parcial (reanudable). */

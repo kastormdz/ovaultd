@@ -87,3 +87,48 @@ describe('escanearVault', () => {
     expect(entradas[0]!.contentHash).toMatch(/^[0-9a-f]{64}$/);
   });
 });
+
+describe('escaneo incremental (cache por mtime+size)', () => {
+  it('no lee el contenido si el archivo no cambió desde el último ciclo', async () => {
+    let lecturas = 0;
+    const port = {
+      list: async () => [{ name: 'nota.md', isFile: true, isDirectory: false }],
+      read: async () => {
+        lecturas += 1;
+        return new TextEncoder().encode('contenido');
+      },
+      stat: async () => ({ size: 9, mtimeMs: 1_700_000_000_000, isFile: true, isDirectory: false }),
+    } as unknown as FileSystemPort;
+    const cache = new Map([
+      ['nota.md', { mtime: 1_700_000_000_000, size: 9, contentHash: 'f'.repeat(64) }],
+    ]);
+
+    const entradas = await escanearVault(port, CLAVES, '', cache);
+
+    expect(lecturas).toBe(0); // el hash salió del índice, sin tocar el disco
+    expect(entradas).toHaveLength(1);
+    expect(entradas[0]!.contentHash).toBe('f'.repeat(64));
+    expect(entradas[0]!.mtimeMs).toBe(1_700_000_000_000);
+  });
+
+  it('vuelve a leer y hashear si el mtime o el tamaño cambiaron', async () => {
+    let lecturas = 0;
+    const port = {
+      list: async () => [{ name: 'nota.md', isFile: true, isDirectory: false }],
+      read: async () => {
+        lecturas += 1;
+        return new TextEncoder().encode('contenido');
+      },
+      stat: async () => ({ size: 10, mtimeMs: 1_700_000_000_500, isFile: true, isDirectory: false }),
+    } as unknown as FileSystemPort;
+    const cache = new Map([
+      ['nota.md', { mtime: 1_700_000_000_000, size: 9, contentHash: 'f'.repeat(64) }],
+    ]);
+
+    const entradas = await escanearVault(port, CLAVES, '', cache);
+
+    expect(lecturas).toBe(1); // cambió: se re-hashea
+    expect(entradas[0]!.contentHash).toMatch(/^[0-9a-f]{64}$/);
+    expect(entradas[0]!.contentHash).not.toBe('f'.repeat(64));
+  });
+});

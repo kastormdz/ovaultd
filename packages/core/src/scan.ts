@@ -47,6 +47,7 @@ export async function escanearVault(
   port: FileSystemPort,
   keys: SubKeys,
   dir = '',
+  cache?: Map<string, { mtime: number | null; size: number | null; contentHash: string | null }>,
 ): Promise<EntradaEscaneada[]> {
   const salida: EntradaEscaneada[] = [];
 
@@ -63,8 +64,30 @@ export async function escanearVault(
       }
       if (!entrada.isFile) continue;
 
-      const bytes = await port.read(rel);
       const stat = await port.stat(rel);
+      // Escaneo incremental: si el archivo no cambió (mismo mtime y tamaño) el hash del
+      // índice sigue valiendo y NO se lee el contenido. Un vault de 100 MB pasa de ~8 s
+      // a milisegundos por ciclo. El riesgo de un mtime falseado lo cubren el watcher
+      // (los cambios locales llegan por evento) y un rescan completo a demanda.
+      const recordado = cache?.get(rel);
+      if (
+        recordado &&
+        stat &&
+        recordado.contentHash != null &&
+        recordado.mtime === stat.mtimeMs &&
+        recordado.size === stat.size
+      ) {
+        salida.push({
+          path: rel,
+          pathId: toHex(calcularPathId(keys, rel)),
+          contentHash: recordado.contentHash,
+          size: stat.size,
+          mtimeMs: stat.mtimeMs,
+        });
+        continue;
+      }
+
+      const bytes = await port.read(rel);
       salida.push({
         path: rel,
         pathId: toHex(calcularPathId(keys, rel)),

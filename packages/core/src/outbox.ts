@@ -33,6 +33,8 @@ export interface EnqueueRequest {
   contentHash?: string | null;
   /** Milisegundos de encolado (default: ahora). */
   queuedAt?: number;
+  /** mtime del archivo al encolar (cache del escaneo incremental). */
+  mtimeMs?: number;
 }
 
 /** Payload canónico del que deriva la identidad de la operación. */
@@ -100,5 +102,6 @@ export function prepareOutboxEntry(req: EnqueueRequest): OutboxEntry {
     snapshot,
     snapshotHash: req.contentHash ?? null,
     state: 'pending',
+    mtimeMs: req.mtimeMs ?? null,
   };
 }

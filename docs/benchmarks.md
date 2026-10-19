@@ -31,6 +31,26 @@ más rápido).
 | **T3** un cambio suelto | editar 1 de 1000 notas y subirla | **8,7 s** |
 | **T4** bajada completa | segundo cliente baja 1001 revisiones (↓1001 · ↑0) | **39,1 s** (~2,6 MB/s · ~39 ms por revisión) |
 
+### Corrida 2026-10-19 · núcleo 0.2.20 (push agrupado + PUTs paralelos + scan incremental)
+
+| Fase | Qué mide | Resultado |
+|---|---|---|
+| **T1** primera subida | 1000 altas (vault nuevo) | **71,9 s** (~1,4 MB/s) |
+| **T2** ciclo en reposo | escanear los 100 MB y confirmar «sin cambios» | **3,4 s** |
+| **T3** un cambio suelto | editar 1 de 1000 notas y subirla | **3,4 s** |
+| **T4** bajada completa | segundo cliente baja 1001 revisiones (↓1001 · ↑0) | **39,1 s** (~2,6 MB/s) |
+
+Qué cambió: las operaciones se mandan **agrupadas (50 por batch, UNA revisión por lote —
+el modelo del restore masivo)** y los PUT de blobs corren **en paralelo**; el escaneo reusa
+el hash del índice cuando mtime+size no cambiaron (no lee los 100 MB). El delta de un cambio
+y el reposo bajaron ~60 %; la subida inicial, 28 %.
+
+**Los cuellos que quedan** (los targets del plan son <30 s y <1 s):
+- **T1**: el **fsync del CAS por blob en el server** (~50 ms × 1000) — el piso no lo mueve
+  el cliente.
+- **T2/T3**: el **`stat` por archivo del adapter** (~2,5 s por 1000 round-trips al puente).
+- **T4**: el apply escribe por archivo (~39 ms cada uno).
+
 ## Cómo se leen
 
 - **T1 está dominado por el round-trip POR LOTE, no por los bytes.** El push manda **1 op

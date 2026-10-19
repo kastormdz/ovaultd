@@ -97,4 +97,61 @@ describe('modos del ciclo', () => {
     expect(report.diff.borrados).toBe(0); // el borrado no se encoló
     expect(escrituras).not.toContain('outbox');
   });
+
+  it('las operaciones pendientes suben agrupadas en UN batch (una sola revisión por lote)', async () => {
+    // Tres archivos nuevos en disco, outbox vacía: el push los encola y los manda en un
+    // solo commit. El server agrupa las ops bajo UNA revisión (el modelo del restore
+    // masivo): todas las entradas se confirman con el mismo `ack.rev`.
+    const archivos = ['a.md', 'b.md', 'c.md'];
+    const bases = new Map<string, { pathId: string; rev: number }>();
+    const outbox = new Map<string, { operationId: string; state: string }>();
+    const commits: Array<{ ops: unknown[]; expected_rev: number }> = [];
+    const store = {
+      readCheckpoint: async () => ({ since: 0, minRev: null, updatedAt: 0 }),
+      listBase: async () => [],
+      listIndex: async () => [],
+      listOutbox: async () => [...outbox.values()],
+      getOutbox: async (id: string) => outbox.get(id),
+      putOutbox: async (entry: { operationId: string; state: string }) =>
+        void outbox.set(entry.operationId, entry),
+      deleteOutbox: async (id: string) => void outbox.delete(id),
+      setOutboxState: async (id: string, state: string) => {
+        const entry = outbox.get(id);
+        if (entry) outbox.set(id, { ...entry, state });
+      },
+      getIndex: async () => null,
+      writeCheckpoint: async () => undefined,
+      putBase: async (entrada: { pathId: string; rev: number }) => void bases.set(entrada.pathId, entrada),
+      putIndex: async () => undefined,
+    };
+    const port = {
+      list: async () => archivos.map((name) => ({ name, isFile: true, isDirectory: false })),
+      read: async (ruta: string) => new TextEncoder().encode(`contenido ${ruta}`),
+      stat: async () => ({ size: 12, mtimeMs: 1_700_000_000_000, isFile: true, isDirectory: false }),
+    } as unknown as FileSystemPort;
+    const conn = {
+      putBlob: async () => undefined,
+      commit: async (batch: { ops: unknown[]; expected_rev: number; t: string }) => {
+        commits.push(batch);
+        // Una sola revisión por batch (como el server real).
+        return { rev: batch.expected_rev + 1 };
+      },
+    };
+
+    const report = await pushOnce({
+      store,
+      port,
+      keys: CLAVES,
+      conn: conn as unknown as SyncConnection,
+      vaultUuid: new Uint8Array(16),
+      epoch: 0,
+    } as never);
+
+    expect(report.empujadas).toBe(3);
+    expect(commits).toHaveLength(1); // UN solo batch para las tres ops
+    expect(commits[0]!.ops).toHaveLength(3);
+    expect(report.headRev).toBe(1);
+    expect(bases.size).toBe(3); // una base por op…
+    expect([...bases.values()].map((b) => b.rev)).toEqual([1, 1, 1]); // …todas en la rev del lote
+  });
 });
