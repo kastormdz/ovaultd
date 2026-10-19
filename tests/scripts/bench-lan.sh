@@ -29,6 +29,11 @@ KB="${BENCH_KB:-100}"
 
 CLI=(node "$RAIZ/packages/cli/dist/main.js")
 export OVAULTD_CONFIG_DIR="$D/config"
+# Cada cliente (config + runtime) va AISLADO en el bench: el runtime dir por defecto es
+# GLOBAL del usuario (~/.local/share/ovaultd/runtime) y un segundo cliente que lo comparta
+# hereda el checkpoint del primero — el "vault nuevo" arranca en el head ajeno y su scan
+# sube borrados en vez de bajar (cazado re-corriendo este script).
+export OVAULTD_RUNTIME_DIR="$D/runtime"
 
 paso() { printf '\n== %s\n' "$*"; }
 nota() { printf '   %s\n' "$*"; }
@@ -55,7 +60,7 @@ echo
 
 paso "terreno fresco en $D"
 rm -rf "$D"
-mkdir -p "$D/vault/Notas" "$D/vault2"
+mkdir -p "$D/vault/Notas" "$D/vault2" "$D/runtime" "$D/runtime2"
 
 paso "login + vault nuevo de $NOTAS notas de ~${KB} KB"
 echo "$BENCH_PASSWORD" | "${CLI[@]}" login "$BASE" --email "$BENCH_EMAIL" --password-stdin | tail -1
@@ -111,15 +116,20 @@ nota "T3 = ${T3} ms"
 
 paso "T4 · bajada completa en un segundo cliente"
 export OVAULTD_CONFIG_DIR="$D/config2"
+export OVAULTD_RUNTIME_DIR="$D/runtime2"
 echo "$BENCH_PASSWORD" | "${CLI[@]}" login "$BASE" --email "$BENCH_EMAIL" --password-stdin >/dev/null
 echo "$BENCH_VAULT_PASSWORD" | "${CLI[@]}" setup "$VID" --dir "$D/vault2" --password-stdin >/dev/null
 T4="$(medir_ms "${CLI[@]}" sync "$VID")" || { tail -5 "$D/ultimo.log"; fallo "T4"; }
 tail -1 "$D/ultimo.log"
+# La bajada es BAJADA: si el cliente nuevo sube algo, el runtime no estaba aislado
+# (o el vault quedó sucio) — abortar antes de dejar el server mutado.
+grep -q "↑ 0 subida(s)" "$D/ultimo.log" || { tail -3 "$D/ultimo.log"; fallo "el 2º cliente subió algo en la bajada"; }
 BAJADAS="$(find "$D/vault2/Notas" -name '*.md' | wc -l)"
 [ "$BAJADAS" = "$NOTAS" ] || fallo "bajaron $BAJADAS archivos, esperaba $NOTAS"
 MBPS2="$(awk -v b="$BYTES" -v ms="$T4" 'BEGIN{printf "%.2f", (b/1000000)/(ms/1000)}')"
 nota "T4 = ${T4} ms ($BAJADAS archivos, ${MBPS2} MB/s)"
 export OVAULTD_CONFIG_DIR="$D/config"
+export OVAULTD_RUNTIME_DIR="$D/runtime"
 
 paso "resultados"
 printf '  notas: %s · datos: %s B\n' "$NOTAS" "$BYTES"
