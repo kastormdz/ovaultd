@@ -5,6 +5,16 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y e
 [semver](https://semver.org/lang/es/): server y plugin viajan en un **release train** (mismo
 `MAJOR.MINOR` = pareja probada junta; ver ADR-0018 y la sección «Compatibilidad» del README).
 
+## [Unreleased]
+
+### Added
+
+- **CLI: `cat`, `write`, `ls` y `rm`** sobre el vault local (`packages/cli/src/vault-fs.ts`).
+  Es la base del dispositivo-agente de la fase 4: el vault sincronizado se edita como
+  archivos y el `sync` propaga; las rutas se validan con `validarRutaDeVault` y no pueden
+  escapar del vault (travesía, absolutas ni symlinks). `write` toma el contenido por
+  `--stdin` (markdown multilínea) o `--file`, y publica con rename atómico.
+
 ## [0.2.10] — 2026-10-19
 
 Remediación de la segunda auditoría (F-01…F-11). Sin cambios de contrato: wire `v2`, API

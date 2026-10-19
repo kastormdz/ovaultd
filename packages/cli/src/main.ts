@@ -15,6 +15,13 @@ import { Command } from 'commander';
 
 import { backoffMs, diffDeTextos, validarRutaDeVault, type RevisionResumen } from '@ovaultd/core';
 import {
+  borrarDelVault,
+  escribirEnVault,
+  leerDelVault,
+  listarVault,
+  resolverVaultLocal,
+} from './vault-fs.js';
+import {
   KDF_DEFAULTS,
   deriveKek,
   deriveKekRecovery,
@@ -480,6 +487,76 @@ programa
     } finally {
       await abierto.cerrar();
     }
+  });
+
+// ------------------------------------------------------- vault local (FS, sin red)
+
+/** stdin completo como bytes (markdown multilínea va por acá, nunca por argv). */
+async function leerStdinBinario(): Promise<Uint8Array> {
+  const trozos: Buffer[] = [];
+  for await (const trozo of process.stdin) trozos.push(trozo as Buffer);
+  return new Uint8Array(Buffer.concat(trozos));
+}
+
+programa
+  .command('cat <vault-path>')
+  .description('imprime un archivo del vault local (binario-safe, sin red)')
+  .option('--vault <n>', 'id del vault local (si hay más de uno)')
+  .action((vaultPath: string, opciones: { vault?: string }) => {
+    const vault = resolverVaultLocal(opciones.vault);
+    process.stdout.write(leerDelVault(vault.dir!, vaultPath));
+  });
+
+programa
+  .command('write <vault-path>')
+  .description('escribe un archivo del vault local: el contenido va por stdin o --file (el sync lo sube)')
+  .option('--vault <n>', 'id del vault local (si hay más de uno)')
+  .option('--stdin', 'lee el contenido de stdin')
+  .option('--file <ruta>', 'lee el contenido de un archivo del sistema')
+  .action(async (vaultPath: string, opciones: { vault?: string; stdin?: boolean; file?: string }) => {
+    if (opciones.stdin === true && opciones.file !== undefined) {
+      throw new Error('--stdin y --file son excluyentes');
+    }
+    let bytes: Uint8Array;
+    if (opciones.file !== undefined) {
+      bytes = new Uint8Array(readFileSync(opciones.file));
+    } else if (opciones.stdin === true) {
+      bytes = await leerStdinBinario();
+    } else {
+      throw new Error('falta el contenido: usá --stdin (recomendado) o --file <ruta>');
+    }
+    const vault = resolverVaultLocal(opciones.vault);
+    const escritos = escribirEnVault(vault.dir!, vaultPath, bytes);
+    console.log(
+      `escrito ${vaultPath} (${escritos} B) en el vault #${vault.vault} «${vault.name}»; el próximo sync lo sube`,
+    );
+  });
+
+programa
+  .command('ls [prefijo]')
+  .description('lista archivos del vault local (sin .obsidian salvo --todo)')
+  .option('--vault <n>', 'id del vault local (si hay más de uno)')
+  .option('--json', 'salida JSON (path, size, mtimeMs)')
+  .option('--todo', 'incluye .obsidian y la config')
+  .action((prefijo: string | undefined, opciones: { vault?: string; json?: boolean; todo?: boolean }) => {
+    const vault = resolverVaultLocal(opciones.vault);
+    const entradas = listarVault(vault.dir!, prefijo ?? '', opciones.todo === true);
+    if (opciones.json === true) {
+      console.log(JSON.stringify(entradas));
+      return;
+    }
+    for (const entrada of entradas) console.log(`${entrada.size}\t${entrada.path}`);
+  });
+
+programa
+  .command('rm <vault-path>')
+  .description('borra un archivo del vault local (o un directorio con --recursivo); el sync lo propaga')
+  .option('--vault <n>', 'id del vault local (si hay más de uno)')
+  .option('-r, --recursivo', 'borra un directorio y todo su contenido')
+  .action((vaultPath: string, opciones: { vault?: string; recursivo?: boolean }) => {
+    const vault = resolverVaultLocal(opciones.vault);
+    borrarDelVault(vault.dir!, vaultPath, opciones.recursivo === true);
+    console.log(`borrado ${vaultPath} del vault #${vault.vault} «${vault.name}»; el próximo sync lo propaga`);
   });
 
 // -------------------------------------------------------------------- history
