@@ -822,6 +822,16 @@ programa
 // --------------------------------------------------------------------- unlink
 
 programa
+  .command('olvidar-clave [vault]')
+  .description('borra las subclaves cacheadas (el próximo comando vuelve a pedir la password del vault)')
+  .action((vaultTexto: string | undefined) => {
+    const vault = resolverVaultLocal(vaultTexto);
+    const { subkeys: _claves, subkeys_epoch: _epoch, ...resto } = vault;
+    saveVaultState(resto);
+    console.log(`claves del vault #${vault.vault} «${vault.name}» olvidadas`);
+  });
+
+programa
   .command('unlink <vault>')
   .description('desvincula la carpeta local (borra el estado local; el server no se toca)')
   .option('--purge', 'borra además el perfil del runtime (IndexedDB/outbox local)')

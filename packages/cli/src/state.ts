@@ -12,6 +12,8 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 
 import type { KdfParamsWire, VaultSummary } from '@ovaultd/protocol';
+import { fromHex, toHex } from '@ovaultd/protocol';
+import type { SubKeys } from '@ovaultd/crypto';
 
 export interface SessionState {
   server: string;
@@ -38,8 +40,45 @@ export interface VaultLocalState {
   vault_pubkey: string;
   /** Carpeta local vinculada por `setup`, si existe. */
   dir?: string;
+  /**
+   * Subclaves derivadas cacheadas (hex): evitan pedir la password en cada `sync`
+   * (un timer no puede tipearla). Mismo modelo que el plugin; el archivo es 0600 y
+   * se borran con `ovaultd olvidar-clave`.
+   */
+  subkeys?: SubclavesEnHex;
+  /** Epoch con la que se derivaron: si la vault_key rota, el cache queda inválido. */
+  subkeys_epoch?: number;
   saved_at: string;
 }
+
+export interface SubclavesEnHex {
+  content: string;
+  nonce: string;
+  path: string;
+  meta: string;
+  bind: string;
+  sign: string;
+}
+
+/** Subclaves → hex para el estado local (lo único que se cachea). */
+export const subclavesAHex = (subkeys: SubKeys): SubclavesEnHex => ({
+  content: toHex(subkeys.content),
+  nonce: toHex(subkeys.nonce),
+  path: toHex(subkeys.path),
+  meta: toHex(subkeys.meta),
+  bind: toHex(subkeys.bind),
+  sign: toHex(subkeys.sign),
+});
+
+/** Hex del estado local → subclaves (sin tocar la password). */
+export const subclavesDeHex = (hex: SubclavesEnHex): SubKeys => ({
+  content: fromHex(hex.content),
+  nonce: fromHex(hex.nonce),
+  path: fromHex(hex.path),
+  meta: fromHex(hex.meta),
+  bind: fromHex(hex.bind),
+  sign: fromHex(hex.sign),
+});
 
 export const configDir = (): string =>
   process.env.OVAULTD_CONFIG_DIR ?? join(homedir(), '.config', 'ovaultd');

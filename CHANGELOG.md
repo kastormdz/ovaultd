@@ -14,6 +14,9 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y e
   archivos y el `sync` propaga; las rutas se validan con `validarRutaDeVault` y no pueden
   escapar del vault (travesía, absolutas ni symlinks). `write` toma el contenido por
   `--stdin` (markdown multilínea) o `--file`, y publica con rename atómico.
+- **El CLI pide la password del vault UNA sola vez**: las subclaves derivadas se cachean
+  en el estado local (0600, invalidado por epoch) y `ovaultd olvidar-clave` las borra.
+  Es lo que permite `sync` desde un timer sin TTY.
 - **Comando `ovaultd` instalable**: `scripts/instalar-cli.sh` crea el shim en
   `~/.local/bin` (el paquete es privado y no va al registry) y `docs/cli.md` documenta
   instalación, vínculo, sync, comandos de filesystem e historia/restore.

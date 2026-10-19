@@ -23,6 +23,9 @@ import {
   listVaultStates,
   readSession,
   readVaultState,
+  saveVaultState,
+  subclavesAHex,
+  subclavesDeHex,
   type SessionState,
   type VaultLocalState,
 } from './state.js';
@@ -89,16 +92,26 @@ export async function abrirVaultLocal(
     );
   }
 
-  // Password → KEK → vault_key → subclaves. Nada de esto se persiste.
+  // Subclaves: si están cacheadas y la epoch no cambió, NO se pide la password (un
+  // timer no puede tipearla). Si no, se derivan una vez y se cachean en el estado 0600.
   const salt = b64Decode(vault.salt);
   const vaultUuid = b64Decode(vault.vault_id);
-  const password = await resolvePassword({
-    passwordStdin: opciones.passwordStdin,
-    prompt: `Password del vault #${vault.vault} «${vault.name}»: `,
-  });
-  const kek = deriveKek(password, salt, vault.kdf_params);
-  const vaultKey = unwrapKeyPw(b64Decode(vault.wrapped_key_pw), kek, vaultUuid, salt);
-  const subkeys = deriveSubkeys(vaultKey, salt);
+  let subkeys: SubKeys;
+  if (vault.subkeys && vault.subkeys_epoch === vault.epoch) {
+    subkeys = subclavesDeHex(vault.subkeys);
+  } else {
+    const password = await resolvePassword({
+      passwordStdin: opciones.passwordStdin,
+      prompt: `Password del vault #${vault.vault} «${vault.name}»: `,
+    });
+    const kek = deriveKek(password, salt, vault.kdf_params);
+    const vaultKey = unwrapKeyPw(b64Decode(vault.wrapped_key_pw), kek, vaultUuid, salt);
+    subkeys = deriveSubkeys(vaultKey, salt);
+    saveVaultState({ ...vault, subkeys: subclavesAHex(subkeys), subkeys_epoch: vault.epoch });
+    process.stderr.write(
+      'claves cacheadas en el estado local (0600); `ovaultd olvidar-clave` para borrarlas\n',
+    );
+  }
 
   const runtime = await BrowserRuntime.open({
     dataDir: runtimeDirDe(sesion.server, vault.vault),

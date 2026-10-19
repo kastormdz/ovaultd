@@ -15,6 +15,8 @@ import {
   readVaultState,
   saveSession,
   saveVaultState,
+  subclavesAHex,
+  subclavesDeHex,
   vaultPath,
   type SessionState,
   type VaultLocalState,
@@ -98,5 +100,27 @@ describe('estado del CLI', () => {
     saveSession(sesion);
     writeFileSync(join(configDir(), 'session.json'), '{no soy json');
     expect(() => readSession()).toThrow();
+  });
+});
+
+describe('subclaves cacheadas', () => {
+  it('round-trip hex y persisten con permisos 0600', () => {
+    const subkeys = {
+      content: new Uint8Array(32).fill(1),
+      nonce: new Uint8Array(24).fill(2),
+      path: new Uint8Array(32).fill(3),
+      meta: new Uint8Array(32).fill(4),
+      bind: new Uint8Array(32).fill(5),
+      sign: new Uint8Array(32).fill(6),
+    };
+    const hex = subclavesAHex(subkeys as never);
+    expect(subclavesDeHex(hex).content).toEqual(subkeys.content);
+    expect(subclavesDeHex(hex).nonce).toEqual(subkeys.nonce);
+
+    saveVaultState({ ...vault, subkeys: hex, subkeys_epoch: 1 });
+    const leido = readVaultState(vault.server, vault.vault);
+    expect(leido?.subkeys).toEqual(hex);
+    expect(leido?.subkeys_epoch).toBe(1);
+    expect(statSync(vaultPath(vault.server, vault.vault)).mode & 0o777).toBe(0o600);
   });
 });

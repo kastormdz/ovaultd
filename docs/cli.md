@@ -44,6 +44,22 @@ ovaultd list-local           # scan + hash-diff, no network
 ovaultd status
 ```
 
+## The vault password is asked once
+
+The first command that needs the vault key (the first `sync`, `history`, `preview` or
+`restore`) derives the subkeys and caches them in the local vault state
+(`~/.config/ovaultd/vaults/<server>_<id>.json`, mode `0600`). Later runs — including a
+systemd timer — do not ask again. The cache is invalidated when the vault key epoch
+changes.
+
+```bash
+ovaultd olvidar-clave          # drop the cached subkeys (the next command asks again)
+ovaultd olvidar-clave <ID>
+```
+
+The state file is private but is as sensitive as the vault itself: whoever reads it can
+decrypt the vault's blobs. `unlink` deletes it together with the rest of the local state.
+
 ## Filesystem commands (agent access)
 
 With the vault linked, these operate **locally**: no network, no password prompt, no
