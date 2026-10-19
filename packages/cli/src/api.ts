@@ -77,9 +77,22 @@ export class OvaultdClient {
 
     let respuesta: Response;
     try {
-      respuesta = await this.fetchImpl(`${this.base}${ruta}`, { method: metodo, headers, body: cuerpo });
+      respuesta = await this.fetchImpl(`${this.base}${ruta}`, {
+        method: metodo,
+        headers,
+        body: cuerpo,
+        // Sin timeout, un borde que acepta la conexión y no responde deja el CLI colgado
+        // para siempre (síntoma: "no hace nada"). 30 s es de sobra para el API.
+        signal: AbortSignal.timeout(30_000),
+      });
     } catch (error) {
-      throw new ApiError(0, 'network', null, `no se pudo conectar a ${this.base}: ${String(error)}`);
+      const abortado = (error as { name?: string }).name === 'TimeoutError';
+      throw new ApiError(
+        0,
+        'network',
+        null,
+        abortado ? `el server no respondió en 30 s: ${this.base}` : `no se pudo conectar a ${this.base}: ${String(error)}`,
+      );
     }
 
     if (!respuesta.ok) {

@@ -31,15 +31,24 @@ const promptOculto = (etiqueta: string): Promise<string> =>
       return;
     }
 
-    process.stderr.write(etiqueta);
     const rl = createInterface({ input: process.stdin, output: process.stderr, terminal: true });
-    // Silencia el eco del input manteniendo el cursor.
+    // El prompt va por `setPrompt`/`prompt` y el override deja pasar el PRIMER write:
+    // readline con `terminal: true` reescribe la línea al inicializarse y borraba el
+    // `write` previo, así que el comando parecía colgado esperando una password invisible.
     const escribirOriginal = (rl as unknown as { _writeToOutput?: (s: string) => void })._writeToOutput;
-    (rl as unknown as { _writeToOutput: (s: string) => void })._writeToOutput = function (texto: string) {
+    let promptMostrado = false;
+    (rl as unknown as { _writeToOutput: (texto: string) => void })._writeToOutput = function (texto: string) {
+      if (!promptMostrado) {
+        promptMostrado = true;
+        escribirOriginal?.call(rl, texto);
+        return;
+      }
       if (texto.includes('\n') || texto.includes('\r')) {
         escribirOriginal?.call(rl, '\n');
       }
     };
+    rl.setPrompt(etiqueta);
+    rl.prompt();
 
     rl.question('', (respuesta) => {
       rl.close();
