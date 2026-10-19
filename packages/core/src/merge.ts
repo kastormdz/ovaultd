@@ -79,8 +79,8 @@ function cambiosDe(dmp: DiffMatchPatch, base: string, texto: string): Cambio[] {
   return cambios;
 }
 
-/** ¿Algún cambio de `a` se pisa con alguno de `b`? */
-function seSolapan(a: readonly Cambio[], b: readonly Cambio[]): boolean {
+/** ¿Algún cambio de `a` se pisa con alguno de `b`? `largoBase` distingue el fin del documento. */
+function seSolapan(a: readonly Cambio[], b: readonly Cambio[], largoBase: number): boolean {
   for (const p of a) {
     for (const q of b) {
       const pEsPunto = p.inicio === p.fin;
@@ -92,11 +92,18 @@ function seSolapan(a: readonly Cambio[], b: readonly Cambio[]): boolean {
         continue;
       }
       if (pEsPunto) {
+        // Dentro del cambio ajeno (borde izquierdo inclusive): se pisan.
         if (p.inicio >= q.inicio && p.inicio < q.fin) return true;
+        // En el borde derecho INTERNO: el ancla de la inserción (lo que venía "después")
+        // fue reemplazada por el otro lado — fusionar ahí mezcla artefactos que nadie
+        // escribió ("1"→"uno" + "1"→"1.0" daba "uno.0"). En el FIN del documento sí es
+        // adyacencia válida (el reemplazo total + agregado al final, decisión del plan).
+        if (p.inicio === q.fin && p.inicio < largoBase) return true;
         continue;
       }
       if (qEsPunto) {
         if (q.inicio >= p.inicio && q.inicio < p.fin) return true;
+        if (q.inicio === p.fin && q.inicio < largoBase) return true;
         continue;
       }
       // Intervalos [inicio, fin): dos ediciones CONTIGUAS no se pisan.
@@ -124,7 +131,7 @@ export function mergeDeTexto(base: string, ours: string, theirs: string): Result
   if (cambiosOurs.length === 0) return { tipo: 'merge', texto: theirs };
   if (cambiosTheirs.length === 0) return { tipo: 'merge', texto: ours };
 
-  if (seSolapan(cambiosOurs, cambiosTheirs)) return { tipo: 'conflicto' };
+  if (seSolapan(cambiosOurs, cambiosTheirs, base.length)) return { tipo: 'conflicto' };
 
   // Disjuntos: se recorren los cambios de los dos lados sobre la base y se arma la fusión.
   // Determinístico — no hay lugar donde el fuzzy pueda "elegir" ni dejar un resultado parcial.

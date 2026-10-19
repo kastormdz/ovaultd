@@ -1,0 +1,149 @@
+{
+  "descripcion": "Corpus de merge 3-vias (fase 5, paso 4 del plan): casos de TEXTO que el merge del nucleo debe fusionar (esperado = string) o rechazar conservando ambas versiones (esperado = null). Los consume packages/core/test/merge-corpus.test.ts contra mergeDeTexto (base, nuestro, suyo). El algoritmo es determinista: cambios crudos y solapamiento estricto — el fuzzy no decide nada.",
+  "casos": [
+    {
+      "nombre": "frontmatter: claves distintas editadas a cada lado",
+      "base": "---\ntitle: Proyecto\ntags: [uno]\n---\n\n# Hola\n\nCuerpo.\n",
+      "nuestro": "---\ntitle: Proyecto\ntags: [uno, dos]\n---\n\n# Hola\n\nCuerpo.\n",
+      "suyo": "---\ntitle: Proyecto Nuevo\ntags: [uno]\n---\n\n# Hola\n\nCuerpo.\n",
+      "esperado": "---\ntitle: Proyecto Nuevo\ntags: [uno, dos]\n---\n\n# Hola\n\nCuerpo.\n",
+      "nota": "Dos claves del mismo YAML, separadas: disjuntas."
+    },
+    {
+      "nombre": "frontmatter y cuerpo: uno toca el YAML, el otro el texto",
+      "base": "---\ntags: [a]\n---\n\nPrimera linea.\nSegunda linea.\n",
+      "nuestro": "---\ntags: [a, b]\n---\n\nPrimera linea.\nSegunda linea.\n",
+      "suyo": "---\ntags: [a]\n---\n\nPrimera linea.\nSegunda linea editada.\n",
+      "esperado": "---\ntags: [a, b]\n---\n\nPrimera linea.\nSegunda linea editada.\n",
+      "nota": "Zonas opuestas del documento."
+    },
+    {
+      "nombre": "tabla: fila nueva al final y una celda de otra fila",
+      "base": "| Archivo | Estado |\n|---|---|\n| uno.md | listo |\n| dos.md | pendiente |\n",
+      "nuestro": "| Archivo | Estado |\n|---|---|\n| uno.md | listo |\n| dos.md | pendiente |\n| tres.md | pendiente |\n",
+      "suyo": "| Archivo | Estado |\n|---|---|\n| uno.md | EN CURSO |\n| dos.md | pendiente |\n",
+      "esperado": "| Archivo | Estado |\n|---|---|\n| uno.md | EN CURSO |\n| dos.md | pendiente |\n| tres.md | pendiente |\n",
+      "nota": "Fila agregada al final + celda distinta: disjuntas."
+    },
+    {
+      "nombre": "tabla: la MISMA celda editada distinto",
+      "base": "| K | V |\n|---|---|\n| a | 1 |\n| b | 2 |\n",
+      "nuestro": "| K | V |\n|---|---|\n| a | uno |\n| b | 2 |\n",
+      "suyo": "| K | V |\n|---|---|\n| a | 1.0 |\n| b | 2 |\n",
+      "esperado": null,
+      "nota": "Mismo segmento de linea: conflicto (se conservan ambas versiones)."
+    },
+    {
+      "nombre": "lista: item nuevo al final y otro item editado",
+      "base": "- comprar pan\n- llamar a mama\n",
+      "nuestro": "- comprar pan\n- llamar a mama\n- pagar la luz\n",
+      "suyo": "- comprar pan integral\n- llamar a mama\n",
+      "esperado": "- comprar pan integral\n- llamar a mama\n- pagar la luz\n",
+      "nota": "Items distintos de la misma lista."
+    },
+    {
+      "nombre": "lista: el MISMO item editado distinto",
+      "base": "- comprar pan\n- llamar a mama\n",
+      "nuestro": "- comprar pan de centeno\n- llamar a mama\n",
+      "suyo": "- comprar pan integral\n- llamar a mama\n",
+      "esperado": null,
+      "nota": "Mismo item: conflicto."
+    },
+    {
+      "nombre": "code fence: una linea del codigo y texto posterior al bloque",
+      "base": "Intro.\n\n```js\nconst a = 1;\nconst b = 2;\n```\n\nFinal.\n",
+      "nuestro": "Intro.\n\n```js\nconst a = 10;\nconst b = 2;\n```\n\nFinal.\n",
+      "suyo": "Intro.\n\n```js\nconst a = 1;\nconst b = 2;\n```\n\nFinal editado.\n",
+      "esperado": "Intro.\n\n```js\nconst a = 10;\nconst b = 2;\n```\n\nFinal editado.\n",
+      "nota": "Dentro del fence + despues del fence: disjuntas."
+    },
+    {
+      "nombre": "code fence: la MISMA linea de codigo editada distinto",
+      "base": "```python\ndef suma(a, b):\n    return a + b\n```\n",
+      "nuestro": "```python\ndef suma(a, b):\n    return b + a\n```\n",
+      "suyo": "```python\ndef suma(a, b):\n    return (a + b)\n```\n",
+      "esperado": null,
+      "nota": "Misma linea de codigo: conflicto."
+    },
+    {
+      "nombre": "Unicode: emoji y CJK en zonas distintas",
+      "base": "# Notas 🚀\n\nTexto en español con acentos: canción, corazón.\n\nVersion 中文 uno.\n",
+      "nuestro": "# Notas 🚀\n\nTexto en español con acentos: canción, corazón. ¡Y más!\n\nVersion 中文 uno.\n",
+      "suyo": "# Notas 🚀\n\nTexto en español con acentos: canción, corazón.\n\nVersion 中文 二.\n",
+      "esperado": "# Notas 🚀\n\nTexto en español con acentos: canción, corazón. ¡Y más!\n\nVersion 中文 二.\n",
+      "nota": "Emoji, acentos y CJK disjuntos (los indices del diff son de code units)."
+    },
+    {
+      "nombre": "Unicode: la MISMA linea con emoji editada distinto",
+      "base": "Estado: pendiente ⏳\n",
+      "nuestro": "Estado: listo ✅\n",
+      "suyo": "Estado: en curso 🔄\n",
+      "esperado": null,
+      "nota": "Misma linea: conflicto."
+    },
+    {
+      "nombre": "parrafos largos: reemplazo de un parrafo y agregado al final",
+      "base": "Primer parrafo corto.\n\nSegundo parrafo con bastante texto para que el reemplazo sea de un bloque entero y no de unas pocas letras; cubre una oracion completa con sus comas, puntos y palabras variadas que hacen al diff no trivial.\n\nTercer parrafo final.\n",
+      "nuestro": "Primer parrafo corto.\n\nSegundo parrafo REESCRITO por completo: otra redaccion distinta del mismo contenido, con otras palabras, para forzar un reemplazo grande en el diff del merge.\n\nTercer parrafo final.\n",
+      "suyo": "Primer parrafo corto.\n\nSegundo parrafo con bastante texto para que el reemplazo sea de un bloque entero y no de unas pocas letras; cubre una oracion completa con sus comas, puntos y palabras variadas que hacen al diff no trivial.\n\nTercer parrafo final.\n\nCuarto parrafo agregado por el otro lado.\n",
+      "esperado": "Primer parrafo corto.\n\nSegundo parrafo REESCRITO por completo: otra redaccion distinta del mismo contenido, con otras palabras, para forzar un reemplazo grande en el diff del merge.\n\nTercer parrafo final.\n\nCuarto parrafo agregado por el otro lado.\n",
+      "nota": "Reemplazo de bloque en el medio + agregado al final: disjuntas."
+    },
+    {
+      "nombre": "heading: retitular y editar el cuerpo",
+      "base": "## Como instalar\n\nPaso uno.\n\nPaso dos.\n",
+      "nuestro": "## Cómo instalar (paso a paso)\n\nPaso uno.\n\nPaso dos.\n",
+      "suyo": "## Como instalar\n\nPaso uno.\n\nPaso dos con mas detalle.\n",
+      "esperado": "## Cómo instalar (paso a paso)\n\nPaso uno.\n\nPaso dos con mas detalle.\n",
+      "nota": "Titulo y cuerpo: disjuntas."
+    },
+    {
+      "nombre": "insercion concurrente en el MISMO punto",
+      "base": "Linea unica.\n",
+      "nuestro": "Linea unica. Agregado nuestro.\n",
+      "suyo": "Linea unica. Agregado suyo.\n",
+      "esperado": null,
+      "nota": "Ambos insertan al final del mismo punto: conflicto (patron central del fallback)."
+    },
+    {
+      "nombre": "link markdown: editar la URL y agregar un parrafo aparte",
+      "base": "Ver [la doc](https://ejemplo.com/vieja).\n\nFin.\n",
+      "nuestro": "Ver [la doc](https://ejemplo.com/nueva).\n\nFin.\n",
+      "suyo": "Ver [la doc](https://ejemplo.com/vieja).\n\nFin.\n\nNota agregada.\n",
+      "esperado": "Ver [la doc](https://ejemplo.com/nueva).\n\nFin.\n\nNota agregada.\n",
+      "nota": "URL y append: disjuntas."
+    },
+    {
+      "nombre": "wiki-link: renombrar el target y editar otra linea",
+      "base": "Ir a [[Notas/Proyecto viejo]].\n\nSeguir con el plan.\n",
+      "nuestro": "Ir a [[Notas/Proyecto nuevo]].\n\nSeguir con el plan.\n",
+      "suyo": "Ir a [[Notas/Proyecto viejo]].\n\nSeguir con el plan ajustado.\n",
+      "esperado": "Ir a [[Notas/Proyecto nuevo]].\n\nSeguir con el plan ajustado.\n",
+      "nota": "El rename de un wiki-link es texto: se fusiona si es disjunto."
+    },
+    {
+      "nombre": "documento realista: frontmatter, tabla y cuerpo tocados en zonas opuestas",
+      "base": "---\ntitle: Semanal\ndate: 2026-10-18\n---\n\n# Resumen\n\n## Pendientes\n\n| Tarea | Estado |\n|---|---|\n| deploy | ok |\n| docs | falta |\n\n## Notas\n\nNada mas por hoy.\n",
+      "nuestro": "---\ntitle: Semanal\ndate: 2026-10-19\n---\n\n# Resumen\n\n## Pendientes\n\n| Tarea | Estado |\n|---|---|\n| deploy | ok |\n| docs | falta |\n\n## Notas\n\nNada mas por hoy.\n",
+      "suyo": "---\ntitle: Semanal\ndate: 2026-10-18\n---\n\n# Resumen\n\n## Pendientes\n\n| Tarea | Estado |\n|---|---|\n| deploy | ok |\n| docs | falta |\n\n## Notas\n\nCerrado el cierre de fase.\n",
+      "esperado": "---\ntitle: Semanal\ndate: 2026-10-19\n---\n\n# Resumen\n\n## Pendientes\n\n| Tarea | Estado |\n|---|---|\n| deploy | ok |\n| docs | falta |\n\n## Notas\n\nCerrado el cierre de fase.\n",
+      "nota": "La fecha del frontmatter y la ultima seccion: el caso tipico de dos dispositivos."
+    },
+    {
+      "nombre": "los dos cambiaron igual: converge sin conflicto (corpus)",
+      "base": "Version: una.\n",
+      "nuestro": "Version: dos.\n",
+      "suyo": "Version: dos.\n",
+      "esperado": "Version: dos.\n",
+      "nota": "Atajo de convergencia."
+    },
+    {
+      "nombre": "uno no cambio: gana el otro (corpus)",
+      "base": "Sin tocar.\n",
+      "nuestro": "Tocado por uno.\n",
+      "suyo": "Sin tocar.\n",
+      "esperado": "Tocado por uno.\n",
+      "nota": "Atajo del caso comun."
+    }
+  ]
+}

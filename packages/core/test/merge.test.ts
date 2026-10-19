@@ -76,6 +76,15 @@ describe('merge de texto a 3 vías', () => {
     }
   });
 
+  it('una inserción en el borde INTERNO de un reemplazo es conflicto; en el fin del documento no', () => {
+    // El patrón que cazó el corpus (fase 5): "1"→"uno" (reemplazo) con "1"→"1.0" (inserción
+    // pegada a la derecha) fusionaba "uno.0" — un artefacto que nadie escribió. El ancla de
+    // la inserción (lo que venía después del "1") fue reemplazada: decide el usuario.
+    expect(mergeDeTexto('valor: 1\n', 'valor: uno\n', 'valor: 1.0\n').tipo).toBe('conflicto');
+    // Y en el FIN del documento la adyacencia sigue fusionando (el caso del plan, arriba).
+    expect(mergeDeTexto('a\n', 'b\n', 'a\nc\n')).toEqual({ tipo: 'merge', texto: 'b\nc\n' });
+  });
+
   it('cambios que se pisan PARCIALMENTE son conflicto', () => {
     // Ninguno cubre todo el texto, pero sus rangos se superponen: decide el usuario.
     const base = 'linea uno\nlinea dos\nlinea tres\n';
