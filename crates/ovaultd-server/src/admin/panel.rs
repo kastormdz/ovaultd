@@ -482,7 +482,12 @@ async fn dashboard(State(estado): State<EstadoServidor>, Sesion(sesion): Sesion)
     let revisiones = contar(&estado.pool, "SELECT COUNT(*) FROM revisions").await;
     let devices = contar(
         &estado.pool,
-        "SELECT COUNT(*) FROM devices WHERE revoked_at IS NULL",
+        // Solo los activos (mismo criterio que /admin/devices): el KPI no debe contar
+        // vínculos abandonados sin uso.
+        "SELECT COUNT(*) FROM devices d
+          WHERE d.revoked_at IS NULL
+            AND (d.last_seen IS NOT NULL
+                 OR EXISTS (SELECT 1 FROM batches b WHERE b.device_id = d.id))",
     )
     .await;
     let lotes = contar(&estado.pool, "SELECT COUNT(*) FROM batches").await;

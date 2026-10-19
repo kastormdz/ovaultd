@@ -1121,3 +1121,48 @@ async fn las_paginas_w2_son_solo_para_admins() -> Result<()> {
 
     Ok(())
 }
+
+#[tokio::test]
+async fn devices_oculta_los_inactivos_y_los_muestra_con_todos() -> Result<()> {
+    let contexto = TestContext::new().await?;
+    hacer_admin(&contexto).await?;
+    let cookie = login(&contexto).await?;
+
+    // Un device que nunca dio señales de vida (ni `last_seen` ni un batch): el vínculo
+    // abandonado del caso real. El panel lo oculta por defecto y lo deja auditar con
+    // `?todos=1` para poder revocarlo.
+    let cuenta: i64 = sqlx::query_scalar("SELECT account_id FROM devices WHERE id = ?")
+        .bind(contexto.device_id)
+        .fetch_one(&contexto.pool)
+        .await?;
+    sqlx::query(
+        "INSERT INTO devices (account_id, name, platform)
+         VALUES (?, 'huerfano-test', 'obsidian')",
+    )
+    .bind(cuenta)
+    .execute(&contexto.pool)
+    .await?;
+
+    let resp = contexto
+        .request(get_con_cookie("/admin/devices", &cookie)?)
+        .await?;
+    assert_eq!(resp.status(), StatusCode::OK);
+    let html = cuerpo(resp).await?;
+    assert!(!html.contains("huerfano-test"), "los inactivos quedan ocultos");
+    assert!(
+        html.contains("inactivos ocultos"),
+        "el conteo de ocultos se informa"
+    );
+
+    let resp = contexto
+        .request(get_con_cookie("/admin/devices?todos=1", &cookie)?)
+        .await?;
+    assert_eq!(resp.status(), StatusCode::OK);
+    let html = cuerpo(resp).await?;
+    assert!(
+        html.contains("huerfano-test"),
+        "con todos=1 aparece para auditarlo"
+    );
+
+    Ok(())
+}

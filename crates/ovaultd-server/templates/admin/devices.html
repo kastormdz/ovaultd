@@ -59,5 +59,10 @@
     <span>{% if hay_mas %}<a class="boton mini" href="/admin/devices?pagina={{ pagina + 1 }}">{{ t.btn_siguiente }}</a>{% endif %}</span>
   </div>
   {% endif %}
+  {% if ver_todos %}
+  <p class="sub"><a href="/admin/devices">{{ t.devices_ver_activos }}</a></p>
+  {% else if inactivos > 0 %}
+  <p class="sub">{{ inactivos }} {{ t.devices_inactivos }} · <a href="/admin/devices?todos=1">{{ t.devices_ver_todos }}</a></p>
+  {% endif %}
 </section>
 {% endblock %}

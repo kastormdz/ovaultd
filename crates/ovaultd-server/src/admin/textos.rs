@@ -94,6 +94,9 @@ pub struct Textos {
     pub est_deshabilitada: &'static str,
     pub est_al_dia: &'static str,
     pub est_sin_actividad: &'static str,
+    pub devices_ver_todos: &'static str,
+    pub devices_ver_activos: &'static str,
+    pub devices_inactivos: &'static str,
     pub cero_eventos: &'static str,
     pub sin_datos: &'static str,
 
@@ -324,6 +327,9 @@ pub static ES: Textos = Textos {
     est_deshabilitada: "deshabilitada",
     est_al_dia: "al día",
     est_sin_actividad: "sin actividad",
+    devices_ver_todos: "Ver también inactivos",
+    devices_ver_activos: "Ver solo activos",
+    devices_inactivos: "inactivos ocultos",
     cero_eventos: "0 eventos",
     sin_datos: "—",
 

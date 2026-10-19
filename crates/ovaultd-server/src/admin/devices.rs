@@ -41,6 +41,8 @@ struct PlantillaDevices {
     devices: Vec<VistaDevice>,
     pagina: i64,
     hay_mas: bool,
+    ver_todos: bool,
+    inactivos: i64,
     error: Option<String>,
     ok: Option<String>,
 }
@@ -60,6 +62,9 @@ struct VistaDevice {
 struct ParamsLista {
     #[serde(default)]
     pagina: Option<i64>,
+    /// `?todos=1` incluye los devices inactivos (para auditarlos o revocarlos).
+    #[serde(default)]
+    todos: Option<u8>,
     #[serde(default)]
     ok: Option<String>,
     #[serde(default)]
@@ -87,6 +92,7 @@ async fn lista(
         &estado,
         &sesion,
         params.pagina.unwrap_or(1).max(1),
+        params.todos.unwrap_or(0) != 0,
         params.ok,
         params.error,
     )
@@ -97,13 +103,32 @@ async fn pintar(
     estado: &EstadoServidor,
     sesion: &sesiones::SesionActiva,
     pagina: i64,
+    todos: bool,
     ok: Option<String>,
     error: Option<String>,
 ) -> Response {
     let offset = (pagina - 1) * POR_PAGINA;
 
-    let filas = match sqlx::query_as::<_, FilaDevice>(
-        "SELECT d.id, a.email AS cuenta, d.name AS nombre, d.platform AS plataforma,
+    // "Activo" = el device dio señales de vida: el latido de `autenticar_token`
+    // (`last_seen`) o al menos un lote commiteado. Un vínculo abandonado (dos creaciones
+    // y nunca usado) queda fuera de la lista por defecto; `?todos=1` lo muestra para
+    // poder auditarlo o revocarlo. Dos literales: sqlx 0.9 exige SqlSafeStr.
+    let por_defecto = "SELECT d.id, a.email AS cuenta, d.name AS nombre, d.platform AS plataforma,
+                d.created_at AS creado,
+                COALESCE(d.last_seen,
+                         (SELECT MAX(b.ts) FROM batches b WHERE b.device_id = d.id)) AS ultima_actividad,
+                d.revoked_at AS revocado,
+                (SELECT COUNT(*) FROM device_tokens t
+                  WHERE t.device_id = d.id AND t.revoked_at IS NULL
+                    AND t.expires_at > datetime('now')) AS tokens_vivos
+         FROM devices d
+         JOIN accounts a ON a.id = d.account_id
+         WHERE d.revoked_at IS NULL
+           AND (d.last_seen IS NOT NULL
+                OR EXISTS (SELECT 1 FROM batches b WHERE b.device_id = d.id))
+         ORDER BY d.id DESC
+         LIMIT ? OFFSET ?";
+    let con_todos = "SELECT d.id, a.email AS cuenta, d.name AS nombre, d.platform AS plataforma,
                 d.created_at AS creado,
                 COALESCE(d.last_seen,
                          (SELECT MAX(b.ts) FROM batches b WHERE b.device_id = d.id)) AS ultima_actividad,
@@ -114,15 +139,30 @@ async fn pintar(
          FROM devices d
          JOIN accounts a ON a.id = d.account_id
          ORDER BY d.id DESC
-         LIMIT ? OFFSET ?",
-    )
-    .bind(POR_PAGINA + 1)
-    .bind(offset)
-    .fetch_all(&estado.pool)
-    .await
+         LIMIT ? OFFSET ?";
+
+    let filas = match sqlx::query_as::<_, FilaDevice>(if todos { con_todos } else { por_defecto })
+        .bind(POR_PAGINA + 1)
+        .bind(offset)
+        .fetch_all(&estado.pool)
+        .await
     {
         Ok(filas) => filas,
         Err(error) => return panel::error_interno("devices_lista", error),
+    };
+
+    let inactivos = if todos {
+        0
+    } else {
+        sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM devices d
+             WHERE d.revoked_at IS NULL
+               AND NOT (d.last_seen IS NOT NULL
+                        OR EXISTS (SELECT 1 FROM batches b WHERE b.device_id = d.id))",
+        )
+        .fetch_one(&estado.pool)
+        .await
+        .unwrap_or(0)
     };
 
     let hay_mas = filas.len() as i64 > POR_PAGINA;
@@ -154,6 +194,8 @@ async fn pintar(
                 devices,
                 pagina,
                 hay_mas,
+                ver_todos: todos,
+                inactivos,
                 error,
                 ok,
             }

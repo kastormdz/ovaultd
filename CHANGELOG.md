@@ -5,6 +5,34 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y e
 [semver](https://semver.org/lang/es/): server y plugin viajan en un **release train** (mismo
 `MAJOR.MINOR` = pareja probada junta; ver ADR-0018 y la sección «Compatibilidad» del README).
 
+## [0.2.8] — 2026-10-19
+
+Higiene de dispositivos en el panel: la lista muestra solo los activos y el dispositivo se
+presenta con el nombre real de cada máquina en vez del literal «obsidian».
+
+### Added
+
+- **Latido de dispositivos** (`routes.rs::autenticar_token`): cada request autenticado por
+  token actualiza `devices.last_seen` (throttled a una hora por dispositivo, best-effort:
+  un fallo del UPDATE no frena el request). Es el dato que distingue un device en uso de un
+  vínculo abandonado.
+- **`/admin/devices` filtra por activos**: por defecto solo lista los devices no revocados
+  que dieron señales de vida (`last_seen` o al menos un lote commiteado). Los inactivos se
+  informan con su conteo y quedan a un click (`?todos=1`) para auditarlos o revocarlos.
+- **KPI `dispositivos` del dashboard**: mismo criterio que la lista (no cuenta vínculos
+  abandonados).
+
+### Fixed
+
+- **Lista de dispositivos vacía con inactivos ocultos**: el conteo y el enlace de
+  «Ver también inactivos» ahora se muestran también cuando no hay activos (el estado vacío
+  ya no se los come).
+
+### Tests
+
+- `devices_oculta_los_inactivos_y_los_muestra_con_todos`: cubre el filtro, el conteo y el
+  enlace de inactivos.
+
 ## [0.2.7] — 2026-10-18
 
 Fase 5, corte 5e: GC de blobs huérfanos, con auditoría del invariante de referencias.
