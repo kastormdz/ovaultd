@@ -144,7 +144,8 @@ test.describe('sync E2E (stack real)', () => {
       expect(empujado.conflicto).toBeUndefined();
       expect(empujado.encoladas).toBe(3);
       expect(empujado.empujadas).toBe(3);
-      expect(empujado.headRev).toBe(5);
+      // Push agrupado: las 3 ops viajan en UN lote = UNA revisión nueva (base 2 → 3).
+      expect(empujado.headRev).toBe(3);
       expect(await runtime.call('outbox.list')).toEqual([]);
 
       // El server confirma: tres revisiones nuevas cuyos blobs DESCIFRAN al contenido
@@ -195,10 +196,10 @@ test.describe('sync E2E (stack real)', () => {
       expect(ciclo.pull).toMatchObject({ status: 'pulled', applied: 0 });
       expect(ciclo.push?.encoladas).toBe(1);
       expect(ciclo.push?.empujadas).toBe(1);
-      expect(ciclo.push?.headRev).toBe(6);
+      expect(ciclo.push?.headRev).toBe(4);
 
       // El server lo confirma y el blob del ciclo descifra al contenido escrito.
-      const deltaCiclo = (await pedirJson(`/api/v1/vaults/${vault}/changes?since=5&limit=10`, {
+      const deltaCiclo = (await pedirJson(`/api/v1/vaults/${vault}/changes?since=3&limit=10`, {
         headers: { authorization: `Bearer ${signin.token}` },
       })) as { items: Array<{ rev: number; op: string; blob_id: string }> };
       expect(deltaCiclo.items.length).toBe(1);
