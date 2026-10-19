@@ -197,6 +197,20 @@ describe('merge 3-vías integrado al apply', () => {
     expect(sha256Hex(caso.files.get(PATH)!)).not.toBe(caso.index.get(PATH_ID)?.contentHash);
   });
 
+  it('local ausente: la revisión remota se APLICA y el ciclo no se bloquea', async () => {
+    // El archivo estaba en la base pero ya no está en disco (un theme borrado a mano, una
+    // config que Obsidian limpió). El guard viejo lo trataba como conflicto y congelaba el
+    // ciclo ENTERO para siempre; ahora se escribe la versión del server.
+    const caso = armarCaso({ local: OURS_TEXTO, remoto: THEIRS_TEXTO });
+    caso.files.delete(PATH); // el disco ya no lo tiene
+
+    const resultado = await applyRevision(caso.deps, caso.revision, caso.storedRemoto);
+
+    expect(resultado.status).not.toBe('blocked');
+    expect(dec.decode(caso.files.get(PATH))).toBe(THEIRS_TEXTO);
+    expect(caso.checkpoint()).toEqual({ since: 6, minRev: null });
+  });
+
   it('la misma frase editada distinto: conflicto explícito y el local intacto', async () => {
     const caso = armarCaso({ local: 'El gato ronca en el sofá.\n', remoto: 'El gato corre en el sofá.\n' });
 

@@ -109,8 +109,12 @@ async function evaluarGuard(
 
   // add / mod de archivo
   if (!actual) {
-    if (base) return { verdict: 'blocked', reason: 'el archivo local desapareció respecto de la base' };
-    return { verdict: 'safe' }; // creación fresca
+    // El archivo local NO existe: no hay nada que pisar. Se escribe la versión del server
+    // (si el usuario lo vuelve a borrar, ese borrado se propaga como `del` en el push).
+    // Bloquear acá dejaba el ciclo entero TRABADO PARA SIEMPRE por un archivo ausente —
+    // medido en un escritorio y un teléfono: un theme borrado a mano congelaba la sync de
+    // las notas.
+    return { verdict: 'safe' };
   }
   if (actual.isDirectory) return { verdict: 'blocked', reason: 'un directorio local ocupa el camino' };
 
