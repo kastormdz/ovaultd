@@ -12,14 +12,19 @@ import { dirname, join, resolve, sep } from 'node:path';
 
 import { validarRutaDeVault } from '@ovaultd/core';
 
-import { listVaultStates, type VaultLocalState } from './state.js';
+import { listVaultStates, readSession, type VaultLocalState } from './state.js';
 
 /** Resuelve el vault local desde el estado guardado, sin pedir password ni abrir el runtime. */
 export function resolverVaultLocal(vaultTexto?: string): VaultLocalState {
-  const vaults = listVaultStates().filter((vault) => vault.dir !== undefined);
-  if (vaults.length === 0) {
+  const todos = listVaultStates().filter((vault) => vault.dir !== undefined);
+  if (todos.length === 0) {
     throw new Error('no hay ningún vault vinculado a una carpeta (corré `ovaultd setup`)');
   }
+  // Los ids se repiten entre servidores (el lab y el server real pueden tener un #1):
+  // se prefiere el server de la sesión actual, que es con el que se está trabajando.
+  const sesion = readSession();
+  const delServer = sesion ? todos.filter((vault) => vault.server === sesion.server) : [];
+  const vaults = delServer.length > 0 ? delServer : todos;
   if (vaultTexto !== undefined && vaultTexto !== '') {
     const numero = Number(vaultTexto);
     const encontrado = vaults.find((vault) => vault.vault === numero);
@@ -29,7 +34,7 @@ export function resolverVaultLocal(vaultTexto?: string): VaultLocalState {
   if (vaults.length === 1) return vaults[0]!;
   throw new Error(
     `hay ${vaults.length} vaults vinculados; indicá cuál con --vault <n> (${vaults
-      .map((vault) => `#${vault.vault} «${vault.name}»`)
+      .map((vault) => `#${vault.vault} «${vault.name}» en ${vault.server}`)
       .join(', ')})`,
   );
 }
