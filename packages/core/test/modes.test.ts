@@ -28,6 +28,9 @@ describe('modos del ciclo', () => {
       listBase: async () => [],
       writeCheckpoint: async () => void escrituras.push('checkpoint'),
       putOutbox: async () => void escrituras.push('outbox'),
+      putOutboxMany: async (entradas: unknown[]) => {
+        if (entradas.length > 0) escrituras.push('outbox');
+      },
       setOutboxState: async () => void escrituras.push('outbox-state'),
     };
     const conn = {
@@ -75,6 +78,9 @@ describe('modos del ciclo', () => {
       listOutbox: async () => [],
       getOutbox: async () => undefined,
       putOutbox: async () => void escrituras.push('outbox'),
+      putOutboxMany: async (entradas: unknown[]) => {
+        if (entradas.length > 0) escrituras.push('outbox');
+      },
       writeCheckpoint: async () => void escrituras.push('checkpoint'),
       setOutboxState: async () => void escrituras.push('outbox-state'),
     };
@@ -114,6 +120,9 @@ describe('modos del ciclo', () => {
       getOutbox: async (id: string) => outbox.get(id),
       putOutbox: async (entry: { operationId: string; state: string }) =>
         void outbox.set(entry.operationId, entry),
+      putOutboxMany: async (entradas: Array<{ operationId: string; state: string }>) => {
+        for (const entrada of entradas) outbox.set(entrada.operationId, entrada);
+      },
       deleteOutbox: async (id: string) => void outbox.delete(id),
       setOutboxState: async (id: string, state: string) => {
         const entry = outbox.get(id);
@@ -123,6 +132,16 @@ describe('modos del ciclo', () => {
       writeCheckpoint: async () => undefined,
       putBase: async (entrada: { pathId: string; rev: number }) => void bases.set(entrada.pathId, entrada),
       putIndex: async () => undefined,
+      // El push confirma el lote entero en UNA transacción: el fake la emula poblando las
+      // bases y retirando las entradas del outbox (fiel a lo que hace el StateStore real).
+      confirmarLote: async (
+        items: Array<{ entry: { operationId: string }; base: { pathId: string; rev: number } }>,
+      ) => {
+        for (const item of items) {
+          bases.set(item.base.pathId, item.base);
+          outbox.delete(item.entry.operationId);
+        }
+      },
     };
     const port = {
       list: async () => archivos.map((name) => ({ name, isFile: true, isDirectory: false })),

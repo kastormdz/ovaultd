@@ -122,6 +122,30 @@ por nota: putBase + putIndex + setOutboxState + deleteOutbox) más el costo fijo
 El próximo corte necesita **una transacción de IndexedDB por lote** en el `StateStore`
 (interfaz transaccional para base+índice+outbox), no otra micro-optimización.
 
+### Corrida 2026-10-19 (quinta) · transacciones por lote
+
+Ese corte se hizo y fue el que más rindió:
+
+- `StateStore.confirmarLote`: base + índice + outbox + checkpoint del lote entero en **UNA
+  transacción** (antes 4 por nota). `confirmar` bajó de **1.655 ms a 60 ms** por 100 notas.
+- `StateStore.putOutboxMany`: las altas del diff en una sola transacción.
+- `TAMANO_LOTE` 250 → **1000** (el máximo del protocolo): el T1 pasa de 4 commits a **uno**.
+- `LOTE_LECTURA` 150 y `CONCURRENCIA_PUT` 24 (sin cambio medible: el cuello ya no es el I/O).
+
+| Fase | Antes (100 notas) | Ahora |
+|---|---|---|
+| `confirmar` | 1.655 ms | **60 ms** |
+| `encolar` | 608 ms | **~90 ms** |
+| push total | 6.510 ms | **~4.900 ms** |
+
+**T1: 70,8 → 37,1 s (-48 %)** · T2 1,86 s · T3 1,87 s · T4 36,2 s.
+
+**Lo que falta para <30 s** (medido, no adivinado): el `outbox` guarda el snapshot de 133 KB
+JUNTO a los metadatos, así que `listOutbox` carga ~133 MB desde IndexedDB en el T1 y
+`prepareOutboxEntry` paga un `b64Encode` + SHA por nota. Próximo corte: **store de
+snapshots separado** del outbox (metadatos livianos para listar; el blob se lee solo al
+construir la op) y medir `prepareOutboxEntry` con una marca propia.
+
 Los ~1,9 s de T2/T3 son **el arranque de Chromium del CLI**: el ciclo neto (~0,3-0,4 s)
 está por debajo del target de un segundo, y el plugin (motor persistente) no paga arranque.
 

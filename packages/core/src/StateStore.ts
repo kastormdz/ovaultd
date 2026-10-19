@@ -242,6 +242,15 @@ export class StateStore {
     await this.db.put('outbox', entry);
   }
 
+  /** Encola varias entradas en UNA transacción (el push inicial encola cientos de golpe). */
+  async putOutboxMany(entries: OutboxEntry[]): Promise<void> {
+    if (entries.length === 0) return;
+    const tx = this.db.transaction('outbox', 'readwrite');
+    const store = tx.objectStore('outbox');
+    for (const entry of entries) await store.put(entry);
+    await tx.done;
+  }
+
   async getOutbox(operationId: string): Promise<OutboxEntry | null> {
     return (await this.db.get('outbox', operationId)) ?? null;
   }
@@ -262,6 +271,35 @@ export class StateStore {
     const updated: OutboxEntry = { ...entry, state };
     await this.db.put('outbox', updated);
     return updated;
+  }
+
+  /**
+   * Confirmación de un LOTE del push en UNA transacción de IndexedDB: base + índice +
+   * outbox (borrado) + checkpoint. Antes eran 4 transacciones POR NOTA (~16,5 ms cada
+   * una: el piso medido del T1); acá el lote entero paga el costo fijo UNA vez.
+   * Es atómica: si el proceso muere, o se confirma el lote entero o nada (las entradas
+   * siguen en `sent` y el reintento es idempotente).
+   */
+  async confirmarLote(
+    items: Array<{ entry: OutboxEntry; base: BaseEntry; index: IndexEntry }>,
+    checkpoint: { since: number; minRev: number | null },
+  ): Promise<void> {
+    const tx = this.db.transaction(['base', 'index', 'outbox', 'checkpoint'], 'readwrite');
+    const base = tx.objectStore('base');
+    const index = tx.objectStore('index');
+    const outbox = tx.objectStore('outbox');
+    for (const item of items) {
+      await base.put(item.base);
+      await index.put(item.index);
+      await outbox.delete(item.entry.operationId);
+    }
+    await tx.objectStore('checkpoint').put({
+      id: 'checkpoint',
+      since: checkpoint.since,
+      minRev: checkpoint.minRev,
+      updatedAt: Date.now(),
+    });
+    await tx.done;
   }
 
   // ------------------------------------------------------------------ transfers
