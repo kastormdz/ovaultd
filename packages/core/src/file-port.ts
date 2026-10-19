@@ -29,6 +29,12 @@ export interface FileSystemPort {
    * del bench). Opcional: sin soporte, el escaneo bate el bucle de `stat`.
    */
   statMany?(relPaths: string[]): Promise<Array<VaultStat | null>>;
+  /**
+   * Lee varios archivos en UNA tanda (un round-trip, como `statMany`). El escaneo lo pide
+   * por lotes para no pagar ~30 ms de bridge por archivo en la primera subida. Opcional:
+   * sin soporte, el escaneo bate el bucle de `read`.
+   */
+  readMany?(relPaths: string[]): Promise<Array<Uint8Array | null>>;
   read(relPath: string): Promise<Uint8Array>;
   /** Escribe un temporal en `relDir`; devuelve su nombre (relativo al vault). */
   writeTemp(relDir: string, bytes: Uint8Array): Promise<{ tempName: string }>;
@@ -71,6 +77,13 @@ export class HttpFileSystemPort implements FileSystemPort {
   async read(relPath: string): Promise<Uint8Array> {
     const result = await this.op<{ b64: string }>('read', { path: relPath });
     return b64Decode(result.b64);
+  }
+
+  async readMany(relPaths: string[]): Promise<Array<Uint8Array | null>> {
+    const result = await this.op<{ blobs: Array<string | null> }>('readMany', {
+      paths: relPaths,
+    });
+    return result.blobs.map((b64) => (b64 === null ? null : b64Decode(b64)));
   }
 
   writeTemp(relDir: string, bytes: Uint8Array): Promise<{ tempName: string }> {

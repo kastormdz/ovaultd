@@ -71,6 +71,30 @@ async fn iniciar_servidor() -> Result<(), String> {
         .await
         .map_err(|error| format!("no se pudo escuchar en {bind_addr}: {error}"))?;
 
+    // TCP_NODELAY en el socket de ESCUCHA (los aceptados heredan el flag en Linux): con
+    // Nagle activo, cada request chico sobre loopback paga ~40 ms de delayed ACK — 1000
+    // PUT de blobs = 40 s de espera pura. Es el cuello REAL del bench de subida.
+    // SAFETY: el fd es válido (listener vivo) y el valor es un i32 de 1.
+    {
+        use std::os::fd::AsRawFd;
+        let uno: libc::c_int = 1;
+        let rc = unsafe {
+            libc::setsockopt(
+                listener.as_raw_fd(),
+                libc::IPPROTO_TCP,
+                libc::TCP_NODELAY,
+                (&uno as *const libc::c_int).cast(),
+                std::mem::size_of_val(&uno) as libc::socklen_t,
+            )
+        };
+        if rc != 0 {
+            return Err(format!(
+                "no se pudo configurar TCP_NODELAY: {}",
+                std::io::Error::last_os_error()
+            ));
+        }
+    }
+
     tracing::info!(bind_addr = %bind_addr, "ovaultd escuchando");
 
     // Con connect info: cada request lleva la IP real del peer TCP (la usa el freno de

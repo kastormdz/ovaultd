@@ -36,6 +36,16 @@ impl CasStore {
             .map_err(|_| ServerError::Invalid("falló la tarea de almacenamiento".to_owned()))?
     }
 
+    /// Sincroniza TODO el CAS con el disco (`syncfs`: una sola llamada por lote).
+    /// `commit_batch` la invoca ANTES del ack: un blob confirmado tiene que sobrevivir al
+    /// crash — si no, el cliente no volvería a subirlo (el ack ya lo dio por bueno).
+    pub async fn sincronizar(&self) -> Result<()> {
+        let root = self.root.clone();
+        task::spawn_blocking(move || sincronizar_sync(&root))
+            .await
+            .map_err(|_| ServerError::Invalid("falló la tarea de almacenamiento".to_owned()))?
+    }
+
     pub async fn read(&self, hash: &BlobId) -> Result<Vec<u8>> {
         let path = self.blob_path(hash);
         let hash = *hash;
@@ -232,11 +242,12 @@ fn publish_sync(root: &Path, hash: &BlobId, bytes: &[u8]) -> Result<()> {
         // Failpoint de test (no-op en release): crash después de escribir el temporal.
         crate::failpoints::failpoint("cas.temp");
 
-        file.sync_all()?;
+        // SIN fsync acá: el blob todavía es invisible (ningún batch lo commiteó) y un
+        // crash lo tira sin consecuencias — el cliente lo re-sube (los blobs son
+        // inmutables y el PUT es idempotente). El fsync REAL va en `commit_batch`, que
+        // sincroniza el CAS entero con un solo `syncfs` por lote: 1 fsync por lote en vez
+        // de archivo+directorio por blob (el cuello del bench de subida).
         drop(file);
-
-        // Failpoint de test: crash después del fsync, antes de publicar.
-        crate::failpoints::failpoint("cas.fsync");
 
         match fs::rename(&temporary, &destination) {
             Ok(()) => {}
@@ -259,10 +270,12 @@ fn publish_sync(root: &Path, hash: &BlobId, bytes: &[u8]) -> Result<()> {
             Err(error) => return Err(ServerError::Io(error)),
         }
 
-        File::open(directory)?.sync_all()?;
+        // Sin fsync del directorio: el nombre del blob puede perderse en un crash antes
+        // del commit, y el mismo argumento del temporal lo cubre (el cliente re-sube).
+        // `commit_batch` sincroniza el CAS completo una vez por lote.
 
-        // Failpoint de test: crash después de publicar en el CAS (rename + fsync del
-        // directorio), antes de que el llamador registre el blob en el índice.
+        // Failpoint de test: crash después de publicar en el CAS (rename), antes de que
+        // el llamador registre el blob en el índice.
         crate::failpoints::failpoint("cas.publish");
 
         Ok(())
@@ -469,4 +482,26 @@ mod tests {
             true
         );
     }
+}
+
+/// Sincroniza el filesystem del CAS con el disco (`syncfs`): UNA llamada por lote en vez
+/// de un fsync de archivo + directorio por blob. El commit la hace ANTES del ack.
+#[cfg(unix)]
+fn sincronizar_sync(root: &Path) -> Result<()> {
+    use std::os::unix::io::AsRawFd;
+
+    let dir = File::open(root)?;
+    // SAFETY: el fd es válido mientras `dir` vive; `syncfs` solo lee del kernel.
+    let rc = unsafe { libc::syncfs(dir.as_raw_fd()) };
+    if rc != 0 {
+        return Err(ServerError::Io(std::io::Error::last_os_error()));
+    }
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn sincronizar_sync(root: &Path) -> Result<()> {
+    // Sin `syncfs` en esta plataforma: fsync de la raíz del CAS (best effort).
+    File::open(root)?.sync_all()?;
+    Ok(())
 }

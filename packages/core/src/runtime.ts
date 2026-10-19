@@ -276,6 +276,33 @@ const handlers: Record<string, Handler> = {
       vault: Number(params.vault),
       device: Number(params.device),
       keys,
+      // El HTTP del cliente pasa por el PUENTE (mismo origen que la página): el cache del
+      // preflight CORS del navegador es por URL y cada blob tiene la suya, así que un PUT
+      // directo pagaba un OPTIONS de ~40 ms por blob. El puente lo reenvía con node.
+      fetchImpl: async (input, init) => {
+        const peticion = input instanceof Request ? input : null;
+        const url = peticion ? peticion.url : String(input);
+        const metodo = init?.method ?? peticion?.method ?? 'GET';
+        const headers = (init?.headers ?? {}) as Record<string, string>;
+        const cuerpo = init?.body as ArrayBuffer | undefined;
+        // Binario CRUDO (sin base64 ni JSON grande): el sobre de un blob de 100 KB son
+        // ~133 KB y codificarlo en la página costaba 40-100 ms por PUT. Los metadatos van
+        // en headers y el body viaja tal cual; el puente lo reenvía con node.
+        const res = await fetch('/fs/proxyFetch', {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/octet-stream',
+            'x-ovaultd-url': encodeURIComponent(url),
+            'x-ovaultd-method': metodo,
+            'x-ovaultd-headers': JSON.stringify(headers),
+          },
+          body: cuerpo ?? null,
+        });
+        if (!res.ok) throw new Error(`puente proxyFetch: HTTP ${res.status}`);
+        const status = Number(res.headers.get('x-ovaultd-status') ?? 502);
+        const bytes = await res.arrayBuffer();
+        return new Response(bytes.byteLength ? bytes : null, { status });
+      },
     });
     const { headRev } = await conn.open({ since: Number(params.since ?? 0) });
     syncConn = conn;

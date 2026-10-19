@@ -1246,6 +1246,7 @@ dependencies = [
  "clap",
  "futures",
  "http-body-util",
+ "libc",
  "ovaultd-crypto",
  "ovaultd-protocol",
  "serde",

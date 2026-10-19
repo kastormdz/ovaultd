@@ -129,6 +129,10 @@ pub fn router(estado: EstadoServidor) -> Router {
             // (el upgrade del WS no pasa por CORS y por eso no lo cubre).
             CorsLayer::new()
                 .allow_origin(Any)
+                // Sin `max_age` el navegador NO cachea el preflight: cada PUT de blob paga
+                // un OPTIONS extra (~40 ms en loopback, el doble de requests). El bench de
+                // subida lo delató: ~80 ms por nota con /healthz respondiendo en 1 ms.
+                .max_age(std::time::Duration::from_secs(3600))
                 .allow_methods([
                     Method::GET,
                     Method::POST,

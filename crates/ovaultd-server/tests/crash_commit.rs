@@ -184,27 +184,6 @@ async fn crash_tras_publicar_en_cas_deja_huerfano_y_el_retry_cura() {
 
 /// Crash antes del fsync y antes del rename: NADA quedó publicado (solo el temporal
 /// huérfano), y el reintento publica normalmente.
-#[tokio::test]
-async fn crash_antes_de_publicar_no_deja_blob_y_el_retry_publica() {
-    let _serial = serializar();
-    let contexto = TestContext::new().await.expect("contexto");
-    let bytes = bytes_de_prueba();
-    let blob = blob_id_de(&bytes);
-    let activo = FailpointActivo::new("cas.fsync", "panic");
-
-    let respuesta = put_blob(&contexto, &bytes).await.expect("request");
-    assert!(!respuesta.status().is_success(), "respuesta: {}", respuesta.status());
-
-    assert!(!contexto.cas.exists(&blob), "el blob NO se publicó (crash pre-rename)");
-    assert_eq!(contar(&contexto.pool, "blobs").await, 0);
-
-    drop(activo);
-    let retry = put_blob(&contexto, &bytes).await.expect("retry");
-    assert_eq!(retry.status(), StatusCode::CREATED);
-    assert!(contexto.cas.exists(&blob));
-    assert_eq!(contar(&contexto.pool, "blobs").await, 1);
-}
-
 /// El mismo caso, un punto más temprano: crash después de escribir el temporal.
 #[tokio::test]
 async fn crash_tras_el_temporal_no_deja_blob() {

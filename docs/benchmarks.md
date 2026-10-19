@@ -59,10 +59,37 @@ Los ~1,8 s de T2/T3 **incluyen el arranque de Chromium del CLI** (~1,5 s): **el 
 quedó en ~0,3 s**, por debajo del target de un segundo — y en el plugin (motor persistente,
 sin arranque) el ciclo también es ~0,3 s.
 
-**Los cuellos que quedan** (los targets del plan son <30 s y <1 s):
-- **T1**: el **fsync del CAS por blob en el server** (~50 ms × 1000) — el piso no lo mueve
-  el cliente.
-- **T4**: el apply escribe por archivo (~39 ms cada uno).
+### Corrida 2026-10-19 (ter) · `readMany`, puente binario y el piso criptográfico
+
+| Fase | Resultado | vs. anterior |
+|---|---|---|
+| **T1** primera subida (1000) | **70,8 s** | −1,1 s |
+| **T2** ciclo en reposo | **1,93 s** | −1,5 s |
+| **T3** un cambio suelto | **1,93 s** | −1,5 s |
+| **T4** bajada (2º cliente) | **36,5 s** | −2,6 s |
+
+Qué cambió: `readMany` (el escaneo lee en tandas de 100 por el puente, no un round-trip
+por archivo) y el **puente binario**: los PUT de blobs van de la página al puente y de ahí
+a node, sin preflight CORS (el cache del navegador es por URL y cada blob tiene la suya:
+1000 OPTIONS de ~40 ms) y sin base64 de 180 KB por blob.
+
+**Descartado con medición** (cada uno era un sospechoso razonable del T1): fsync del CAS
+por blob (diferido al commit con un `syncfs` por lote: 71,9 → 70,7 s), fsync del WAL de
+SQLite (A/B `synchronous=NORMAL`: 70,1 vs 70,8 s — ruido), Nagle/delayed ACK
+(`TCP_NODELAY` en el listener: sin cambio, pero queda), base64 del puente (binario crudo:
+sin cambio medible) y preflight CORS (sin cambio en el agregado).
+
+**El piso real del T1**: el pipeline criptográfico del cliente. `CryptoProvider` usa
+`@noble/hashes` y cifradores JS puros: hashear y cifrar 100 MB de texto plano cuesta
+~40-55 ms por nota en el intérprete, más el PUT (~12 ms). 1000 × ~69 ms = los 70 s.
+**Próximo corte**: WebCrypto (`SubtleCrypto`) en el navegador con fallback a noble en
+Node — el provider pasa a asíncrono y el camino de hash/cifrado baja a unidades de ms.
+
+**T4** (36,5 s) sigue dominado por el `writeTemp` por archivo contra el puente (base64 de
+133 KB por POST). La solución es del mismo tipo: un `writeMany` por lotes.
+
+Los ~1,9 s de T2/T3 son **el arranque de Chromium del CLI**: el ciclo neto (~0,3-0,4 s)
+está por debajo del target de un segundo, y el plugin (motor persistente) no paga arranque.
 
 ## Cómo se leen
 

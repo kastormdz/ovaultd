@@ -355,6 +355,14 @@ impl Connection {
             .await
             .map_err(WsFailure::from_server_error)?;
 
+        // Sincronizar el CAS ANTES del ack: los blobs del batch tienen que estar en disco
+        // (un blob confirmado no se re-sube nunca más). Es el ÚNICO fsync del camino de
+        // subida: uno por lote (`syncfs`), no dos por blob.
+        self.cas
+            .sincronizar()
+            .await
+            .map_err(WsFailure::from_server_error)?;
+
         let rev = u64::try_from(outcome.rev)
             .map_err(|_| WsFailure::close(ErrorCode::Internal, "revisión inválida"))?;
 

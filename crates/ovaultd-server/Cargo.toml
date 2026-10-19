@@ -31,6 +31,7 @@ tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "json"] }
 uuid = { version = "1.26.1", features = ["v4"] }
 futures = "0.3.34"
+libc = "0.2"
 
 [dev-dependencies]
 http-body-util = "0.1.5"

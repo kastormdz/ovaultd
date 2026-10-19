@@ -92,6 +92,47 @@ function ejecutarOp(vault: NodeFileAdapter, op: string, p: Record<string, unknow
     }
     case 'read':
       return { b64: Buffer.from(vault.read(String(p.path))).toString('base64') };
+    case 'readMany':
+      // Una tanda de lecturas en UN round-trip: el escaneo inicial ya no paga el bridge
+      // por archivo (el cuello que quedaba en T1). El límite de cuerpo del bridge cubre
+      // lotes de hasta 100 notas de 100 KB.
+      return {
+        blobs: (p.paths as string[]).map((ruta) => {
+          try {
+            return Buffer.from(vault.read(ruta)).toString('base64');
+          } catch {
+            return null;
+          }
+        }),
+      };
+    // Trace de diagnóstico desde la página (el console del navegador no llega al CLI).
+    case 'log':
+      console.error(`[runtime] ${String(p.msg)}`);
+      return {};
+    // Proxy HTTP desde la página: el PUT de blobs va por acá para NO pagar el preflight
+    // CORS del navegador (uno por URL, y cada blob es una URL). node lo reenvía al server.
+    // IIFE async: `ejecutarOp` es síncrona y el call site resuelve la promesa.
+    case 'proxyFetch':
+      return (async () => {
+        const peticion = p as {
+          url: string;
+          method: string;
+          headers: Record<string, string>;
+          b64: string | null;
+        };
+        const cuerpo = peticion.b64 ? Buffer.from(peticion.b64, 'base64') : undefined;
+        const t0 = Date.now();
+        const respuesta = await fetch(peticion.url, {
+          method: peticion.method,
+          headers: peticion.headers,
+          body: cuerpo,
+        });
+        const bytes = Buffer.from(await respuesta.arrayBuffer());
+        console.error(
+          `[proxy] ${peticion.method} ${Math.round((cuerpo?.length ?? 0) / 1024)}KB ${Date.now() - t0}ms`,
+        );
+        return { status: respuesta.status, b64: bytes.length ? bytes.toString('base64') : null };
+      })();
     case 'writeTemp':
       return vault.writeTemp(String(p.dir), new Uint8Array(Buffer.from(String(p.b64), 'base64')));
     case 'rename':
@@ -126,6 +167,39 @@ function manejarFs(req: IncomingMessage, res: ServerResponse, vault: NodeFileAda
       responder(res, { ok: false, error: { message: 'cuerpo demasiado grande' } });
       return;
     }
+    // Proxy binario ANTES del parse de JSON: el body son bytes crudos y no parsea.
+    if (op === 'proxyFetch') {
+      void (async () => {
+        try {
+          const destino = decodeURIComponent(String(req.headers['x-ovaultd-url'] ?? ''));
+          const metodo = String(req.headers['x-ovaultd-method'] ?? 'PUT');
+          let headers: Record<string, string> = {};
+          try {
+            headers = JSON.parse(String(req.headers['x-ovaultd-headers'] ?? '{}'));
+          } catch {
+            headers = {};
+          }
+          const crudo = Buffer.concat(partes);
+          const respuesta = await fetch(destino, {
+            method: metodo,
+            headers,
+            body: crudo.length ? crudo : undefined,
+          });
+          const bytes = Buffer.from(await respuesta.arrayBuffer());
+          res.writeHead(200, {
+            'content-type': 'application/octet-stream',
+            'content-length': String(bytes.length),
+            'x-ovaultd-status': String(respuesta.status),
+          });
+          res.end(bytes);
+        } catch (error) {
+          const err = error as Error;
+          console.error(`[proxyFetch] fallo: ${err.message}`);
+          responder(res, { ok: false, error: { message: err.message, name: err.name } });
+        }
+      })();
+      return;
+    }
     let params: Record<string, unknown>;
     try {
       params = JSON.parse(Buffer.concat(partes).toString('utf8') || '{}') as Record<string, unknown>;
@@ -134,7 +208,21 @@ function manejarFs(req: IncomingMessage, res: ServerResponse, vault: NodeFileAda
       return;
     }
     try {
-      responder(res, { ok: true, result: ejecutarOp(vault, op, params) });
+      // Proxy binario: la página manda los bytes crudos y los metadatos en headers; acá
+      // se reenvían con node (evita el preflight CORS por URL y el base64 de 180 KB).
+      const resultado = ejecutarOp(vault, op, params);
+      // `proxyFetch` devuelve una promesa (el HTTP real corre en node, fuera del bridge).
+      if (resultado instanceof Promise) {
+        resultado.then(
+          (valor) => responder(res, { ok: true, result: valor }),
+          (error) => {
+            const err = error as Error;
+            responder(res, { ok: false, error: { message: err.message, name: err.name } });
+          },
+        );
+        return;
+      }
+      responder(res, { ok: true, result: resultado });
     } catch (error) {
       const err = error as Error;
       responder(res, { ok: false, error: { message: err.message, name: err.name } });

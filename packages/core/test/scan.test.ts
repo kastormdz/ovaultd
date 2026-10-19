@@ -133,6 +133,49 @@ describe('escaneo incremental (cache por mtime+size)', () => {
   });
 });
 
+describe('reads masivos (readMany)', () => {
+  it('usa UN solo round-trip para todo el vault (sin un read por archivo)', async () => {
+    let readManyLlamadas = 0;
+    let readsIndividuales = 0;
+    const archivos = ['a.md', 'b.md', 'c.md'];
+    const port = {
+      list: async () => archivos.map((name) => ({ name, isFile: true, isDirectory: false })),
+      read: async (ruta: string) => {
+        readsIndividuales += 1;
+        return new TextEncoder().encode(`contenido ${ruta}`);
+      },
+      stat: async () => ({ size: 12, mtimeMs: 1_700_000_000_000, isFile: true, isDirectory: false }),
+      readMany: async (rutas: string[]) => {
+        readManyLlamadas += 1;
+        return rutas.map((ruta) => new TextEncoder().encode(`contenido ${ruta}`));
+      },
+    } as unknown as FileSystemPort;
+
+    const entradas = await escanearVault(port, CLAVES);
+
+    expect(readManyLlamadas).toBe(1); // UN solo round-trip para los 3
+    expect(readsIndividuales).toBe(0); // ni un read suelto
+    expect(entradas).toHaveLength(3);
+  });
+
+  it('sin readMany en el port cae al bucle clásico de read', async () => {
+    let readsIndividuales = 0;
+    const port = {
+      list: async () => [{ name: 'a.md', isFile: true, isDirectory: false }],
+      read: async () => {
+        readsIndividuales += 1;
+        return new TextEncoder().encode('hola');
+      },
+      stat: async () => ({ size: 4, mtimeMs: 1, isFile: true, isDirectory: false }),
+    } as unknown as FileSystemPort;
+
+    const entradas = await escanearVault(port, CLAVES);
+
+    expect(readsIndividuales).toBe(1);
+    expect(entradas).toHaveLength(1);
+  });
+});
+
 describe('stat masivo (statMany)', () => {
   it('usa UN solo round-trip para todo el vault (sin un stat por archivo)', async () => {
     let statManyLlamadas = 0;
