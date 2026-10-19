@@ -10,7 +10,7 @@ use axum::{
 };
 use common::{TestContext, add_op, del_op, hex_lower, response_json};
 use ovaultd_protocol::{BatchOp, Op, PathId};
-use ovaultd_server::history;
+use ovaultd_server::{delta, history};
 
 /// Un `mod` es un `add` con otra op: la forma del op en el wire es la misma.
 fn mod_op(path: u8, blob: u8, size: u64) -> BatchOp {
@@ -294,6 +294,61 @@ async fn history_http_valida_token_y_path_id() -> Result<(), Box<dyn std::error:
         .authenticated_request(Method::GET, &snap_uri, Body::empty())
         .await?;
     assert_eq!(lista.status(), StatusCode::OK);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn rename_edit_conflict_preserves_both_versions() -> Result<(), Box<dyn std::error::Error>> {
+    // El escenario de dos dispositivos de la fase 5: uno EDITA «viejo» (rev 2) mientras el
+    // otro lo RENOMBRA a «nuevo» (rev 3, un `move` con `prev_path_id`). El server no pisa
+    // ninguna de las dos: la edición sigue en el oplog del path viejo Y la cadena de renames
+    // la alcanza bajo el nombre nuevo — conservar ambas versiones es el contrato.
+    let ctx = TestContext::new().await?;
+    ctx.registrar_blob(7, 10).await?;
+
+    ctx.commit(vec![add_op(10, 7, 10)], 0).await?;
+    let edicion = ctx.commit(vec![mod_op(10, 7, 20)], 1).await?;
+    let renombre = ctx.commit(vec![move_op(11, 10, 7, 20)], 2).await?;
+
+    // 1) Las DOS revisiones conviven en la delta que ven los demás dispositivos.
+    let pagina = delta::changes(&ctx.pool, ctx.vault_id, 0, 100).await?;
+    assert!(
+        pagina
+            .items
+            .iter()
+            .any(|item| item.rev == edicion.rev as u64 && item.op == Op::Mod),
+        "la edición del path viejo sigue en el oplog"
+    );
+    assert!(
+        pagina
+            .items
+            .iter()
+            .any(|item| item.rev == renombre.rev as u64 && item.op == Op::Move),
+        "el renombre llega como su propia revisión"
+    );
+
+    // 2) La historia del nombre VIEJO conserva la edición.
+    let historial_viejo = history::listar(&ctx.pool, ctx.vault_id, &[10u8; 32], None, 50).await?;
+    assert!(
+        historial_viejo
+            .items
+            .iter()
+            .any(|item| item.rev == edicion.rev && item.op == "mod"),
+        "la edición sigue accesible por el nombre viejo"
+    );
+
+    // 3) Y la historia del nombre NUEVO la alcanza por la cadena: renombrar no borra historia.
+    let historial_nuevo = history::listar(&ctx.pool, ctx.vault_id, &[11u8; 32], None, 50).await?;
+    assert_eq!(historial_nuevo.items[0].rev, renombre.rev);
+    assert_eq!(historial_nuevo.items[0].op, "move");
+    assert!(
+        historial_nuevo
+            .items
+            .iter()
+            .any(|item| item.rev == edicion.rev),
+        "la edición concurrente sigue alcanzable desde el nombre nuevo"
+    );
 
     Ok(())
 }

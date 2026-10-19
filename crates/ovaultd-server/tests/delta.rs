@@ -4,7 +4,9 @@
 
 mod common;
 
-use common::{add_op, TestContext};
+use base64::{engine::general_purpose::STANDARD, Engine as _};
+use common::{add_op, op_code, TestContext};
+use ovaultd_protocol::Op;
 use ovaultd_server::delta;
 
 #[tokio::test]
@@ -91,6 +93,84 @@ async fn since_fuera_de_ventana_pide_resync() -> Result<(), Box<dyn std::error::
     assert!(adentro.items.is_empty());
     assert_eq!(adentro.next_since, 2);
     assert_eq!(adentro.min_rev, None);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn historical_epoch_remains_verifiable() -> Result<(), Box<dyn std::error::Error>> {
+    // El epoch de cada revisión viaja FIRMADO en el registro (base de la fase 4: rotación de
+    // vault_key ⇒ el epoch del vault sube). Una revisión vieja debe seguir re-verificándose
+    // con EL EPOCH CON EL QUE SE FIRMÓ — y NO con el actual — aunque el vault haya rotado.
+    let ctx = TestContext::new().await?;
+    ctx.registrar_blob(5, 10).await?;
+
+    // Un add firmado con el epoch del contexto (1), commiteado por el MISMO camino del server.
+    let batch = ctx.batch_firmado(vec![add_op(5, 5, 10)], 0);
+    ovaultd_server::sync::commit::commit_batch(&ctx.pool, ctx.vault_id, ctx.device_id, &batch)
+        .await?;
+
+    // La rotación de época: el vault pasa a la 2 (los registros viejos conservan la suya).
+    sqlx::query("UPDATE vaults SET epoch = 2 WHERE id = ?")
+        .bind(ctx.vault_id)
+        .execute(&ctx.pool)
+        .await?;
+
+    // El delta entrega la firma histórica CON su epoch — no con el actual del vault.
+    let pagina = delta::changes(&ctx.pool, ctx.vault_id, 0, 10).await?;
+    let item = &pagina.items[0];
+    assert_eq!(item.epoch, 1, "el delta entrega el epoch histórico, no el actual");
+
+    // Reconstrucción como la haría un cliente: TODOS los campos salen del registro del delta.
+    let pubkey_bytes: Vec<u8> = sqlx::query_scalar("SELECT vault_pubkey FROM vaults WHERE id = ?")
+        .bind(ctx.vault_id)
+        .fetch_one(&ctx.pool)
+        .await?;
+    let pubkey: [u8; 32] = pubkey_bytes.try_into().expect("vault_pubkey son 32 bytes");
+    let sig: [u8; 64] = STANDARD
+        .decode(&item.sig)
+        .expect("sig b64")
+        .try_into()
+        .expect("sig son 64 bytes");
+    let t_mac: [u8; 64] = STANDARD
+        .decode(&item.t_mac)
+        .expect("t_mac b64")
+        .try_into()
+        .expect("t_mac son 64 bytes");
+
+    ovaultd_crypto::verify_record(
+        &pubkey,
+        item.path_id.as_bytes(),
+        item.blob_id.as_bytes(),
+        &t_mac,
+        op_code(item.op),
+        item.size,
+        item.mtime,
+        item.expected_rev,
+        item.operation_id.as_bytes(),
+        item.epoch, // 1: el epoch con el que se firmó
+        &sig,
+    )
+    .expect("la firma histórica verifica con SU epoch");
+
+    // Y con el epoch ACTUAL la firma vieja NO verifica: el histórico se valida con el suyo.
+    assert!(
+        ovaultd_crypto::verify_record(
+            &pubkey,
+            item.path_id.as_bytes(),
+            item.blob_id.as_bytes(),
+            &t_mac,
+            op_code(item.op),
+            item.size,
+            item.mtime,
+            item.expected_rev,
+            item.operation_id.as_bytes(),
+            2,
+            &sig,
+        )
+        .is_err(),
+        "con el epoch actual la firma histórica NO debe verificar"
+    );
 
     Ok(())
 }
