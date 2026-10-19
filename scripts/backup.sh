@@ -59,7 +59,9 @@ limpiar() {
     # fallado a mitad: el fallo del backup no puede convertirse en caída del servicio.
     if [ "$REINICIAR" = "1" ]; then
         echo "   levantando de nuevo: $START_CMD"
-        eval "$START_CMD" || echo "backup: OJO: el start-cmd falló; levantá el servicio a mano" >&2
+        # `bash -c` y NO `eval`: eval expande el comando DOS veces (un $VAR del
+        # comando se interpola antes y después); `bash -c --` lo ejecuta una sola vez.
+        bash -c -- "$START_CMD" || echo "backup: OJO: el start-cmd falló; levantá el servicio a mano" >&2
     fi
 }
 trap limpiar EXIT
@@ -69,7 +71,7 @@ nota() { printf '   %s\n' "$*"; }
 
 paso "deteniendo el servidor"
 if [ -n "$STOP_CMD" ]; then
-    eval "$STOP_CMD"
+    bash -c -- "$STOP_CMD"
     REINICIAR=1
     nota "detenido: $STOP_CMD"
 else

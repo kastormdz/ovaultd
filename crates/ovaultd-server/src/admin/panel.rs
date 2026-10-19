@@ -789,7 +789,7 @@ async fn mi_cuenta_post(
     if formulario.nueva != formulario.repetir {
         return pintar(Some(t.msg_passwords_no_coinciden.to_owned()), None);
     }
-    if formulario.nueva.chars().count() < 8 {
+    if crate::auth::password_debil(&formulario.nueva) {
         return pintar(Some(t.msg_password_corta.to_owned()), None);
     }
 

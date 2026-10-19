@@ -120,9 +120,12 @@ Dos formas, ambas válidas:
 
 ### Los cuatro puntos que cualquier borde tiene que respetar
 
-1. **Preservar el `Host`**: `POST /access` devuelve el `Host` que **ve el server** (`{host, rev}`)
-   y los clientes lo usan para subir. Si el proxy lo reescribe (`proxy_set_header Host $host;`
-   en nginx; default en NPM/Caddy/traefik), las URLs que guardan los clientes no resuelven.
+1. **Preservar el `Host`** (o fijarlo con `OVAULTD_PUBLIC_HOST`): `POST /access` devuelve el
+   host que **ve el server** (`{host, rev}`) y los clientes lo usan para subir. Con
+   `OVAULTD_PUBLIC_HOST=obs.ejemplo.com` el server devuelve SIEMPRE ese valor (recomendado
+   detrás de un borde: el `Host` del request es spoofeable y el cliente persiste lo que
+   aprende). Sin la variable, el proxy tiene que preservarlo (`proxy_set_header Host $host;`
+   en nginx; default en NPM/Caddy/traefik) o las URLs guardadas no resuelven.
 2. **WebSocket** (`GET /api/v1/ws`): passthrough de `Upgrade`/`Connection` y timeouts de vida
    larga (`proxy_read_timeout 1h`): la conexión queda abierta escuchando revisiones.
 3. **Tamaño y streaming**: `client_max_body_size 40m` y `proxy_request_buffering off` (los

@@ -51,6 +51,11 @@ impl Candidato {
 }
 
 /// Plan (dry-run): lo que `borrar` va a borrar. NUNCA escribe.
+///
+/// El CAS es GLOBAL por hash (un solo archivo para todos los vaults): una fila `refs = 0`
+/// de este vault sigue siendo un blob VIVO si otro vault tiene el mismo hash. Esos hashes
+/// no entran al plan — si se borraran del CAS, el vault ajeno queda en 404 con su índice
+/// mintiendo (`refs = 1`). `borrar` lo vuelve a verificar dentro de su transacción.
 pub async fn planificar(
     pool: &SqlitePool,
     vault: Option<i64>,
@@ -58,12 +63,13 @@ pub async fn planificar(
 ) -> Result<Vec<Candidato>> {
     let modificador = format!("-{gracia_minutos} minutes");
     let filas = sqlx::query_as::<_, (i64, Vec<u8>, i64, String)>(
-        "SELECT vault_id, hash, size, created_at
-         FROM blobs
-         WHERE refs = 0
-           AND (?1 IS NULL OR vault_id = ?1)
-           AND created_at <= datetime('now', ?2)
-         ORDER BY vault_id, hash",
+        "SELECT b.vault_id, b.hash, b.size, b.created_at
+         FROM blobs b
+         WHERE b.refs = 0
+           AND (?1 IS NULL OR b.vault_id = ?1)
+           AND b.created_at <= datetime('now', ?2)
+           AND (SELECT COUNT(*) FROM blobs o WHERE o.hash = b.hash) = 1
+         ORDER BY b.vault_id, b.hash",
     )
     .bind(vault)
     .bind(&modificador)
@@ -221,8 +227,16 @@ pub async fn borrar(
         .execute(&mut *tx)
         .await?;
         if resultado.rows_affected() == 1 {
-            bytes += candidato.size;
-            a_borrar.push(candidato.hash.clone());
+            // Defensa en profundidad (el plan pudo envejecer): el CAS es global por hash y
+            // borrarlo con OTRA fila viva deja a ese vault sin bytes (404 con refs = 1).
+            let referencias: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM blobs WHERE hash = ?")
+                .bind(&candidato.hash)
+                .fetch_one(&mut *tx)
+                .await?;
+            if referencias == 0 {
+                bytes += candidato.size;
+                a_borrar.push(candidato.hash.clone());
+            }
         }
     }
 

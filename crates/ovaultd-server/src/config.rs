@@ -30,6 +30,13 @@ pub struct Config {
     /// `off`: las métricas exponen la disponibilidad del proceso y no tienen por qué ser
     /// públicas.
     pub metrics: ModoMetrics,
+    /// Orígenes CORS permitidos (`OVAULTD_ALLOWED_ORIGINS`, CSV). Vacío = `*`
+    /// (desarrollo). En producción, la lista explícita que debe poder leer respuestas con
+    /// `Authorization` desde un navegador.
+    pub allowed_origins: Vec<String>,
+    /// Host que devuelve `/access` (`OVAULTD_PUBLIC_HOST`). Sin configurar se refleja el
+    /// `Host` del request; con esto, el cliente aprende SIEMPRE el host del despliegue.
+    pub public_host: Option<String>,
 }
 
 /// Modo de exposición de `/metrics`.
@@ -120,6 +127,20 @@ impl Config {
             }
         };
 
+        let allowed_origins: Vec<String> = valor(&get, "OVAULTD_ALLOWED_ORIGINS")
+            .map(|texto| {
+                texto
+                    .split(',')
+                    .map(|origen| origen.trim().to_owned())
+                    .filter(|origen| !origen.is_empty())
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        let public_host = valor(&get, "OVAULTD_PUBLIC_HOST")
+            .map(|host| host.trim().to_owned())
+            .filter(|host| !host.is_empty());
+
         Ok(Self {
             bind_addr,
             database_path,
@@ -131,6 +152,8 @@ impl Config {
             secure_cookies,
             trust_proxy,
             metrics,
+            allowed_origins,
+            public_host,
         })
     }
 }

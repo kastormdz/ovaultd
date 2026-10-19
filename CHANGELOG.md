@@ -5,6 +5,48 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y e
 [semver](https://semver.org/lang/es/): server y plugin viajan en un **release train** (mismo
 `MAJOR.MINOR` = pareja probada junta; ver ADR-0018 y la sección «Compatibilidad» del README).
 
+## [0.2.10] — 2026-10-19
+
+Remediación de la segunda auditoría (F-01…F-11). Sin cambios de contrato: wire `v2`, API
+`v1` y el comportamiento del cliente legítimo quedan igual.
+
+### Fixed
+
+- **F-01 (High, pérdida de datos) — el GC borraba del CAS un blob vivo de otro vault.**
+  El CAS es global por hash; `gc::planificar` ahora excluye los hashes con más de una fila
+  `blobs` y `gc::borrar` re-verifica `COUNT(*) WHERE hash = ?` dentro de su transacción.
+  Antes, dos vaults con el mismo contenido + `gc --delete` dejaban al vault sano en 404 con
+  su índice mintiendo.
+- **F-02 — `changes` traía el oplog entero a RAM.** Corte por revisión: se miran los
+  tamaños (una fila por revisión) y se traen solo las filas que entran; `limit = 0` se
+  clampea a 1 (antes significaba «traeme todo»). La primera revisión entra siempre, aunque
+  sola supere el limit.
+- **F-03 — snapshots sin tope.** 100 snapshots y 64 MB de manifests por vault (reserva
+  atómica en el INSERT) + etiqueta ≤ 128 caracteres.
+- **F-06 — Argon2id con parámetros explícitos** (m=64 MiB, t=3, p=4; antes `default()`,
+  m=19 MiB t=2) y política de password de **12** caracteres + lista local de comunes. Los
+  hashes existentes siguen verificando (el verify lee los parámetros del PHC).
+- **F-08 — topes de nombre** (device/platform 128, vault 256, sin saltos de línea).
+
+### Added
+
+- **`OVAULTD_ALLOWED_ORIGINS`** (CORS): CSV de orígenes; vacío = `*` (desarrollo).
+- **`OVAULTD_PUBLIC_HOST`**: host que devuelve `/access` (detrás de un borde el `Host` del
+  request es spoofeable y el cliente persiste lo que aprende).
+- **F-10**: `GET /vaults` devuelve el rol real de `vault_members` (fallback `owner`).
+- **F-11**: barrido de subidas abandonadas cada hora (antes solo al crear una subida).
+
+### Changed
+
+- **F-09**: WebSocket con timeout de inactividad de 5 minutos y máximo 4 transferencias
+  simultáneas por conexión.
+- **F-07**: `backup.sh` usa `bash -c --` en vez de `eval` (elimina la doble expansión).
+
+### Tests
+
+- `tests/auditoria_2026_10_19.rs`: regresión de F-01, F-02, F-03, F-06, F-08 y F-10.
+- Server **197/197**, workspace **227/227**, `xtask protocol-check` verde.
+
 ## [0.2.9] — 2026-10-19
 
 ### Changed

@@ -467,7 +467,7 @@ pub static ES: Textos = Textos {
     setup_ok: "Cuenta creada",
     setup_ok_ayuda: "Entrá con tu cliente (email + esta password) y creá tu primer vault: la password de cifrado la definís ahí, no acá. Esta página queda desactivada.",
     setup_email_invalido: "Ese email no parece válido: volvé atrás y corregilo.",
-    setup_password_corta: "Usá al menos 8 caracteres para la password de la cuenta.",
+    setup_password_corta: "Usá al menos 12 caracteres para la password de la cuenta (nada de contraseñas obvias).",
 };
 
 /// Devuelve los textos del idioma configurado (hoy: siempre español).

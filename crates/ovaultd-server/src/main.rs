@@ -65,7 +65,30 @@ async fn iniciar_servidor() -> Result<(), String> {
         limitador_login: Default::default(),
         notifier: std::sync::Arc::new(ovaultd_server::storage::Notifier::new()),
     };
+    let app_pool = estado.pool.clone();
+    let app_cas_raiz = estado.config.cas_root.clone();
     let app = routes::router(estado);
+
+    // Barrido periódico de subidas abandonadas: `crear_upload` barre, pero un server en
+    // reposo (sin subidas nuevas) acumulaba `.part` y reservas de cuota vencidas para
+    // siempre. Una hora; el primer tick NO es inmediato (no compite con el arranque).
+    {
+        let pool_barrido = app_pool.clone();
+        let cas_raiz = app_cas_raiz.clone();
+        tokio::spawn(async move {
+            let periodo = std::time::Duration::from_secs(3600);
+            let mut intervalo = tokio::time::interval_at(tokio::time::Instant::now() + periodo, periodo);
+            intervalo.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            loop {
+                intervalo.tick().await;
+                match ovaultd_server::uploads::barrer(&pool_barrido, &cas_raiz).await {
+                    Ok(0) => {}
+                    Ok(borradas) => tracing::info!(borradas, "barrido de subidas abandonadas"),
+                    Err(error) => tracing::warn!(%error, "barrido de subidas falló"),
+                }
+            }
+        });
+    }
 
     let listener = tokio::net::TcpListener::bind(&bind_addr)
         .await

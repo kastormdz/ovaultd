@@ -73,51 +73,66 @@ pub async fn changes(
         });
     }
 
+    // `LIMIT` REAL, por REVISIÓN y no por fila: el contrato es no partir una revisión, así
+    // que primero se miran los tamaños (una fila por revisión, barato aun con 100k) y
+    // después se traen SOLO las filas de las revisiones que entran. Antes se traía el oplog
+    // entero y se recortaba en memoria.
+    let maximo = limit.clamp(1, 1000);
+    let grupos: Vec<(i64, i64)> = sqlx::query_as(
+        "SELECT rev, COUNT(*) FROM revisions
+         WHERE vault_id = ? AND rev > ?
+         GROUP BY rev
+         ORDER BY rev
+         LIMIT ?",
+    )
+    .bind(vault_id)
+    .bind(since)
+    .bind(maximo + 1)
+    .fetch_all(pool)
+    .await?;
+
+    let mut total = 0i64;
+    let mut corte = None;
+    for (rev, cuantos) in &grupos {
+        // La PRIMERA revisión entra siempre (aunque sola supere el limit): si no, un lote
+        // grande bloquearía el pull para siempre.
+        if total > 0 && total + cuantos > maximo {
+            break;
+        }
+        total += cuantos;
+        corte = Some(*rev);
+    }
+
+    let Some(corte) = corte else {
+        return Ok(Changes {
+            items: Vec::new(),
+            next_since: checked_revision(since, "since")?,
+            min_rev: None,
+        });
+    };
+
     let rows = sqlx::query(
         "SELECT rev, path_id, op, path_enc, prev_path_id,
                 blob_hash, t_mac, sig, epoch, size, mtime,
                 operation_id, expected_rev
          FROM revisions
-         WHERE vault_id = ? AND rev > ?
+         WHERE vault_id = ? AND rev > ? AND rev <= ?
          ORDER BY rev, path_id",
     )
     .bind(vault_id)
     .bind(since)
+    .bind(corte)
     .fetch_all(pool)
     .await?;
 
-    let mut items = Vec::new();
-    let mut next_since = since;
-    let mut index = 0;
-
-    while index < rows.len() {
-        let revision = rows[index].get::<i64, _>("rev");
-        let mut end = index + 1;
-
-        while end < rows.len() && rows[end].get::<i64, _>("rev") == revision {
-            end += 1;
-        }
-
-        let revision_len = end - index;
-        let can_append = items.is_empty()
-            || limit <= 0
-            || (items.len() as i64 + revision_len as i64 <= limit);
-
-        if !can_append {
-            break;
-        }
-
-        for row in &rows[index..end] {
-            items.push(registro_de_fila(row)?);
-        }
-
-        next_since = revision;
-        index = end;
+    let mut items = Vec::with_capacity(rows.len());
+    for row in &rows {
+        items.push(registro_de_fila(row)?);
     }
 
     Ok(Changes {
         items,
-        next_since: checked_revision(next_since, "next_since")?,
+        next_since: checked_revision(corte, "next_since")?,
         min_rev: None,
     })
 }

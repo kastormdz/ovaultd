@@ -196,6 +196,16 @@ fn snapshot_desde_fila(fila: &sqlx::sqlite::SqliteRow) -> Result<Snapshot> {
     })
 }
 
+/// Tope de snapshots por vault. Un snapshot congela el manifest completo y suma una
+/// referencia a cada blob (bloquea el GC): sin tope, una cuenta autenticada infla la base
+/// y el disco sin límite, y los blobs quedan protegidos para siempre.
+const MAX_SNAPSHOTS_POR_VAULT: i64 = 100;
+/// Cuota de bytes de manifests por vault (100 snapshots de un vault grande no son 100
+/// filas chicas: el manifest es proporcional al número de archivos).
+const MAX_BYTES_MANIFEST: i64 = 64 * 1024 * 1024;
+/// Tope de la etiqueta visible (va al listado y al HTML del panel).
+const MAX_LABEL: usize = 128;
+
 /// Crea un snapshot etiquetado sobre un corte coherente en `rev` (default: el head,
 /// clampeado al head si piden uno futuro). El manifest sale del índice (`files` vivos
 /// a esa revisión) y cada blob suma una referencia en la MISMA transacción.
@@ -216,6 +226,15 @@ pub async fn crear_snapshot(
     .ok_or(ServerError::NotFound)?;
 
     let rev = rev.unwrap_or(head_rev).clamp(0, head_rev);
+
+    let label = label.map(|texto| texto.trim().to_owned());
+    if let Some(ref texto) = label {
+        if texto.chars().count() > MAX_LABEL {
+            return Err(ServerError::Invalid(format!(
+                "la etiqueta del snapshot supera {MAX_LABEL} caracteres"
+            )));
+        }
+    }
 
     let mut tx = pool.begin().await?;
 
@@ -241,17 +260,31 @@ pub async fn crear_snapshot(
     let manifest_json = serde_json::to_string(&manifest)
         .map_err(|error| ServerError::Invalid(format!("manifest no serializable: {error}")))?;
 
+    // Reserva ATÓMICA del cupo (cantidad + bytes) dentro del mismo INSERT: dos snapshots
+    // simultáneos no pueden pasar los dos el chequeo. Si no hay cupo, `fetch_optional`
+    // devuelve None y la transacción se descarta sin tocar `refs`.
     let fila = sqlx::query(
         "INSERT INTO snapshots (vault_id, rev, label, manifest)
-         VALUES (?, ?, ?, ?)
+         SELECT ?1, ?2, ?3, ?4
+         WHERE (SELECT COUNT(*) FROM snapshots WHERE vault_id = ?1) < ?5
+           AND (SELECT COALESCE(SUM(length(manifest)), 0) FROM snapshots WHERE vault_id = ?1)
+               + length(?4) <= ?6
          RETURNING id, rev, label, created_at, manifest",
     )
     .bind(vault_id)
     .bind(rev)
     .bind(label.as_deref())
     .bind(&manifest_json)
-    .fetch_one(&mut *tx)
-    .await?;
+    .bind(MAX_SNAPSHOTS_POR_VAULT)
+    .bind(MAX_BYTES_MANIFEST)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or_else(|| {
+        ServerError::Invalid(format!(
+            "límite de snapshots del vault alcanzado ({MAX_SNAPSHOTS_POR_VAULT} snapshots \
+             o 64 MB de manifests): borrá uno viejo antes de crear otro"
+        ))
+    })?;
 
     for blob_hex in manifest.values() {
         if let Some(bytes) = decodificar_hex32(blob_hex) {

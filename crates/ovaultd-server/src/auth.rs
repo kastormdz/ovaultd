@@ -85,8 +85,37 @@ fn is_unique_violation(error: &sqlx::Error) -> bool {
     }
 }
 
+/// Mínimo de la password de CUENTA. Solo aplica a altas y cambios: las passwords
+/// existentes no se invalidan (el verify lee los parámetros del propio PHC).
+pub const MIN_PASSWORD: usize = 12;
+
+/// Las más usadas del mundo (y las locales obvias), en minúsculas. Lista corta y local:
+/// el chequeo contra HIBP exige una dependencia HTTP saliente y el server tiene que poder
+/// correr air-gapped. Con el mínimo de 12 esto filtra lo que un atacante prueba primero.
+const PASSWORDS_COMUNES: &[&str] = &[
+    "123456789012", "1234567890123", "password1234", "password123!", "qwertyuiop12",
+    "qwerty123456", "administrador", "contraseña123", "contrasena123", "admin1234567",
+    "iloveyou1234", "micontrasena", "mipassword12", "argentina2024", "argentina2025",
+    "cambiar12345", "temporal1234", "bienvenido12", "welcome12345", "letmein12345",
+    "superman1234", "batman123456", "futbol123456", "riverplate12", "bocajuniors",
+    "monotributo1", "computadora1", "windows12345", "android12345", "samsung12345",
+    "correo123456", "usuario12345", "privado12345", "secreto12345", "seguridad123",
+];
+
+/// `true` si la password no cumple la política mínima (largo o lista de comunes).
+pub fn password_debil(password: &str) -> bool {
+    password.chars().count() < MIN_PASSWORD
+        || PASSWORDS_COMUNES.contains(&password.to_lowercase().as_str())
+}
+
 pub fn hash_password(password: &str) -> Result<String> {
-    Argon2::default()
+    // Argon2id con parámetros EXPLÍCITOS: `default()` es m=19 MiB, t=2, p=1 (el mínimo del
+    // RFC 9106, no el recomendado). m=64 MiB · t=3 · p=4 es el mismo costo que la KEK del
+    // vault (sync2): ~50 ms acá y ~50 ms por candidato del atacante.
+    let parametros = argon2::Params::new(65_536, 3, 4, Some(32))
+        .map_err(|error| ServerError::Invalid(format!("parámetros de Argon2 inválidos: {error}")))?;
+    let argon = Argon2::new(argon2::Algorithm::Argon2id, argon2::Version::V0x13, parametros);
+    argon
         .hash_password(password.as_bytes())
         .map(|phc| phc.to_string())
         .map_err(|error| {

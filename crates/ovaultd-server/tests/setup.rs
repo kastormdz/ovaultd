@@ -53,6 +53,8 @@ impl Contexto {
             secure_cookies: ovaultd_server::config::ModoSecureCookies::Auto,
             trust_proxy: true,
             metrics: ovaultd_server::config::ModoMetrics::On,
+            allowed_origins: Vec::new(),
+            public_host: None,
         };
         let cas = Arc::new(CasStore::new(cas_dir.path().to_path_buf())?);
 

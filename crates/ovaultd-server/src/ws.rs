@@ -28,6 +28,12 @@ use crate::{
 };
 
 const PROTOCOL_VERSION: u64 = 1;
+
+/// Inactividad máxima sin un solo frame del cliente: reconecta solo y retoma por el oplog;
+/// una conexión idle para siempre ocupa un fd y una tarea.
+const INACTIVIDAD: std::time::Duration = std::time::Duration::from_secs(300);
+/// Transferencias simultáneas por conexión: cada `blob_head` reserva `len` bytes.
+const MAX_TRANSFERS: usize = 4;
 const MAX_INLINE_BLOB_BYTES: usize = 1024 * 1024;
 
 #[derive(Debug, Deserialize)]
@@ -451,6 +457,13 @@ impl Connection {
             ));
         }
 
+        if self.transfers.len() >= MAX_TRANSFERS {
+            return Err(WsFailure::close(
+                ErrorCode::BadRequest,
+                "demasiadas transferencias abiertas en esta conexión",
+            ));
+        }
+
         self.transfers.insert(
             head.transfer,
             BlobTransfer {
@@ -798,7 +811,10 @@ async fn websocket_with_connection(socket: WebSocket, mut connection: Connection
 
         let message = if let Some(canal) = avisos.as_mut() {
             tokio::select! {
-                message = stream.next() => message,
+                message = tokio::time::timeout(INACTIVIDAD, stream.next()) => match message {
+                    Ok(message) => message,
+                    Err(_) => break,
+                },
                 aviso = canal.recv() => {
                     match aviso {
                         // El eco de mi propio batch no sirve: el pull que dispararía no traería
@@ -823,7 +839,10 @@ async fn websocket_with_connection(socket: WebSocket, mut connection: Connection
                 }
             }
         } else {
-            stream.next().await
+            match tokio::time::timeout(INACTIVIDAD, stream.next()).await {
+                Ok(message) => message,
+                Err(_) => break,
+            }
         };
 
         let Some(message) = message else { break };

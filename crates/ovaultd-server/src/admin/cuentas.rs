@@ -275,7 +275,7 @@ async fn cuentas_crear(
     if !email.contains('@') || email.len() > 254 {
         return volver(t.msg_email_invalido, true);
     }
-    if formulario.password.chars().count() < 8 {
+    if crate::auth::password_debil(&formulario.password) {
         return volver(t.msg_password_corta, true);
     }
 
@@ -798,7 +798,7 @@ async fn register_post(
     if formulario.password != formulario.repetir {
         return pintar(Some(t.msg_passwords_no_coinciden.to_owned()), false);
     }
-    if formulario.password.chars().count() < 8 {
+    if crate::auth::password_debil(&formulario.password) {
         return pintar(Some(t.msg_password_corta.to_owned()), false);
     }
 
@@ -929,7 +929,7 @@ async fn reset_post(
             fila.email,
         );
     }
-    if formulario.nueva.chars().count() < 8 {
+    if crate::auth::password_debil(&formulario.nueva) {
         return pintar(Some(t.msg_password_corta.to_owned()), false, true, fila.email);
     }
 

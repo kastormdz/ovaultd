@@ -20,7 +20,7 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 use sqlx::{FromRow, SqlitePool};
 use ovaultd_protocol::BlobId;
-use tower_http::cors::{Any, CorsLayer};
+use tower_http::cors::{AllowOrigin, CorsLayer};
 
 use askama::Template;
 
@@ -48,6 +48,20 @@ pub struct EstadoServidor {
 pub fn router(estado: EstadoServidor) -> Router {
     // Marca de arranque para `/metrics` (idempotente: el primer router montado manda).
     let _ = ARRANQUE.set(std::time::Instant::now());
+
+    // CORS: sin `OVAULTD_ALLOWED_ORIGINS` sigue siendo `*` (el plugin no manda `Origin`);
+    // con la lista, solo esos orígenes pueden leer respuestas autenticadas desde un navegador.
+    let origen_permitido = if estado.config.allowed_origins.is_empty() {
+        AllowOrigin::any()
+    } else {
+        AllowOrigin::list(
+            estado
+                .config
+                .allowed_origins
+                .iter()
+                .filter_map(|origen| origen.parse::<axum::http::HeaderValue>().ok()),
+        )
+    };
 
     // El middleware de la IP del cliente lleva su propia copia del estado (el router se
     // queda con la otra en `with_state`).
@@ -128,7 +142,7 @@ pub fn router(estado: EstadoServidor) -> Router {
             // el origen comodín no habilita CSRF, y sin esto el fetch queda bloqueado
             // (el upgrade del WS no pasa por CORS y por eso no lo cubre).
             CorsLayer::new()
-                .allow_origin(Any)
+                .allow_origin(origen_permitido)
                 // Sin `max_age` el navegador NO cachea el preflight: cada PUT de blob paga
                 // un OPTIONS extra (~40 ms en loopback, el doble de requests). El bench de
                 // subida lo delató: ~80 ms por nota con /healthz respondiendo en 1 ms.
@@ -378,7 +392,7 @@ async fn setup_crear(
         ));
     }
 
-    if formulario.password.chars().count() < 8 {
+    if crate::auth::password_debil(&formulario.password) {
         return Ok(render_setup(
             StatusCode::BAD_REQUEST,
             PlantillaSetup {
@@ -683,6 +697,9 @@ struct VaultRow {
     id: i64,
     name: String,
     head_rev: i64,
+    /// Rol real de `vault_members` (hoy el único miembro es el dueño; el fallback cubre
+    /// los vaults creados antes de la tabla).
+    role: String,
 }
 
 async fn listar_vaults(
@@ -690,10 +707,11 @@ async fn listar_vaults(
     autenticado: Autenticado,
 ) -> Result<Json<Vec<VaultResponse>>> {
     let vaults = sqlx::query_as::<_, VaultRow>(
-        "SELECT id, name, head_rev
-         FROM vaults
-         WHERE account_id = ?
-         ORDER BY id",
+        "SELECT v.id, v.name, v.head_rev, COALESCE(m.role, 'owner') AS role
+         FROM vaults v
+         LEFT JOIN vault_members m ON m.vault_id = v.id AND m.account_id = v.account_id
+         WHERE v.account_id = ?
+         ORDER BY v.id",
     )
     .bind(autenticado.account_id)
     .fetch_all(&state.pool)
@@ -705,7 +723,7 @@ async fn listar_vaults(
             .map(|vault| VaultResponse {
                 id: vault.id,
                 name: vault.name,
-                role: "owner".to_owned(),
+                role: vault.role,
                 rev: vault.head_rev,
             })
             .collect(),
@@ -757,6 +775,7 @@ async fn crear_vault(
     headers: HeaderMap,
     Json(request): Json<CreateVaultRequest>,
 ) -> Result<axum::response::Response> {
+    let name = validar_nombre(&request.name, "name", 256)?;
     let salt = decode_bytes(&request.salt, "salt")?;
     let wrapped_key_pw = decode_bytes(&request.wrapped_key_pw, "wrapped_key_pw")?;
     let wrapped_key_rc = request
@@ -792,7 +811,7 @@ async fn crear_vault(
          RETURNING id",
     )
     .bind(autenticado.account_id)
-    .bind(&request.name)
+    .bind(&name)
     .bind(salt)
     .bind(request.kdf_params.to_string())
     .bind(wrapped_key_pw)
@@ -1126,11 +1145,15 @@ async fn access(
     .fetch_one(&state.pool)
     .await?;
 
-    let host = headers
-        .get(HOST)
-        .and_then(|value| value.to_str().ok())
-        .map(str::to_owned)
-        .unwrap_or_else(|| state.config.bind_addr.clone());
+    // `OVAULTD_PUBLIC_HOST` manda: detrás de un borde el `Host` del request es spoofeable,
+    // y el cliente persiste lo que aprende acá. Sin configurar se mantiene el Host (compat).
+    let host = state.config.public_host.clone().unwrap_or_else(|| {
+        headers
+            .get(HOST)
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_owned)
+            .unwrap_or_else(|| state.config.bind_addr.clone())
+    });
 
     Ok(Json(serde_json::json!({
         "host": host,
@@ -1155,7 +1178,9 @@ async fn changes(
     resolve_vault(&state.pool, autenticado.account_id, vault_id).await?;
 
     let since = query.since.unwrap_or(0);
-    let limit = query.limit.unwrap_or(100).clamp(0, 1000);
+    // `limit = 0` ya no significa "traeme el oplog entero": el mínimo es 1 (el cliente
+    // manda 100 por defecto; este era un agujero para una cuenta autenticada).
+    let limit = query.limit.unwrap_or(100).clamp(1, 1000);
 
     Ok(Json(
         delta::changes(&state.pool, vault_id, since, limit).await?,
@@ -1666,6 +1691,26 @@ async fn listar_devices(
     ))
 }
 
+/// Nombre visible (device, platform, vault): sin vacíos, sin saltos de línea (CWE-117 en
+/// los logs) y con tope. Askama escapa el HTML, así que esto es higiene de datos, no XSS.
+fn validar_nombre(texto: &str, campo: &str, maximo: usize) -> Result<String> {
+    let limpio = texto.trim();
+    if limpio.is_empty() {
+        return Err(ServerError::Invalid(format!("{campo} no puede estar vacío")));
+    }
+    if limpio.chars().count() > maximo {
+        return Err(ServerError::Invalid(format!(
+            "{campo} supera {maximo} caracteres"
+        )));
+    }
+    if limpio.contains(['\n', '\r']) {
+        return Err(ServerError::Invalid(format!(
+            "{campo} no puede tener saltos de línea"
+        )));
+    }
+    Ok(limpio.to_owned())
+}
+
 #[derive(Debug, Deserialize)]
 struct CreateDeviceRequest {
     name: String,
@@ -1678,11 +1723,17 @@ async fn crear_device(
     autenticado: Autenticado,
     Json(request): Json<CreateDeviceRequest>,
 ) -> Result<(StatusCode, Json<Value>)> {
+    let name = validar_nombre(&request.name, "name", 128)?;
+    let platform = request
+        .platform
+        .as_deref()
+        .map(|valor| validar_nombre(valor, "platform", 128))
+        .transpose()?;
     let token = auth::emitir_device(
         &state.pool,
         autenticado.account_id,
-        &request.name,
-        request.platform.as_deref(),
+        &name,
+        platform.as_deref(),
     )
     .await?;
 
