@@ -132,3 +132,34 @@ describe('escaneo incremental (cache por mtime+size)', () => {
     expect(entradas[0]!.contentHash).not.toBe('f'.repeat(64));
   });
 });
+
+describe('stat masivo (statMany)', () => {
+  it('usa UN solo round-trip para todo el vault (sin un stat por archivo)', async () => {
+    let statManyLlamadas = 0;
+    let statsIndividuales = 0;
+    const archivos = ['a.md', 'b.md', 'c.md'];
+    const port = {
+      list: async () => archivos.map((name) => ({ name, isFile: true, isDirectory: false })),
+      read: async (ruta: string) => new TextEncoder().encode(`contenido ${ruta}`),
+      stat: async () => {
+        statsIndividuales += 1;
+        return { size: 12, mtimeMs: 1_700_000_000_000, isFile: true, isDirectory: false };
+      },
+      statMany: async (rutas: string[]) => {
+        statManyLlamadas += 1;
+        return rutas.map(() => ({
+          size: 12,
+          mtimeMs: 1_700_000_000_000,
+          isFile: true,
+          isDirectory: false,
+        }));
+      },
+    } as unknown as FileSystemPort;
+
+    const entradas = await escanearVault(port, CLAVES);
+
+    expect(statManyLlamadas).toBe(1); // UN solo round-trip para los 3
+    expect(statsIndividuales).toBe(0); // ni un stat suelto
+    expect(entradas).toHaveLength(3);
+  });
+});

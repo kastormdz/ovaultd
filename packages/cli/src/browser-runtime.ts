@@ -85,6 +85,11 @@ function ejecutarOp(vault: NodeFileAdapter, op: string, p: Record<string, unknow
   switch (op) {
     case 'stat':
       return vault.stat(String(p.path));
+    case 'statMany': {
+      // Stat masivo en UN request: el escaneo del CLI dejaba de pagar 1000 round-trips.
+      const rutas = Array.isArray(p.paths) ? (p.paths as string[]) : [];
+      return { stats: rutas.map((ruta) => vault.stat(ruta)) };
+    }
     case 'read':
       return { b64: Buffer.from(vault.read(String(p.path))).toString('base64') };
     case 'writeTemp':
