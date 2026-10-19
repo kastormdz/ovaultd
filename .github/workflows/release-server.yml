@@ -150,16 +150,6 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      # Docker Hub además de GHCR. Condicional vía env: los `secrets` no se pueden evaluar en un
-      # `if` de step, pero sí pasarse por env. Sin el secret el release publica sólo en GHCR (una
-      # integración sin configurar no puede tumbar la release).
-      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4
-        env:
-          DOCKERHUB_USER: ${{ secrets.DOCKERHUB_USERNAME }}
-        if: env.DOCKERHUB_USER != ''
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
       - name: Publicar en GHCR la imagen que PASÓ el E2E
         run: |
           vers="${{ needs.preflight.outputs.version }}"
@@ -170,17 +160,6 @@ jobs:
           docker push "ghcr.io/${{ github.repository }}:$vers"
           docker push "ghcr.io/${{ github.repository }}:latest"
           docker image inspect "ghcr.io/${{ github.repository }}:$vers" --format 'imagen publicada: {{.Id}} ({{.Size}} bytes)'
-          # La misma imagen, además, en Docker Hub: sale del mismo `ovaultd:dev` que el E2E
-          # levantó, así que el digest es idéntico. Nunca se construye una gemela para publicar.
-          if [ -n "$DOCKERHUB_USER" ]; then
-            docker tag ovaultd:dev "$DOCKERHUB_USER/ovaultd:$vers"
-            docker tag ovaultd:dev "$DOCKERHUB_USER/ovaultd:latest"
-            docker push "$DOCKERHUB_USER/ovaultd:$vers"
-            docker push "$DOCKERHUB_USER/ovaultd:latest"
-            docker image inspect "$DOCKERHUB_USER/ovaultd:$vers" --format 'imagen publicada en Docker Hub: {{.Id}}'
-          else
-            echo "Docker Hub: sin DOCKERHUB_USERNAME/DOCKERHUB_TOKEN; se publica sólo en GHCR."
-          fi
 
   release:
     needs: [preflight, binario, imagen]

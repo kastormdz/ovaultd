@@ -21,10 +21,11 @@ defecto y no necesita proxy para funcionar.
 Distribución: `OVAULTD_IMAGE=repositorio@sha256:<digest>` de una imagen **publicada real** (nunca
 un digest inventado) y `docker compose -f compose.yaml up -d`, sin el overlay de desarrollo.
 
-Cada release publica la MISMA imagen que pasó el E2E en dos registries (digest idéntico: se
-re-taggea, no se reconstruye): `ghcr.io/kastormdz/ovaultd` y `docker.io/kastormdz/ovaultd`. Docker
-Hub necesita los secrets `DOCKERHUB_USERNAME` y `DOCKERHUB_TOKEN` en el repo; sin ellos el release
-publica sólo en GHCR y lo deja dicho en el log del job.
+Cada release publica la MISMA imagen que pasó el E2E (se re-taggea, no se reconstruye) en
+`ghcr.io/kastormdz/ovaultd`, con el tag de la versión (`X.Y.Z`, sin el prefijo `server-v`, que es
+el tag de git) y `latest`. El digest a pinear es el del **manifest** (`docker manifest inspect` o
+`docker inspect --format '{{index .RepoDigests 0}}'` tras un pull por tag), no el `{{.Id}}` que
+imprime el log.
 
 ### Dos cosas que rompen en la primera puesta en producción
 
