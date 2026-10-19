@@ -209,6 +209,26 @@ describe('merge 3-vías integrado al apply', () => {
     expect(caso.base.get(PATH_ID)?.rev).toBe(3);
   });
 
+  it('modo espejo (forzar): pisa el local y resguarda lo descartado en .ovaultd-descartes', async () => {
+    const caso = armarCaso({ local: OURS_TEXTO, remoto: THEIRS_TEXTO });
+
+    // El pull del modo mirror-remote aplica con `forzar`: la versión del server manda.
+    const resultado = await applyRevision(caso.deps, caso.revision, caso.storedRemoto, {
+      forzar: true,
+    });
+    expect(['applied', 'merged']).toContain(resultado.status);
+
+    // El archivo quedó con la versión del SERVER…
+    expect(dec.decode(caso.files.get(PATH))).toBe(THEIRS_TEXTO);
+    // …y lo descartado está resguardado en `.ovaultd-descartes/<sello>/nota.md`
+    // (carpeta vetada por el filtro: jamás vuelve al server).
+    const descartes = [...caso.files.entries()].filter(([ruta]) =>
+      ruta.startsWith('.ovaultd-descartes/'),
+    );
+    expect(descartes).toHaveLength(1);
+    expect(dec.decode(descartes[0]![1])).toBe(OURS_TEXTO);
+  });
+
   it('sin conexión no fusiona: el bloqueo explícito de siempre', async () => {
     const caso = armarCaso({ local: OURS_TEXTO, remoto: THEIRS_TEXTO });
     const { conn: _sin, ...depsSinConn } = caso.deps;

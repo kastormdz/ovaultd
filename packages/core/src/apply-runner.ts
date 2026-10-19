@@ -328,6 +328,10 @@ export async function applyRevision(
     if (revision.deleted) {
       if (verdict !== 'already-gone') await port.unlink(revision.path);
     } else if (verdict !== 'identical') {
+      // Modo espejo (forzar): el contenido local que el pull pisa se resguarda antes.
+      if (opciones.forzar === true) {
+        await resguardarDescartes(port, revision.path);
+      }
       const dir = dirVault(revision.path);
       if (dir !== '.') await port.mkdirp(dir);
       const { tempName } = await port.writeTemp(dir, plaintext!);
@@ -399,6 +403,32 @@ async function commitDesdeIntento(deps: ApplyDeps, intent: IntentEntry): Promise
     },
     checkpoint: { since: intent.rev, minRev: null },
   });
+}
+
+/**
+ * Sello del proceso para las copias de descartes del modo espejo: un solo directorio
+ * por corrida. `.ovaultd-descartes/` está vetado por el filtro: jamás se sube.
+ */
+const SELLO_DESCARTES = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+const DIR_DESCARTES = '.ovaultd-descartes';
+
+/**
+ * Modo espejo: antes de pisar un archivo local con la versión del server, el contenido
+ * local que se descarta se resguarda en `.ovaultd-descartes/<sello>/<path>`. Es la
+ * "protección local antes de descartar cambios" del plan (fase 3, paso 5).
+ */
+async function resguardarDescartes(port: FileSystemPort, relPath: string): Promise<void> {
+  if (relPath === '' || relPath.endsWith('/')) return; // carpetas: no hay contenido
+  try {
+    const actual = await port.read(relPath);
+    const destino = `${DIR_DESCARTES}/${SELLO_DESCARTES}/${relPath}`;
+    const dir = dirVault(destino);
+    await port.mkdirp(dir);
+    const { tempName } = await port.writeTemp(dir, actual);
+    await port.rename(tempName, destino);
+  } catch {
+    // Sin local (alta) o ilegible: no hay nada que resguardar y el apply sigue igual.
+  }
 }
 
 /**

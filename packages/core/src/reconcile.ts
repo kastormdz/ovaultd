@@ -36,7 +36,7 @@ const sinBlob = (blobIdB64: string): boolean => {
 };
 
 async function aplicarRegistro(
-  deps: ApplyDeps,
+  deps: ApplyDeps & { forzar?: boolean },
   conn: SyncConnection,
   registro: SignedRecordWire,
 ): Promise<{ aplicado: boolean; bloqueado?: { reason?: string } }> {
@@ -72,7 +72,9 @@ async function aplicarRegistro(
 
   // La conexión viaja en los deps: es lo que le permite al apply intentar la fusión
   // 3-vías (bajar el blob de la base del CAS) cuando el guard bloquea por "ambos cambiaron".
-  const resultado = await applyRevision({ ...deps, conn }, revision, stored);
+  const resultado = await applyRevision({ ...deps, conn }, revision, stored, {
+    forzar: deps.forzar === true,
+  });
   if (resultado.status === 'blocked') {
     return { aplicado: false, bloqueado: { reason: resultado.reason } };
   }
@@ -80,7 +82,10 @@ async function aplicarRegistro(
 }
 
 /** Una pasada de convergencia (pull). No reconecta: eso es de `retry`/llamador. */
-export async function pullOnce(conn: SyncConnection, deps: ApplyDeps): Promise<PullReport> {
+export async function pullOnce(
+  conn: SyncConnection,
+  deps: ApplyDeps & { forzar?: boolean },
+): Promise<PullReport> {
   const checkpoint = await deps.store.readCheckpoint().catch(() => null);
   let cursor = checkpoint?.since ?? 0;
   let applied = 0;
