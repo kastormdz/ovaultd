@@ -22,6 +22,10 @@ The CLI is private (not on npm): `npm run build -w @ovaultd/cli` then
 `bash scripts/instalar-cli.sh` puts the `ovaultd` command in `~/.local/bin`. Usage and the
 filesystem commands live in [cli.md](cli.md).
 
+For agents: `skills/ovaultd-cli/SKILL.md` is the CLI playbook (install, commands, error
+table, safety). Drop it into your agent's skills directory and it knows how to add, edit,
+search and sync notes.
+
 The plugin lives in its own repository ([ovaultd-plugin](https://github.com/kastormdz/ovaultd-plugin)),
 where `npm run build` also runs the anti-Node gate: the bundle must not gain a single `node:*`
 import, because the same `main.js` runs on mobile.
