@@ -5,6 +5,17 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y e
 [semver](https://semver.org/lang/es/): server y plugin viajan en un **release train** (mismo
 `MAJOR.MINOR` = pareja probada junta; ver ADR-0018 y la sección «Compatibilidad» del README).
 
+## [0.2.9] — 2026-10-19
+
+### Changed
+
+- **Durabilidad del CAS por lote**: `publish` ya no hace fsync por blob (archivo +
+  directorio); el commit del lote sincroniza el CAS entero con un `syncfs` ANTES del ack.
+  Un blob confirmado sigue sobreviviendo al crash; uno sin commit se pierde sin
+  consecuencias (el cliente lo re-sube: los blobs son inmutables y el PUT idempotente).
+- **`TCP_NODELAY`** en el socket de escucha (los aceptados heredan el flag) y **`max_age`**
+  en el CORS: menos espera por delayed ACK y el preflight se cachea una hora.
+
 ## [0.2.8] — 2026-10-19
 
 Higiene de dispositivos en el panel: la lista muestra solo los activos y el dispositivo se
