@@ -90,6 +90,38 @@ adivinando; el candidato con más peso es el `encryptBlob` del sobre por archivo
 **T4** (36,5 s) sigue dominado por el `writeTemp` por archivo contra el puente (base64 de
 133 KB por POST). La solución es del mismo tipo: un `writeMany` por lotes.
 
+### Corrida 2026-10-19 (cuarta) · instrumentación por fases del push
+
+Se instrumentó `pushOnce` (marcas de tiempo por etapa, logueadas por el puente) y se
+corrigieron los dos desperdicios que el desglose destapó:
+
+1. **Los bytes del escaneo se tiraban**: `escanearVault` leía cada archivo (para hashearlo)
+   y `encolarDiff` lo volvía a pedir por el puente (~30 ms × archivo). Ahora el escaneo
+   deja los bytes en un `Map` que el push consume (`leer=0` en el desglose).
+2. **50 PUT de 133 KB en vuelo ahogaban al puente**: el server responde 50 PUT en
+   **0,301 s** (curl) pero desde la página cada uno costaba **330 ms**. Con tandas de 16 la
+   suma de PUT bajó 5×.
+3. **Lotes de 250 ops** (antes 50): el commit cuesta ~450-600 ms por lote casi
+   independiente del tamaño, así que 20 lotes eran 20 costos fijos. El `syncfs` del commit
+   pesa solo **~164 ms** (medido con A/B) y se conserva por durabilidad.
+4. `confirmar` ya no hace `getIndex` (el path viene en la entrada) ni reescribe el
+   checkpoint por nota (una vez por lote).
+
+**Desglose medido (100 notas de 100 KB, push = 6,9 s):**
+
+```
+scan=509  encolar=608  preparar=466  put=6.8s(sum)  commit=900-1100
+confirmar=1655  getOutbox=39  total=6510ms
+```
+
+**Resultado:** T1 70,8 → **63,8 s**; T2 1,93 → 1,85 s; T3 1,93 → 1,90 s; T4 36,5 → 36,3 s.
+
+**El target de <30 s NO se alcanzó y el piso está identificado**: el costo es
+**IndexedDB por entrada** (~16,5 ms por `confirmar` = 16 s en 1000 notas, con 4 operaciones
+por nota: putBase + putIndex + setOutboxState + deleteOutbox) más el costo fijo del commit.
+El próximo corte necesita **una transacción de IndexedDB por lote** en el `StateStore`
+(interfaz transaccional para base+índice+outbox), no otra micro-optimización.
+
 Los ~1,9 s de T2/T3 son **el arranque de Chromium del CLI**: el ciclo neto (~0,3-0,4 s)
 está por debajo del target de un segundo, y el plugin (motor persistente) no paga arranque.
 

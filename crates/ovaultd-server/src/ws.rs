@@ -357,7 +357,7 @@ impl Connection {
 
         // Sincronizar el CAS ANTES del ack: los blobs del batch tienen que estar en disco
         // (un blob confirmado no se re-sube nunca más). Es el ÚNICO fsync del camino de
-        // subida: uno por lote (`syncfs`), no dos por blob.
+        // subida: uno por lote (`syncfs`), no dos por blob. Medido: ~164 ms por lote.
         self.cas
             .sincronizar()
             .await

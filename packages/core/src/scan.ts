@@ -48,6 +48,9 @@ export async function escanearVault(
   keys: SubKeys,
   dir = '',
   cache?: Map<string, { mtime: number | null; size: number | null; contentHash: string | null }>,
+  /** Si se pasa, el escaneo deja acá los bytes leídos: el push los reusa para encolar el
+   *  snapshot en vez de volver a pedir cada archivo al puente (una lectura por archivo). */
+  contenidos?: Map<string, Uint8Array>,
 ): Promise<EntradaEscaneada[]> {
   const archivos: string[] = [];
 
@@ -117,11 +120,18 @@ export async function escanearVault(
       const blobs = await port.readMany(lote.map((pendiente) => pendiente.rel));
       for (let j = 0; j < lote.length; j += 1) {
         const bytes = blobs[j];
-        if (bytes) leidos.set(lote[j]!.rel, bytes);
+        if (bytes) {
+          leidos.set(lote[j]!.rel, bytes);
+          contenidos?.set(lote[j]!.rel, bytes);
+        }
       }
     }
   } else {
-    for (const { rel } of porLeer) leidos.set(rel, await port.read(rel));
+    for (const { rel } of porLeer) {
+      const bytes = await port.read(rel);
+      leidos.set(rel, bytes);
+      contenidos?.set(rel, bytes);
+    }
   }
 
   for (const { rel, stat } of porLeer) {
