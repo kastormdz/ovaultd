@@ -36,7 +36,8 @@ levanta Chromium con Playwright; no hay binario autónomo).
 2. **El contenido va por `--stdin`**, nunca por argv: el markdown con backticks se
    ejecutaría como command substitution.
 3. **Después de escribir o borrar, `ovaultd sync`** (salvo que haya un servicio/timer de
-   sync corriendo). Sin sync, el cambio queda solo en esta máquina.
+   sync corriendo: entonces el servicio publica solo en segundos, y un `sync` manual falla
+   con EADDRINUSE porque el perfil del runtime tiene un solo dueño).
 4. **Antes de crear una nota, buscá la canónica** (`ovaultd ls` + índice local si existe).
    Mismo sujeto → sección dentro de la existente, no nota paralela.
 5. **Rutas relativas al vault**, sin `..`, sin absolutas, sin `.` al final: se rechazan.
@@ -128,6 +129,7 @@ si la revisión sigue en el oplog.
 | `ruta inválida: travesía / absoluta` | la ruta debe ser relativa y sin `..` |
 | `el vault #N no está vinculado a una carpeta` | `ovaultd setup <N> --dir <carpeta>` |
 | `HTTP 401` | password de cuenta incorrecta (no es la del vault) |
+| `EADDRINUSE … el runtime del vault ya está abierto` | el servicio de sync tiene el perfil: usá `cat/write/ls/rm` (no abren runtime) o pará el servicio para un comando puntual |
 | `el server no respondió en 30 s` | red/borde; el request tiene timeout, no se cuelga |
 | `no se pudo conectar` | server caído o URL mal; probá `ovaultd status` |
 

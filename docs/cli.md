@@ -83,6 +83,15 @@ The service never asks for the vault password: run `ovaultd sync` once by hand f
 caches the subkeys, `0600`). If the server or the network is down, systemd restarts the
 process (`RestartSec=10`) and the loop retries with backoff.
 
+**While the service runs, don't call `sync`/`history`/`preview`/`restore` by hand**: the
+runtime profile has a single owner by design, so a second process fails with
+`EADDRINUSE`. That's expected — the service is already syncing every few seconds.
+`cat`, `write`, `ls` and `rm` don't touch the runtime and work fine. For a one-off command:
+
+```bash
+systemctl --user stop ovaultd-sync && ovaultd history "ruta/nota.md" ; systemctl --user start ovaultd-sync
+```
+
 If you prefer a periodic pass over a long-running process, use a oneshot timer instead:
 
 ```ini

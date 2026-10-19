@@ -302,10 +302,16 @@ export class BrowserRuntime {
 
     await new Promise<void>((resolve, reject) => {
       servidor.once('error', (error) => {
+        const ocupado = (error as NodeJS.ErrnoException).code === 'EADDRINUSE';
         reject(
           new Error(
             `no se pudo escuchar en ${origin}: ${String(error)}\n` +
-              '(¿otro runtime del mismo device está abierto? Es a propósito: un solo dueño del perfil)',
+              (ocupado
+                ? 'el runtime del vault ya está abierto por otro proceso (el servicio de sync o otro `ovaultd`).\n' +
+                  'Es a propósito: un solo dueño del perfil. Con el servicio activo el vault YA se sincroniza\n' +
+                  'cada pocos segundos: no hace falta un sync manual. Para uno puntual:\n' +
+                  '  systemctl --user stop ovaultd-sync && ovaultd sync ; systemctl --user start ovaultd-sync'
+                : '(otro runtime del mismo device está abierto: un solo dueño del perfil)'),
           ),
         );
       });
