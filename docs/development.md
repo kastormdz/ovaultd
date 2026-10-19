@@ -18,6 +18,10 @@ bash tests/scripts/container-e2e.sh # everything: real build + smoke + persisten
 (cd spikes/crypto-interop && ./run.sh --check)   # interop against frozen vectors
 ```
 
+The CLI is private (not on npm): `npm run build -w @ovaultd/cli` then
+`bash scripts/instalar-cli.sh` puts the `ovaultd` command in `~/.local/bin`. Usage and the
+filesystem commands live in [cli.md](cli.md).
+
 The plugin lives in its own repository ([ovaultd-plugin](https://github.com/kastormdz/ovaultd-plugin)),
 where `npm run build` also runs the anti-Node gate: the bundle must not gain a single `node:*`
 import, because the same `main.js` runs on mobile.
