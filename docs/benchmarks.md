@@ -77,13 +77,15 @@ a node, sin preflight CORS (el cache del navegador es por URL y cada blob tiene 
 por blob (diferido al commit con un `syncfs` por lote: 71,9 → 70,7 s), fsync del WAL de
 SQLite (A/B `synchronous=NORMAL`: 70,1 vs 70,8 s — ruido), Nagle/delayed ACK
 (`TCP_NODELAY` en el listener: sin cambio, pero queda), base64 del puente (binario crudo:
-sin cambio medible) y preflight CORS (sin cambio en el agregado).
+sin cambio medible), preflight CORS (sin cambio en el agregado) y **el hash SHA-256 del
+provider** (medido: 0,5 ms por nota de 100 KB — no es el cuello).
 
-**El piso real del T1**: el pipeline criptográfico del cliente. `CryptoProvider` usa
-`@noble/hashes` y cifradores JS puros: hashear y cifrar 100 MB de texto plano cuesta
-~40-55 ms por nota en el intérprete, más el PUT (~12 ms). 1000 × ~69 ms = los 70 s.
-**Próximo corte**: WebCrypto (`SubtleCrypto`) en el navegador con fallback a noble en
-Node — el provider pasa a asíncrono y el camino de hash/cifrado baja a unidades de ms.
+**Lo que sí se midió del costo por nota (~69 ms)**: el salto página→puente→server cuesta
+16-32 ms en node (`[proxy]`) y 27-142 ms medido desde la página (`[runtime]`), y el resto
+queda repartido entre el cifrado del sobre y el POST de la página al puente (un request
+por blob, concurrencia limitada por el fetch del navegador). **Próximo corte**: instrumentar
+las fases DENTRO del sync (scan / cifrar / PUT / commit) con marcas de tiempo, no seguir
+adivinando; el candidato con más peso es el `encryptBlob` del sobre por archivo.
 
 **T4** (36,5 s) sigue dominado por el `writeTemp` por archivo contra el puente (base64 de
 133 KB por POST). La solución es del mismo tipo: un `writeMany` por lotes.
