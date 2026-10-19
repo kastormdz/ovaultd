@@ -26,6 +26,12 @@ describe('SyncFilter', () => {
     ['.obsidian/plugins/ovaultd/main.js', 'fuera de la lista blanca'],
     // La identidad del propio plugin de sync es local: la versión la mueve la tienda.
     ['.obsidian/plugins/ovaultd/manifest.json', 'la tienda'],
+    // Estado del DISPOSITIVO: Obsidian los reescribe solo y cada device los tiene distinto
+    // (medido en producción: appearance.json acumuló 25 revisiones entre 3 dispositivos).
+    ['.obsidian/appearance.json', 'fuera de la lista blanca'],
+    ['.obsidian/core-plugins.json', 'fuera de la lista blanca'],
+    ['.obsidian/hotkeys.json', 'fuera de la lista blanca'],
+    ['.obsidian/plugins/comunidad/manifest.json', 'fuera de la lista blanca'],
   ];
 
   for (const [path, aguja] of excluidos) {
@@ -35,15 +41,12 @@ describe('SyncFilter', () => {
     });
   }
 
-  // La lista blanca: lo único de configDir que viaja a los otros dispositivos.
+  // La lista blanca: lo único de configDir que viaja a los otros dispositivos. Es
+  // CONTENIDO (CSS y sus manifiestos). Los JSON de estado del dispositivo quedaron afuera.
   const configPortable = [
-    '.obsidian/appearance.json',
-    '.obsidian/core-plugins.json',
-    '.obsidian/hotkeys.json',
     '.obsidian/snippets/mi-estilo.css',
     '.obsidian/themes/Obsidianite/theme.css',
     '.obsidian/themes/Obsidianite/manifest.json',
-    '.obsidian/plugins/comunidad/manifest.json',
   ];
 
   for (const path of configPortable) {
@@ -55,15 +58,17 @@ describe('SyncFilter', () => {
 
   it('el configDir del vault puede no llamarse .obsidian', () => {
     // Un vault con el configDir cambiado: la política es la misma adentro.
-    expect(estaExcluido('mi-config/appearance.json', 'mi-config')).toBe(false);
+    expect(estaExcluido('mi-config/appearance.json', 'mi-config')).toBe(true); // estado del device
+    expect(estaExcluido('mi-config/themes/x/theme.css', 'mi-config')).toBe(false);
     expect(estaExcluido('mi-config/plugins/x/data.json', 'mi-config')).toBe(true);
     // Y un `.obsidian/` anidado en una carpeta común NO es configDir del vault.
     expect(estaExcluido('Carpeta/.obsidian/appearance.json', 'mi-config')).toBe(false);
   });
 
   it('la lista blanca es explícita: esConfigPortable no acepta prefijos', () => {
-    expect(esConfigPortable('appearance.json')).toBe(true);
+    expect(esConfigPortable('appearance.json')).toBe(false); // estado del dispositivo
     expect(esConfigPortable('appearance-otro.json')).toBe(false);
+    expect(esConfigPortable('themes/x/theme.css')).toBe(true);
     expect(esConfigPortable('plugins/x/data.json')).toBe(false);
     expect(esConfigPortable('snippets/')).toBe(false); // un directorio vacío no aporta nada
   });

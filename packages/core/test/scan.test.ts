@@ -66,9 +66,6 @@ describe('escanearVault', () => {
     const paths = entradas.map((entrada) => entrada.path).sort();
 
     expect(paths).toEqual([
-      '.obsidian/appearance.json',
-      '.obsidian/hotkeys.json',
-      '.obsidian/plugins/dataview/manifest.json',
       '.obsidian/snippets/mio.css',
       '.obsidian/themes/Mi Tema.css',
       'Notas/una.md',
@@ -76,6 +73,10 @@ describe('escanearVault', () => {
     expect(paths.some((path) => path.includes('data.json'))).toBe(false);
     expect(paths.some((path) => path.includes('workspace'))).toBe(false);
     expect(paths.some((path) => path.includes('.trash'))).toBe(false);
+    // Estado del dispositivo: queda afuera (Obsidian lo reescribe solo y colisiona).
+    expect(paths.some((path) => path.includes('appearance'))).toBe(false);
+    expect(paths.some((path) => path.includes('hotkeys'))).toBe(false);
+    expect(paths.some((path) => path.includes('manifest'))).toBe(false);
   });
 
   it('un theme nuevo se escanea con su hash (el caso real del sync de config)', async () => {

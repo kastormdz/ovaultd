@@ -41,6 +41,14 @@ const CARPETAS_VETADAS: ReadonlyMap<string, string> = new Map([
  *  - `community-plugins.json`: la lista de habilitados depende de qué plugins están
  *    INSTALADOS en cada dispositivo (el teléfono no tiene los mismos que la desktop), así
  *    que sincronizarla solo traía conflictos de bajo valor — cada toggle la reescribe;
+ *  - `appearance.json`: mezcla el MODO (claro/oscuro, que Obsidian reescribe solo — con el
+ *    modo automático cambia al anochecer) con el tema elegido. Medido en producción: 25
+ *    revisiones del mismo path entre 3 dispositivos = colisión infinita;
+ *  - `core-plugins.json` y `hotkeys.json`: qué plugins del núcleo están habilitados y con
+ *    qué atajos depende del dispositivo (teclado, pantalla);
+ *  - los `manifest.json` de plugins de TERCEROS: la versión instalada es por dispositivo y
+ *    el binario NO viaja; sincronizar el manifest hace que un device "mienta" su versión
+ *    (misma razón que el propio);
  *  - el `manifest.json` del PROPIO ovaultd: su versión la actualiza la tienda en cada
  *    dispositivo (el binario no viaja), y el manifest sincronizado "mentía" la versión;
  *  - `workspace*.json`: son por dispositivo.
@@ -48,12 +56,8 @@ const CARPETAS_VETADAS: ReadonlyMap<string, string> = new Map([
  * Cada entrada es un path RELATIVO dentro de `configDir`.
  */
 const CONFIG_PORTABLE: readonly RegExp[] = [
-  /^appearance(\.json)?$/, // tema, tamaño de letra, acentos visuales
-  /^core-plugins\.json$/, // qué plugins del núcleo están habilitados
-  /^hotkeys\.json$/, // atajos de teclado (portables: no llevan rutas absolutas)
   /^snippets\/.+/, // CSS propio del vault
-  /^themes\/.+/, // temas instalados como archivos
-  /^plugins\/[^/]+\/manifest\.json$/, // la identidad de cada plugin, NO su data.json
+  /^themes\/.+/, // temas instalados como archivos (contenido puro)
 ];
 
 /** ¿Este path relativo dentro de `configDir` es configuración portable? */
