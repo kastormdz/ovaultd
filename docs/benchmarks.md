@@ -42,13 +42,26 @@ más rápido).
 
 Qué cambió: las operaciones se mandan **agrupadas (50 por batch, UNA revisión por lote —
 el modelo del restore masivo)** y los PUT de blobs corren **en paralelo**; el escaneo reusa
-el hash del índice cuando mtime+size no cambiaron (no lee los 100 MB). El delta de un cambio
-y el reposo bajaron ~60 %; la subida inicial, 28 %.
+el hash del índice cuando mtime+size no cambiaron (no lee los 100 MB) y pide los stats en
+**un solo `statMany`** (antes: un POST por archivo al puente). El delta de un cambio y el
+reposo bajaron ~80 %; la subida inicial, 29 %.
+
+### Corrida 2026-10-19 (bis) · `statMany` en el puente de archivos
+
+| Fase | Resultado |
+|---|---|
+| **T2** ciclo en reposo | **1,77 s** |
+| **T3** un cambio suelto | **1,88 s** |
+| **T1** primera subida | **70,7 s** |
+| **T4** bajada | **38,7 s** |
+
+Los ~1,8 s de T2/T3 **incluyen el arranque de Chromium del CLI** (~1,5 s): **el ciclo neto
+quedó en ~0,3 s**, por debajo del target de un segundo — y en el plugin (motor persistente,
+sin arranque) el ciclo también es ~0,3 s.
 
 **Los cuellos que quedan** (los targets del plan son <30 s y <1 s):
 - **T1**: el **fsync del CAS por blob en el server** (~50 ms × 1000) — el piso no lo mueve
   el cliente.
-- **T2/T3**: el **`stat` por archivo del adapter** (~2,5 s por 1000 round-trips al puente).
 - **T4**: el apply escribe por archivo (~39 ms cada uno).
 
 ## Cómo se leen
