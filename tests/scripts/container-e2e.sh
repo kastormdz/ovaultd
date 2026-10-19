@@ -134,7 +134,9 @@ paso "sync E2E: el runtime (Chromium) baja la delta del smoke y la aplica"
 # El estado del vault y los plaintext que dejó el smoke-cliente son la fuente de verdad:
 # el runtime real (Chromium + IndexedDB + puente /fs) hace signin, abre el WS con el
 # token en subprotocolo (ADR-0015) y aplica la delta firmada por el cliente canónico en
-# Rust, byte a byte. Correr DESPUÉS del smoke y ANTES del recreate.
+# Rust, byte a byte. En DOS invocaciones (el orden importa): primero el sync —que asume el
+# estado del smoke (head 2)— y después la historia, sobre el mismo vault del server (no
+# asume números de revisiones, así que corre después sin romper nada).
 ( cd tests && OVAULTD_SYNC_E2E=1 \
     OVAULTD_SYNC_BASE="http://127.0.0.1:$OVAULTD_PORT" \
     OVAULTD_SYNC_STATE="$DIR/smoke/cliente/estado.json" \
@@ -142,6 +144,13 @@ paso "sync E2E: el runtime (Chromium) baja la delta del smoke y la aplica"
     npx playwright test browser/sync-pull.spec.ts --reporter=line ) \
     || fallo "el E2E de sync falló"
 nota "upgrade por subprotocolo + delta de 2 revisiones aplicada byte a byte"
+( cd tests && OVAULTD_SYNC_E2E=1 \
+    OVAULTD_SYNC_BASE="http://127.0.0.1:$OVAULTD_PORT" \
+    OVAULTD_SYNC_STATE="$DIR/smoke/cliente/estado.json" \
+    OVAULTD_SYNC_SMOKE="$DIR/smoke" \
+    npx playwright test browser/history.spec.ts --reporter=line ) \
+    || fallo "el E2E de historia falló"
+nota "historia: list + preview sin mutar + restore = revisión nueva"
 
 # ---------------------------------------------------------------- 5. persistencia
 

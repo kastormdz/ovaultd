@@ -37,7 +37,7 @@ SECRETS='(password|passwd|secret|token|api[_-]?key)["'"'"']?[[:space:]]*[:=][[:s
 SECRETS_VETADOS='password-de-prueba|token-de-prueba|contrase|\{PASSWORD\}|reset\?token=|"Password"|"Password de la cuenta"|"Contraseña"'
 # `X="$(cmd)"` es una sustitución de shell, no un secreto literal.
 # `X="${VAR}"` / `X: "${VAR:-default}"` es una expansión de variable, tampoco.
-SECRETS_EXPANSION='[:=][[:space:]]*"\$\{'
+SECRETS_EXPANSION='[:=][[:space:]]*"\$'
 SECRETS_SUSTITUCION='=[[:space:]]*["'"'"']\$[(]'
 KEYS='BEGIN (RSA|OPENSSH|EC|DSA) PRIVATE KEY'
 
