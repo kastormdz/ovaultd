@@ -119,7 +119,13 @@ function connFake(blobs: Map<string, Uint8Array>): SyncConnection {
 }
 
 function depsDe(store: unknown, port: unknown): ApplyDeps {
-  return { store: store as StateStore, port: port as FileSystemPort, keys: CLAVES };
+  // Estos casos prueban la política MANUAL (bloquear): el default ahora conserva una copia.
+  return {
+    store: store as StateStore,
+    port: port as FileSystemPort,
+    keys: CLAVES,
+    politicaDeConflictos: 'bloquear',
+  };
 }
 
 const revisionDe = (blobIdHex: string): ApplyRevision => ({

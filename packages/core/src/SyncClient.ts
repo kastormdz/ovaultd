@@ -46,6 +46,8 @@ export interface SyncCycleDeps {
    * pull deja el estado local al día y lo que no vino del server se queda acá.
    */
   modo?: ModoDeSync;
+  /** Nombre del dispositivo, para el sello de las copias de conflicto del pull. */
+  deviceName?: string;
 }
 
 export interface ConflictoDeSync {
@@ -72,6 +74,7 @@ export async function correrCiclo(deps: SyncCycleDeps): Promise<SyncCycleReport>
     store,
     port,
     keys,
+    deviceName: deps.deviceName,
     forzar: deps.modo === 'mirror-remote',
   });
 

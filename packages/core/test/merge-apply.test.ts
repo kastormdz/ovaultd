@@ -17,7 +17,7 @@ import { describe, expect, it } from 'vitest';
 import { blobId, cryptoProvider, deriveSubkeys, encryptBlob, randomSalt, randomVaultKey } from '@ovaultd/crypto';
 import { toHex } from '@ovaultd/protocol';
 
-import { applyRevision, recoverApplies, type ApplyDeps, type ApplyRevision } from '../src/apply-runner.js';
+import { applyRevision, pathDeCopiaDeConflicto, recoverApplies, type ApplyDeps, type ApplyRevision } from '../src/apply-runner.js';
 import type { FileSystemPort } from '../src/file-port.js';
 import type { BaseEntry, IndexEntry, IntentEntry, StateStore } from '../src/StateStore.js';
 import type { SyncConnection } from '../src/SyncConnection.js';
@@ -158,6 +158,9 @@ function armarCaso(opciones: { local: string; remoto: string }) {
     port: port as unknown as FileSystemPort,
     keys: CLAVES,
     conn,
+    // Los casos de conflicto de este archivo prueban la política MANUAL (bloquear); la
+    // política por defecto (conservar copia) tiene sus propios tests al final.
+    politicaDeConflictos: 'bloquear',
   };
   const revision: ApplyRevision = {
     pathId: PATH_ID,
@@ -322,5 +325,93 @@ describe('merge 3-vías integrado al apply', () => {
     const reporte = await recoverApplies(caso.deps);
     expect(reporte.blocked).toBe(1);
     expect(dec.decode(caso.files.get(PATH))).toBe('editado después del crash');
+  });
+});
+
+describe('conflictos: política por defecto (conservar copia, estilo Obsidian Sync)', () => {
+  it('el path del conflicto: sello de 12 dígitos, extensión y dispositivo saneado', () => {
+    const cuando = new Date('2026-10-19T20:45:31Z');
+    expect(pathDeCopiaDeConflicto('Notas/uno.md', 'escritorio', cuando)).toBe(
+      'Notas/uno (conflicto escritorio 202610192045).md',
+    );
+    expect(pathDeCopiaDeConflicto('README', 'Teléfono S23', cuando)).toBe(
+      'README (conflicto Tel-fono-S23 202610192045)',
+    );
+    expect(pathDeCopiaDeConflicto('a/b/c.canvas', 'x y', cuando, 2)).toBe(
+      'a/b/c (conflicto x-y 202610192045-2).canvas',
+    );
+  });
+
+  it('conflicto de contenido: el remoto queda en el path y el local en la copia', async () => {
+    // La MISMA frase editada distinto: el merge no puede decidir y cae al fallback.
+    const caso = armarCaso({
+      local: 'El gato ronca en el sofá.\n',
+      remoto: 'El gato corre en el sofá.\n',
+    });
+    const deps: ApplyDeps = {
+      ...caso.deps,
+      politicaDeConflictos: 'conservar',
+      deviceName: 'escritorio',
+    };
+
+    const resultado = await applyRevision(deps, caso.revision, caso.storedRemoto);
+
+    expect(resultado.status).toBe('conflicted-copy');
+    expect(resultado.copia).toBeTruthy();
+    // El path original: la versión del SERVER (gana el remoto).
+    expect(dec.decode(caso.files.get(PATH))).toBe('El gato corre en el sofá.\n');
+    // La copia: la edición LOCAL, intacta.
+    expect(dec.decode(caso.files.get(resultado.copia!))).toBe('El gato ronca en el sofá.\n');
+    // El checkpoint avanza: el ciclo NO se bloquea.
+    expect(caso.checkpoint()).toEqual({ since: 6, minRev: null });
+    // El intent quedó cerrado (no hay nada bloqueado pendiente).
+    expect([...caso.intents.values()].filter((i) => i.state === 'blocked')).toHaveLength(0);
+  });
+
+  it('sin conexión también conserva: la copia no necesita red', async () => {
+    const caso = armarCaso({
+      local: 'El gato ronca en el sofá.\n',
+      remoto: 'El gato corre en el sofá.\n',
+    });
+    const { conn: _sin, ...sinConn } = caso.deps;
+    const deps: ApplyDeps = {
+      ...(sinConn as ApplyDeps),
+      politicaDeConflictos: 'conservar',
+      deviceName: 'telefono',
+    };
+
+    const resultado = await applyRevision(deps, caso.revision, caso.storedRemoto);
+    expect(resultado.status).toBe('conflicted-copy');
+    expect(dec.decode(caso.files.get(PATH))).toBe('El gato corre en el sofá.\n');
+    expect(dec.decode(caso.files.get(resultado.copia!))).toBe('El gato ronca en el sofá.\n');
+  });
+
+  it('un BORRADO remoto contra un local editado sigue bloqueando (no se automatiza)', async () => {
+    const caso = armarCaso({ local: OURS_TEXTO, remoto: THEIRS_TEXTO });
+    const deps: ApplyDeps = { ...caso.deps, politicaDeConflictos: 'conservar', deviceName: 'escritorio' };
+
+    const resultado = await applyRevision(
+      deps,
+      { ...caso.revision, deleted: true, blobId: null },
+      null,
+    );
+
+    // Conservar una copia y ADEMÁS borrar el original no es una decisión automática.
+    expect(resultado.status).toBe('blocked');
+    expect(dec.decode(caso.files.get(PATH))).toBe(OURS_TEXTO);
+  });
+
+  it('la política «bloquear» mantiene el comportamiento manual', async () => {
+    const caso = armarCaso({
+      local: 'El gato ronca en el sofá.\n',
+      remoto: 'El gato corre en el sofá.\n',
+    });
+    const deps: ApplyDeps = { ...caso.deps, politicaDeConflictos: 'bloquear', deviceName: 'escritorio' };
+
+    const resultado = await applyRevision(deps, caso.revision, caso.storedRemoto);
+
+    expect(resultado.status).toBe('blocked');
+    expect(resultado.reason).toContain('edición local posterior a la base');
+    expect(dec.decode(caso.files.get(PATH))).toBe('El gato ronca en el sofá.\n');
   });
 });

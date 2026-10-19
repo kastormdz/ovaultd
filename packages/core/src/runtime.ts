@@ -62,6 +62,9 @@ const exigirStore = (): StateStore => {
 /** Subclaves del vault configuradas para aplicar (apply.configure). */
 let applyKeys: SubKeys | null = null;
 
+/** Nombre del dispositivo para el sello de las copias de conflicto (apply.configure). */
+let applyDeviceName: string | null = null;
+
 const exigirApply = (): { store: StateStore; keys: SubKeys } => {
   if (!applyKeys) throw new Error('apply: falta apply.configure (subclaves del vault)');
   return { store: exigirStore(), keys: applyKeys };
@@ -234,6 +237,9 @@ const handlers: Record<string, Handler> = {
       keys[nombre] = fromHex(valor);
     }
     applyKeys = keys as unknown as SubKeys;
+    if (typeof params.deviceName === 'string' && params.deviceName.trim().length > 0) {
+      applyDeviceName = params.deviceName.trim().slice(0, 64);
+    }
     return { configured: true, subclaves: subclaves.length };
   },
 
@@ -243,7 +249,12 @@ const handlers: Record<string, Handler> = {
     if (!revision || typeof revision !== 'object') throw new Error('apply.run: falta revision');
     const stored = typeof params.storedB64 === 'string' ? b64Decode(params.storedB64) : null;
     return applyRevision(
-      { store, port: new HttpFileSystemPort(globalThis.location.origin), keys },
+      {
+        store,
+        port: new HttpFileSystemPort(globalThis.location.origin),
+        keys,
+        deviceName: applyDeviceName ?? undefined,
+      },
       revision,
       stored,
     );
@@ -255,6 +266,7 @@ const handlers: Record<string, Handler> = {
       store,
       port: new HttpFileSystemPort(globalThis.location.origin),
       keys,
+      deviceName: applyDeviceName ?? undefined,
     });
   },
 
@@ -317,6 +329,7 @@ const handlers: Record<string, Handler> = {
       store,
       port: new HttpFileSystemPort(globalThis.location.origin),
       keys,
+      deviceName: applyDeviceName ?? undefined,
     });
   },
 
