@@ -62,6 +62,12 @@ export interface PushReport {
   encoladas: number;
   empujadas: number;
   headRev: number;
+  /**
+   * Deletes que la guarda del cliente vacío NO encoló: sin ningún archivo local, los
+   * "borrados" del diff son un artefacto (vault recién creado, disco sin montar, scan a
+   * medias), no una intención del usuario.
+   */
+  deletesBloqueados: number;
   conflicto?: { operationId: string; path?: string; mensaje: string };
 }
 
@@ -81,10 +87,18 @@ const operacionBytes = (operationId: string): Uint8Array => {
  * Encola el diff en la outbox (save-first: el snapshot queda persistido y verificado
  * antes de cualquier publicación).
  */
-async function encolarDiff(deps: PushDeps, head: number): Promise<{ diff: PushReport['diff']; encoladas: number }> {
+async function encolarDiff(deps: PushDeps, head: number): Promise<{ diff: PushReport['diff']; encoladas: number; deletesBloqueados: number }> {
   const { store, port, keys } = deps;
   const entradas = await escanearVault(port, keys);
-  const diff = await diffLocal(store, entradas);
+  const diffBase = await diffLocal(store, entradas);
+
+  // Un cliente VACÍO no borra el remoto (aceptación de fase 3): sin un solo archivo en
+  // disco, los deletes del diff no son una intención — se bloquean y se informan.
+  const deletesBloqueados = entradas.length === 0 ? diffBase.borrados.length : 0;
+  const diff = {
+    ...diffBase,
+    borrados: deletesBloqueados > 0 ? [] : diffBase.borrados,
+  };
   let encoladas = 0;
 
   const encolar = async (entry: OutboxEntry): Promise<void> => {
@@ -140,6 +154,7 @@ async function encolarDiff(deps: PushDeps, head: number): Promise<{ diff: PushRe
       yaEncolados: diff.yaEncolados,
     },
     encoladas,
+    deletesBloqueados,
   };
 }
 
@@ -257,7 +272,7 @@ export async function pushOnce(deps: PushDeps): Promise<PushReport> {
   const { store } = deps;
   let head = (await store.readCheckpoint().catch(() => null))?.since ?? 0;
 
-  const { diff, encoladas } = await encolarDiff(deps, head);
+  const { diff, encoladas, deletesBloqueados } = await encolarDiff(deps, head);
   let empujadas = 0;
 
   const pendientes = (await store.listOutbox())
@@ -294,6 +309,7 @@ export async function pushOnce(deps: PushDeps): Promise<PushReport> {
           encoladas,
           empujadas,
           headRev: head,
+          deletesBloqueados,
           conflicto: {
             operationId: entry.operationId,
             path: entry.path,
@@ -305,5 +321,5 @@ export async function pushOnce(deps: PushDeps): Promise<PushReport> {
     }
   }
 
-  return { diff, encoladas, empujadas, headRev: head };
+  return { diff, encoladas, empujadas, headRev: head, deletesBloqueados };
 }
