@@ -65,7 +65,7 @@ const programa = new Command();
 programa
   .name('ovaultd')
   .description('CLI de ovaultd (protocolo sync2) — login, vaults y setup local')
-  .version('0.1.0');
+  .version('0.2.10');
 
 const exigirSesion = (): SessionState => {
   const sesion = readSession();
