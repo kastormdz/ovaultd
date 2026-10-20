@@ -41,9 +41,9 @@ const CARPETAS_VETADAS: ReadonlyMap<string, string> = new Map([
  *  - `community-plugins.json`: la lista de habilitados depende de qué plugins están
  *    INSTALADOS en cada dispositivo (el teléfono no tiene los mismos que la desktop), así
  *    que sincronizarla solo traía conflictos de bajo valor — cada toggle la reescribe;
- *  - `appearance.json`: mezcla el MODO (claro/oscuro, que Obsidian reescribe solo — con el
- *    modo automático cambia al anochecer) con el tema elegido. Medido en producción: 25
- *    revisiones del mismo path entre 3 dispositivos = colisión infinita;
+ *  - `appearance.json`: NO se sincroniza entero (mezcla el MODO claro/oscuro, que Obsidian
+ *    reescribe solo, con el tema elegido) — viaja POR CAMPO en la lista blanca: el tema y
+ *    los snippets se mergean por campo (apariencia.ts) y el resto queda local;
  *  - `core-plugins.json` y `hotkeys.json`: qué plugins del núcleo están habilitados y con
  *    qué atajos depende del dispositivo (teclado, pantalla);
  *  - los `manifest.json` de plugins de TERCEROS: la versión instalada es por dispositivo y
@@ -58,6 +58,7 @@ const CARPETAS_VETADAS: ReadonlyMap<string, string> = new Map([
 const CONFIG_PORTABLE: readonly RegExp[] = [
   /^snippets\/.+/, // CSS propio del vault
   /^themes\/.+/, // temas instalados como archivos (contenido puro)
+  /^appearance\.json$/, // tema + snippets: merge POR CAMPO, no 3-vías de texto
 ];
 
 /** ¿Este path relativo dentro de `configDir` es configuración portable? */
