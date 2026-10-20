@@ -99,6 +99,28 @@ If you prefer a periodic pass over a long-running process, use a oneshot timer i
 # ~/.config/systemd/user/ovaultd-sync.timer   → OnBootSec=1min, OnUnitActiveSec=5min
 ```
 
+## Reconciling the server (prune-remote)
+
+The server is blind (E2EE): it cannot list paths or see the filesystem. A local delete
+that never went through a sync (made by hand, with the client stopped, or in an old vault)
+leaves the path alive in the server's `files` table forever — and the panel counts it.
+
+`prune-remote` is the only one who can fix that, because only the client has the keys:
+
+```bash
+ovaultd prune-remote            # dry-run: plan only, nothing is deleted
+ovaultd prune-remote --yes      # queue the del of every orphan and publish it
+ovaultd prune-remote --json     # machine-readable plan
+```
+
+It pulls the **whole oplog** (paginated), collapses it by `path_id` (the last op wins, a
+`del` removes it), decrypts every path, validates it with the portable policy and compares
+it against the disk. A hostile path is never deleted: it is counted as blocked.
+
+Run it while the sync service is stopped (the runtime profile has a single owner). The
+counts it prints are the honest ones: `vivos` (server), `enDisco` (this device) and
+`huérfanos` (alive on the server, gone from this disk).
+
 ## The vault password is asked once
 
 The first command that needs the vault key (the first `sync`, `history`, `preview` or

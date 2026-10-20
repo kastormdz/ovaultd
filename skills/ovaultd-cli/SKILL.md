@@ -63,6 +63,7 @@ levanta Chromium con Playwright; no hay binario autónomo).
 | `ovaultd preview <ruta> --rev <n> --diff` | muestra una versión sin escribir |
 | `ovaultd restore <ruta> --rev <n>` | restaura como revisión NUEVA |
 | `ovaultd olvidar-clave [id]` | borra las subclaves cacheadas |
+| `ovaultd prune-remote [--yes]` | borra del server los paths que ya no existen en disco |
 | `ovaultd unlink <id>` | desvincula la carpeta (el server no se toca) |
 
 Con más de un vault vinculado, casi todos aceptan `--vault <n>`.
