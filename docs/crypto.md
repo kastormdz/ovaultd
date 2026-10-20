@@ -1,16 +1,16 @@
-# Spec cripto `sync2` — VIGENTE
+# Spec cripto `sync2` (vigente)
 
-> **Estado:** vigente desde 2026-09-25. Sustituye a `sync1` (ver **ADR-0002**). Cambiar esto requiere un ADR nuevo.
-> **Estado de la interop:** ✅ **probada para `sync2`** (2026-09-25). Rust y JS derivan, envuelven, cifran y firman byte a
+> Estado: vigente desde 2026-09-25. Sustituye a `sync1` (ver **ADR-0002**). Cambiar esto requiere un ADR nuevo.
+> Estado de la interop: probada para `sync2` (2026-09-25). Rust y JS derivan, envuelven, cifran y firman byte a
 > byte idéntico, y los vectores están congelados en `tests/fixtures/crypto/sync2.json`. Los vectores `sync1` (más abajo)
 > quedan como referencia histórica y por el pitfall de NFKC. El layout canónico de los bytes firmados es **ADR-0006**.
 
 ## Dominio y versionado
 
-- `DOMAIN = "sync2"`. Prefija los `info` de HKDF → cambiar de dominio cambia **todas** las claves (válvula de escape).
+- `DOMAIN = "sync2"`. Prefija los `info` de HKDF → cambiar de dominio cambia todas las claves (válvula de escape).
 - `enc_version = 2` para vaults nuevos. `enc_version = 1` = `sync1` (histórico). `0` = cifrado gestionado por el server (no usado).
 
-## Arquitectura de claves — password, KEK y clave de datos
+## Arquitectura de claves: password, KEK y clave de datos
 
 ```
 password_nfkc = NFKC(password)
@@ -21,17 +21,17 @@ wrapped_rc    = XChaCha20-Poly1305(kek_recovery, aad="vaultkey/rc" § vault_id, 
 kX            = HKDF-SHA256(ikm=vault_key, salt=salt, info="sync2/"+X, L=32)
 ```
 
-**Regla estructural:** la clave de datos es **aleatoria** y viaja **envuelta**. La password sólo protege su envoltura.
-Consecuencia: **rotar la password no cambia `path_id`, `blob_id` ni los MACs** — se re-envuelve un registro (§ Rotación).
+**Regla estructural:** la clave de datos es aleatoria y viaja envuelta. La password sólo protege su envoltura.
+Consecuencia: **rotar la password no cambia `path_id`, `blob_id` ni los MACs**: se re-envuelve un registro (§ Rotación).
 
 | Subclave | Uso |
 |---|---|
 | `k_content` | cifrado del contenido de los blobs |
-| `k_nonce` | derivación del nonce determinista *keyed* (**separada** de `k_content`) |
+| `k_nonce` | derivación del nonce determinista *keyed* (separada de `k_content`) |
 | `k_path` | `path_id` (HMAC) + `path_enc` (AEAD) |
 | `k_meta` | metadatos sensibles que el server no debe leer (a futuro) |
 | `k_bind` | (reservada) material de binding auxiliar |
-| `k_sign` | seed → par **Ed25519** determinista del vault |
+| `k_sign` | seed → par Ed25519 determinista del vault |
 
 **Qué viaja al server:** `salt`, `kdf_alg`/`kdf_params`, `wrapped_pw`, `wrapped_rc` y la **clave pública** Ed25519.
 **Nunca** la password, `kek`, `vault_key` ni subclaves. Un `keyhash` opcional sirve como verificación previa, no como proof.
@@ -52,33 +52,33 @@ sig        = Ed25519_sign(priv, rev § op § path_id § blob_id § T § epoch)  
 
 ## Decisiones y por qué
 
-1. **Vault key aleatoria envuelta (KEK).** Con la clave de datos derivada directo de la password, rotar la password
+1. Vault key aleatoria envuelta (KEK). Con la clave de datos derivada directo de la password, rotar la password
    cambiaba `path_id` (HMAC de `k_path`) → había que migrar el **índice**, no sólo los cuerpos. Envolver una clave
    aleatoria deja la rotación en "re-envolver un registro".
-2. **`path_id` = HMAC con clave, determinista a propósito.** El server puede indexar y deduplicar sin adivinar la
+2. `path_id` = HMAC con clave, determinista a propósito. El server puede indexar y deduplicar sin adivinar la
    estructura del vault (un SHA-256 pelado cae por diccionario: los paths son predecibles).
-   **Fuga aceptada:** el server observa **igualdad y estabilidad** de paths — nunca sus nombres.
-3. **`path_enc` con nonce ALEATORIO y `aad = path_id`.** Un cifrado determinista filtraba igualdad; y sin atar
-   `path_enc` a `path_id` el server podía **cambiar el nombre cifrado** y presentar el contenido correcto bajo otro
+   Fuga aceptada: el server observa **igualdad y estabilidad** de paths, nunca sus nombres.
+3. `path_enc` con nonce ALEATORIO y `aad = path_id`. Un cifrado determinista filtraba igualdad; y sin atar
+   `path_enc` a `path_id` el server podía cambiar el nombre cifrado y presentar el contenido correcto bajo otro
    nombre sin invalidar `T` (era un agujero del binding).
-4. **Binding en metadata firmada (`T`), no en el AAD del cuerpo.** Con `aad = path_id` en el **contenido**, el dedupe
+4. Binding en metadata firmada (`T`), no en el AAD del cuerpo. Con `aad = path_id` en el **contenido**, el dedupe
    por contenido moría y cada **rename** obligaba a re-cifrar y resubir el archivo. Con `T` firmado: rename = recalcular
-   32 B de metadata, dedupe intacto, y el server **no puede mover un blob** a otro path.
-5. **`blob_id` sobre el ciphertext + nonce MLE *keyed*.** El CAS deduplica **dentro del vault**, y sin `k_nonce`
+   32 B de metadata, dedupe intacto, y el server no puede mover un blob a otro path.
+5. `blob_id` sobre el ciphertext + nonce MLE *keyed*. El CAS deduplica dentro del vault, y sin `k_nonce`
    nadie puede confirmar contenido candidato desde fuera. El nonce determinista exige clave separada (`k_nonce`), no
    reutilizar `k_content`.
-6. **Ed25519 derivado del vault + registros firmados.** Con un `keyhash` compartido, el server guardaba material
-   equivalente para **forjar proofs** (y una afirmación ingenua de "nunca viaja crudo" era falsa). Con firma: el server
-   guarda sólo la **pública**; y firmar cada registro autentica **también los borrados** (antes silenciables) y habilita
-   **anti-rollback**: el cliente rechaza cualquier historia que retroceda respecto de su último `rev` firmado.
-7. **Argon2id en vez de scrypt `N=32768`.** Los parámetros del servicio oficial son de ~2020 y no hay interop que los
-   justifique: `N=2^15` ≈ 32 MB es débil para 2026. Parámetros **versionados por vault** (`kdf_alg`, `kdf_params`) para
+6. Ed25519 derivado del vault + registros firmados. Con un `keyhash` compartido, el server guardaba material
+   equivalente para forjar proofs (y una afirmación ingenua de "nunca viaja crudo" era falsa). Con firma: el server
+   guarda sólo la pública; y firmar cada registro autentica también los borrados (antes silenciables) y habilita
+   anti-rollback: el cliente rechaza cualquier historia que retroceda respecto de su último `rev` firmado.
+7. Argon2id en vez de scrypt `N=32768`. Los parámetros del servicio oficial son de ~2020 y no hay interop que los
+   justifique: `N=2^15` ≈ 32 MB es débil para 2026. Parámetros versionados por vault (`kdf_alg`, `kdf_params`) para
    endurecerlos sin romper vaults viejos.
-8. **JS puro en el cliente** (`@noble/hashes` + `@noble/ciphers` + `@noble/curves`): una sola implementación
+8. JS puro en el cliente (`@noble/hashes` + `@noble/ciphers` + `@noble/curves`): una sola implementación
    desktop/móvil, auditable, sin binarios opacos. **No** porque WASM esté prohibido (no lo está).
-9. **Chunks: MVP en dos pasadas.** El nonce depende del plaintext completo → 1.ª pasada hash, 2.ª cifrado por chunks
+9. Chunks: MVP en dos pasadas. El nonce depende del plaintext completo → 1.ª pasada hash, 2.ª cifrado por chunks
    (memoria acotada, sin prometer delta por línea). AEAD por chunk con manifiesto: post-MVP.
-10. **Recovery con entropía explícita.** `vault_key` + un secreto **aleatorio de 256 bits** codificado en base32 con
+10. Recovery con entropía explícita. `vault_key` + un secreto **aleatorio de 256 bits** codificado en base32 con
     checksum. La codificación **no** es seguridad: la entropía la da el CSPRNG.
 
 ## Fugas aceptadas (explícitas, no accidentales)
@@ -96,10 +96,10 @@ sig        = Ed25519_sign(priv, rev § op § path_id § blob_id § T § epoch)  
 ## Rotación
 
 1. KEK nuevo (salt y `kdf_params` nuevos) desde la password nueva.
-2. **Re-envolver** `vault_key` (un registro). `path_id`, `blob_id` y `T` **no cambian**: el índice sobrevive.
+2. Re-envolver `vault_key` (un registro). `path_id`, `blob_id` y `T` **no cambian**: el índice sobrevive.
 3. Re-envolver/regenerar `wrapped_rc`.
 4. Revocar tokens de dispositivo y exigir re-auth.
-5. **Sólo si se sospecha `vault_key` comprometida:** subir `epoch` y re-cifrar cuerpos + recalcular MACs (operación
+5. Sólo si se sospecha `vault_key` comprometida: subir `epoch` y re-cifrar cuerpos + recalcular MACs (operación
    cara y explícita).
 
 **Limitación:** invalidar una recovery no revoca copias que alguien haya guardado de un `wrapped_rc` viejo.
@@ -112,7 +112,7 @@ Sin esto, perder la password = perder el vault (el pecado del servicio oficial).
 
 ## Vectores de prueba
 
-### `sync1` — HISTÓRICOS (no aplican a `sync2`)
+### `sync1` (históricos, no aplican a `sync2`)
 
 Se conservan porque documentan el método y el pitfall de NFKC:
 
@@ -124,7 +124,7 @@ PATH_ID     d97d3566d75ab1979545a8516b3865d4d11d5e4db76565ba0c4a68dcbba33b5d
 ROUNDTRIP   OK
 ```
 
-### `sync2` — ✅ CONGELADOS (2026-09-25)
+### `sync2` (congelados el 2026-09-25)
 
 Generados por `spikes/crypto-interop`: **Rust y JS coinciden byte a byte**, y el fixture está congelado en
 `tests/fixtures/crypto/sync2.json`. Se regeneran **solo con revisión** (`./run.sh --emit-candidates DIR` → revisar →
