@@ -15,6 +15,7 @@ export * from './retry.js';
 export * from './scan.js';
 export * from './push.js';
 export * from './prune.js';
+export * from './apariencia.js';
 export * from './SyncConnection.js';
 export * from './reconcile.js';
 export * from './SyncClient.js';
