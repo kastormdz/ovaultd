@@ -1,19 +1,8 @@
 /**
- * `BrowserRuntime` — el runtime durable del CLI: Chromium headless con perfil
- * persistente propio, sirviendo el bundle del núcleo desde un origen local estable.
- *
- * Decisiones (del plan de fase 2):
- *  - **Un solo motor durable**: IndexedDB vive acá; no hay SQLite local ni backends falsos.
- *  - **Origen local estable**: el IndexedDB queda atado al origen; el puerto se persiste y
- *    si cambia con datos ya escritos, se FALLA en vez de crear un universo nuevo en silencio.
- *  - **Perfil privado**: `~/.local/share/ovaultd/runtime` en 0700 (override: `OVAULTD_RUNTIME_DIR`).
- *  - **Puente de archivos**: si se pasa `vaultRoot`, el servidor local expone `/fs/<op>`
- *    contra un `NodeFileAdapter` **confinado al vault** (sin travesía, sin symlinks, solo
- *    en 127.0.0.1). El runtime nunca toca archivos por su cuenta.
- *  - **Failpoint real**: `crash()` mata el proceso de Chromium con SIGKILL (sin shutdown
- *    limpio) para probar que lo confirmado sobrevive y lo a medias se recupera.
- *
- * El puente con la página es JSON puro: `call(method, params)` → `dispatch` del runtime.
+ * Runtime durable del CLI: Chromium headless con perfil propio que sirve el bundle del
+ * núcleo desde un origen local estable. El IndexedDB queda atado al puerto persistido; si
+ * el origen cambia con datos ya escritos, falla en vez de crear un estado nuevo.
+ * El puente con la página es JSON puro: `call(method, params)`.
  */
 
 import { randomBytes, timingSafeEqual } from 'node:crypto';
@@ -113,8 +102,6 @@ const PAGINA = `<!doctype html>
 const bundlePorDefecto = (): string =>
   fileURLToPath(new URL('../../core/dist/runtime.js', import.meta.url));
 
-// --------------------------------------------------------------------- puente /fs
-
 const LIMITE_CUERPO = 64 * 1024 * 1024; // 32 MiB de contenido + base64 + sobre, con aire
 
 function responder(res: ServerResponse, cuerpo: unknown): void {
@@ -143,9 +130,7 @@ function ejecutarOp(
     case 'read':
       return { b64: Buffer.from(vault.read(String(p.path))).toString('base64') };
     case 'readMany':
-      // Una tanda de lecturas en UN round-trip: el escaneo inicial ya no paga el bridge
-      // por archivo (el cuello que quedaba en T1). El límite de cuerpo del bridge cubre
-      // lotes de hasta 100 notas de 100 KB.
+      // Tanda de lecturas en un round-trip: el escaneo inicial no paga el bridge por archivo.
       return {
         blobs: (p.paths as string[]).map((ruta) => {
           try {
@@ -159,9 +144,8 @@ function ejecutarOp(
     case 'log':
       console.error(`[runtime] ${String(p.msg)}`);
       return {};
-    // Proxy HTTP desde la página: el PUT de blobs va por acá para NO pagar el preflight
-    // CORS del navegador (uno por URL, y cada blob es una URL). node lo reenvía al server.
-    // IIFE async: `ejecutarOp` es síncrona y el call site resuelve la promesa.
+    // Proxy HTTP: evita el preflight CORS por blob. El IIFE deja que `ejecutarOp` siga
+    // siendo síncrona y el call site resuelva la promesa.
     case 'proxyFetch':
       return (async () => {
         const peticion = p as {
@@ -290,8 +274,7 @@ function manejarFs(
       return;
     }
     try {
-      // Proxy binario: la página manda los bytes crudos y los metadatos en headers; acá
-      // se reenvían con node (evita el preflight CORS por URL y el base64 de 180 KB).
+      // Proxy binario: bytes crudos en el body y metadatos en headers; lo reenvía node.
       const resultado = ejecutarOp(vault, op, params, serverUrl);
       // `proxyFetch` devuelve una promesa (el HTTP real corre en node, fuera del bridge).
       if (resultado instanceof Promise) {
@@ -311,8 +294,6 @@ function manejarFs(
     }
   });
 }
-
-// --------------------------------------------------------------------- runtime
 
 export class BrowserRuntime {
   private secuencia = 0;
@@ -364,8 +345,7 @@ export class BrowserRuntime {
       }
     }
 
-    // Token del puente: se genera por sesión y SOLO lo recibe el Chromium del runtime (header
-    // extra inyectado por Playwright); nunca toca la página ni el disco.
+    // Token del puente: por sesión, solo lo recibe el Chromium (via `route`), nunca el disco.
     const tokenPuente = randomBytes(32).toString('hex');
     const contenido = readFileSync(bundle);
     const servidor = createServer((req, res) => {
@@ -409,9 +389,8 @@ export class BrowserRuntime {
       headless: opciones.headless ?? true,
       args: ['--no-first-run', '--no-default-browser-check'],
     });
-    // El token va SOLO a las requests del puente: un header global (setExtraHTTPHeaders)
-    // viaja también al server y dispara un preflight CORS con un header no permitido
-    // ("Failed to fetch"). `route` es quirúrgico: el resto del tráfico no lo ve.
+    // `route` es quirúrgico: un header global viaja al server y rompe el sync (preflight
+    // CORS con un header no permitido).
     await contexto.route(`http://127.0.0.1:${port}/fs/**`, async (ruta) => {
       await ruta.continue({
         headers: { ...ruta.request().headers(), [HEADER_BRIDGE]: tokenPuente },
