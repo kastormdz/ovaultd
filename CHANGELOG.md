@@ -28,6 +28,13 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y e
   **fail closed** si no hay server configurado. No reenvía `x-ovaultd-*`, `cookie`,
   `host`, `connection`, `transfer-encoding` ni `content-length`. Tests:
   `proxy-allowlist.test.ts`.
+- **Bridge del CLI: token por sesión en `/fs/*`** (F-02). El puente aceptaba
+  operaciones de cualquier proceso local (leer y borrar el vault sin credenciales).
+  Ahora exige un token de 32 bytes generado por sesión, comparado en tiempo
+  constante, que SOLO recibe el Chromium del runtime — inyectado con `route` sobre
+  `/fs/**` y no con `setExtraHTTPHeaders` (un header global viaja también al server,
+  dispara un preflight CORS con un header no permitido y rompe el sync con
+  `Failed to fetch`). Sin token: **401**. Tests: `bridge-token.test.ts`.
 - **`prune-remote`: guarda de "disco vacío"** (F-03). Si el disco local tiene 0
   archivos y el server tiene paths, el plan borraría el vault entero: la comanda
   aborta antes de imprimirlo. Escape hatch explícito: `--permitir-vacio`.

@@ -16,6 +16,7 @@
  * El puente con la página es JSON puro: `call(method, params)` → `dispatch` del runtime.
  */
 
+import { randomBytes, timingSafeEqual } from 'node:crypto';
 import {
   chmodSync,
   existsSync,
@@ -35,6 +36,19 @@ import { chromium, type BrowserContext, type Page } from 'playwright';
 import { NodeFileAdapter, VaultBoundaryError } from './NodeFileAdapter.js';
 
 export const RUNTIME_PORT_DEFAULT = 18_931;
+
+/** Header con el token de ESTA sesión del puente: lo inyecta Playwright en cada request. */
+export const HEADER_BRIDGE = 'x-ovaultd-bridge';
+
+/**
+ * Comparación en tiempo constante del token del puente. Un proceso local sin el token (o con
+ * uno inventado) no puede leer ni borrar el vault: el confinamiento ya impedía salir de la
+ * raíz, esto agrega la AUTORIZACIÓN que faltaba (F-02 de la auditoría 2026-10-20).
+ */
+export function tokenValido(recibido: string | undefined, esperado: string): boolean {
+  if (!recibido || recibido.length !== esperado.length) return false;
+  return timingSafeEqual(Buffer.from(recibido), Buffer.from(esperado));
+}
 
 /**
  * `proxyFetch` existe para que la página no pague un preflight CORS por blob, pero un proxy
@@ -194,7 +208,19 @@ function manejarFs(
   res: ServerResponse,
   vault: NodeFileAdapter,
   serverUrl: string | undefined,
+  tokenPuente: string,
 ): void {
+  // F-02: sin el token de esta sesión no hay operación, ni siquiera de lectura.
+  if (!tokenValido(req.headers[HEADER_BRIDGE] as string | undefined, tokenPuente)) {
+    res.writeHead(401, { 'content-type': 'application/json; charset=utf-8' });
+    res.end(
+      JSON.stringify({
+        ok: false,
+        error: { message: 'token del puente inválido o ausente', name: 'NoAutorizado' },
+      }),
+    );
+    return;
+  }
   const op = req.url!.slice('/fs/'.length);
   const partes: Buffer[] = [];
   let total = 0;
@@ -338,6 +364,9 @@ export class BrowserRuntime {
       }
     }
 
+    // Token del puente: se genera por sesión y SOLO lo recibe el Chromium del runtime (header
+    // extra inyectado por Playwright); nunca toca la página ni el disco.
+    const tokenPuente = randomBytes(32).toString('hex');
     const contenido = readFileSync(bundle);
     const servidor = createServer((req, res) => {
       if (req.url === '/runtime.js') {
@@ -351,7 +380,7 @@ export class BrowserRuntime {
         return;
       }
       if (vault && req.method === 'POST' && req.url?.startsWith('/fs/')) {
-        manejarFs(req, res, vault, serverUrl);
+        manejarFs(req, res, vault, serverUrl, tokenPuente);
         return;
       }
       res.writeHead(404).end();
@@ -379,6 +408,14 @@ export class BrowserRuntime {
     const contexto = await chromium.launchPersistentContext(join(dataDir, 'chromium-profile'), {
       headless: opciones.headless ?? true,
       args: ['--no-first-run', '--no-default-browser-check'],
+    });
+    // El token va SOLO a las requests del puente: un header global (setExtraHTTPHeaders)
+    // viaja también al server y dispara un preflight CORS con un header no permitido
+    // ("Failed to fetch"). `route` es quirúrgico: el resto del tráfico no lo ve.
+    await contexto.route(`http://127.0.0.1:${port}/fs/**`, async (ruta) => {
+      await ruta.continue({
+        headers: { ...ruta.request().headers(), [HEADER_BRIDGE]: tokenPuente },
+      });
     });
 
     try {
