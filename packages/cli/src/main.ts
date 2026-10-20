@@ -335,11 +335,17 @@ programa
   .description('una pasada (o --continuous): sube los cambios locales y baja los remotos')
   .option('--continuous', 'sigue corriendo: intervalos + backoff con reconexión')
   .option('--interval <segundos>', 'segundos entre pasadas en --continuous', '5')
+  .option('--rescan', 'ignora el cache del escaneo: relee y hashea todo el vault')
   .option('--password-stdin', 'lee la password de stdin (para scripts)')
   .action(
     async (
       vaultTexto: string | undefined,
-      opciones: { continuous?: boolean; interval: string; passwordStdin?: boolean },
+      opciones: {
+        continuous?: boolean;
+        interval: string;
+        rescan?: boolean;
+        passwordStdin?: boolean;
+      },
     ) => {
       const abierto = await abrirVaultLocal(vaultTexto, opciones);
       try {
@@ -382,7 +388,9 @@ programa
             blocked?: { rev: number; reason?: string };
             resync?: { since: number; minRev: number };
           };
-          const empujado = (await abierto.runtime.call('sync.pushOnce')) as {
+          const empujado = (await abierto.runtime.call('sync.pushOnce', {
+            rescan: opciones.rescan === true,
+          })) as {
             encoladas: number;
             empujadas: number;
             headRev: number;

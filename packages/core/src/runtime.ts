@@ -351,19 +351,22 @@ const handlers: Record<string, Handler> = {
     };
   },
 
-  'sync.pushOnce': async () => {
+  'sync.pushOnce': async (params: { rescan?: boolean } = {}) => {
     if (!syncConn || !syncVaultMeta) {
       throw new Error('sync: no hay conexión abierta (sync.open primero)');
     }
     const { store, keys } = exigirApply();
-    return pushOnce({
-      store,
-      port: new HttpFileSystemPort(globalThis.location.origin),
-      keys,
-      conn: syncConn,
-      vaultUuid: syncVaultMeta.vaultUuid,
-      epoch: syncVaultMeta.epoch,
-    });
+    return pushOnce(
+      {
+        store,
+        port: new HttpFileSystemPort(globalThis.location.origin),
+        keys,
+        conn: syncConn,
+        vaultUuid: syncVaultMeta.vaultUuid,
+        epoch: syncVaultMeta.epoch,
+      },
+      { rescan: params.rescan === true },
+    );
   },
 
   /**

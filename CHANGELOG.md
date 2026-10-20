@@ -9,6 +9,14 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y e
 
 ### Added
 
+- **CLI: `prune-remote`** — reconcilia los paths vivos del server contra el disco local.
+  El server es ciego (E2EE): un borrado local sin sync deja el path vivo en `files` y el
+  panel lo cuenta de más. Baja el oplog completo, lo colapsa por `path_id`, descifra cada
+  ruta y la compara contra el filesystem. Dry-run por defecto; `--yes` encola un `del` por
+  huérfano. `--json` para scripts.
+- **CLI: `sync --rescan`** — ignora el cache del escaneo y relee/hashea todo el vault.
+  Remedio manual para el caso (no reproducido) en que una modificación hecha fuera del
+  runtime no se detecta como cambio hasta el próximo evento.
 - **CLI: `cat`, `write`, `ls` y `rm`** sobre el vault local (`packages/cli/src/vault-fs.ts`).
   Es la base del dispositivo-agente de la fase 4: el vault sincronizado se edita como
   archivos y el `sync` propaga; las rutas se validan con `validarRutaDeVault` y no pueden

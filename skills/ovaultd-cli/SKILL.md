@@ -53,6 +53,7 @@ levanta Chromium con Playwright; no hay binario autónomo).
 | `ovaultd setup <id> --dir <carpeta>` | vincula una carpeta local al vault |
 | `ovaultd sync [id]` | una pasada: sube cambios locales y baja remotos |
 | `ovaultd sync --continuous` | queda corriendo (servicio) |
+| `ovaultd sync --rescan` | ignora el cache: relee y hashea todo el vault |
 | `ovaultd status` | sesión, server y vaults locales |
 | `ovaultd list-local [id]` | scan + hash-diff, **sin red** |
 | `ovaultd cat <ruta>` | imprime un archivo (binario-safe) |

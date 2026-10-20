@@ -102,12 +102,18 @@ const operacionBytes = (operationId: string): Uint8Array => {
  * Encola el diff en la outbox (save-first: el snapshot queda persistido y verificado
  * antes de cualquier publicación).
  */
-async function encolarDiff(deps: PushDeps, head: number): Promise<{ diff: PushReport['diff']; encoladas: number; deletesBloqueados: number }> {
+async function encolarDiff(
+  deps: PushDeps,
+  head: number,
+  /** Ignora el cache del escaneo: lee y hashea TODO el vault (remedio y diagnóstico). */
+  rescan = false,
+): Promise<{ diff: PushReport['diff']; encoladas: number; deletesBloqueados: number }> {
   const { store, port, keys } = deps;
   // Cache del escaneo incremental: el índice guarda mtime+size+hash de lo último visto
   // (el push lo escribe al confirmar); si nada cambió, el scan no lee el contenido.
+  // Con `rescan` el cache va vacío: cada archivo se lee y se hashea de nuevo.
   const cache = new Map(
-    (await store.listIndex()).map((entrada) => [
+    (rescan ? [] : await store.listIndex()).map((entrada) => [
       entrada.path ?? '',
       { mtime: entrada.mtime ?? null, size: entrada.size ?? null, contentHash: entrada.contentHash ?? null },
     ]),
@@ -368,13 +374,13 @@ function marcarFase(nombre: keyof typeof FASES, ms: number): void {
   FASES[nombre] += ms;
 }
 
-export async function pushOnce(deps: PushDeps): Promise<PushReport> {
+export async function pushOnce(deps: PushDeps, opciones: { rescan?: boolean } = {}): Promise<PushReport> {
   for (const clave of Object.keys(FASES) as Array<keyof typeof FASES>) FASES[clave] = 0;
   const t0Total = performance.now();
   const { store } = deps;
   let head = (await store.readCheckpoint().catch(() => null))?.since ?? 0;
 
-  const { diff, encoladas, deletesBloqueados } = await encolarDiff(deps, head);
+  const { diff, encoladas, deletesBloqueados } = await encolarDiff(deps, head, opciones.rescan === true);
   let empujadas = 0;
 
   const tLista = performance.now();

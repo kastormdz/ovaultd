@@ -40,6 +40,7 @@ ovaultd sync <ID>
 ovaultd sync                 # one pass over every linked vault
 ovaultd sync <ID>            # one vault
 ovaultd sync --continuous    # keep running (systemd-friendly)
+ovaultd sync --rescan        # ignore the scan cache: re-read and hash the whole vault
 ovaultd list-local           # scan + hash-diff, no network
 ovaultd status
 ```
