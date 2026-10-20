@@ -41,6 +41,7 @@ ovaultd sync                 # one pass over every linked vault
 ovaultd sync <ID>            # one vault
 ovaultd sync --continuous    # keep running (systemd-friendly)
 ovaultd sync --rescan        # ignore the scan cache: re-read and hash the whole vault
+ovaultd sync --continuous --rescan-every 60   # full rescan every 60 cycles (~5 min)
 ovaultd list-local           # scan + hash-diff, no network
 ovaultd status
 ```
@@ -59,7 +60,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=%h/.local/bin/ovaultd sync --continuous --interval 5
+ExecStart=%h/.local/bin/ovaultd sync --continuous --interval 5 --rescan-every 60
 Environment=OVAULTD_CONFIG_DIR=%h/.config/ovaultd
 Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
 Restart=on-failure

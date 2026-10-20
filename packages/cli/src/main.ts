@@ -336,6 +336,11 @@ programa
   .option('--continuous', 'sigue corriendo: intervalos + backoff con reconexión')
   .option('--interval <segundos>', 'segundos entre pasadas en --continuous', '5')
   .option('--rescan', 'ignora el cache del escaneo: relee y hashea todo el vault')
+  .option(
+    '--rescan-every <ciclos>',
+    'en --continuous, rescan completo cada N ciclos (0 = nunca; el 1er ciclo siempre)',
+    '0',
+  )
   .option('--password-stdin', 'lee la password de stdin (para scripts)')
   .action(
     async (
@@ -344,6 +349,7 @@ programa
         continuous?: boolean;
         interval: string;
         rescan?: boolean;
+        rescanEvery?: string;
         passwordStdin?: boolean;
       },
     ) => {
@@ -376,7 +382,17 @@ programa
           });
         };
 
+        const cadaN = Math.max(0, Number.parseInt(opciones.rescanEvery ?? '0', 10) || 0);
+        let ciclo = 0;
+
         const pasada = async (): Promise<void> => {
+          // Rescan periódico: el escaneo incremental confía en mtime+size+hash,
+          // y una race entre un write externo y el scan puede dejar el índice y
+          // el base desalineados. Un rescan completo cada N ciclos lo corrige sin
+          // pagar O(vault) en cada pasada (en 100 MB sería ~0,5 s por ciclo).
+          // El primer ciclo siempre rescan: cubre los cambios con el servicio parado.
+          const rescan = opciones.rescan === true || (cadaN > 0 && ciclo % cadaN === 0);
+          ciclo += 1;
           // Orden del plan (§4.2): PULL primero — la base queda al día y el push que
           // sigue rebasea con el head actual (una operación que quedó pendiente de una
           // corrida anterior se firma/commitea contra la base NUEVA, y si su contenido
@@ -389,7 +405,7 @@ programa
             resync?: { since: number; minRev: number };
           };
           const empujado = (await abierto.runtime.call('sync.pushOnce', {
-            rescan: opciones.rescan === true,
+            rescan,
           })) as {
             encoladas: number;
             empujadas: number;

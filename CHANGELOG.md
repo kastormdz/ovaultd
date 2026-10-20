@@ -15,8 +15,9 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y e
   ruta y la compara contra el filesystem. Dry-run por defecto; `--yes` encola un `del` por
   huérfano. `--json` para scripts.
 - **CLI: `sync --rescan`** — ignora el cache del escaneo y relee/hashea todo el vault.
-  Remedio manual para el caso (no reproducido) en que una modificación hecha fuera del
-  runtime no se detecta como cambio hasta el próximo evento.
+  `--rescan-every <n>` lo hace periódico en `--continuous` (el 1er ciclo siempre rescan):
+  el servicio usa 60 (~5 min) para corregir una desalineación entre el índice y el disco
+  sin pagar O(vault) en cada pasada.
 - **CLI: `cat`, `write`, `ls` y `rm`** sobre el vault local (`packages/cli/src/vault-fs.ts`).
   Es la base del dispositivo-agente de la fase 4: el vault sincronizado se edita como
   archivos y el `sync` propaga; las rutas se validan con `validarRutaDeVault` y no pueden

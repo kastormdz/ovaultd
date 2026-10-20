@@ -9,7 +9,10 @@ Type=simple
 # El comando es un shim sobre el dist del checkout (ver scripts/instalar-cli.sh).
 # Requiere que el vault esté vinculado y con las subclaves cacheadas: el primer
 # `ovaultd sync` se corre a mano (pide la password del vault una vez).
-ExecStart=%h/.local/bin/ovaultd sync --continuous --interval 5
+# --rescan-every 60: cada ~5 min (60 ciclos de 5 s) un escaneo completo corrige
+# cualquier desalineación entre el índice incremental y el disco; el primer ciclo
+# siempre rescan (cambios hechos con el servicio parado).
+ExecStart=%h/.local/bin/ovaultd sync --continuous --interval 5 --rescan-every 60
 Environment=OVAULTD_CONFIG_DIR=%h/.config/ovaultd
 Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
 # Si el server o la red se caen, reintenta sin intervención.
