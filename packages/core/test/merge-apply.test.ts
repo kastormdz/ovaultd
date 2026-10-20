@@ -328,6 +328,55 @@ describe('merge 3-vías integrado al apply', () => {
   });
 });
 
+  it('appearance.json: el tema del remoto gana y el modo local se conserva', async () => {
+    const PATH_AP = '.obsidian/appearance.json';
+    const PATH_ID_AP = 'bb'.repeat(32);
+    const baseTexto = JSON.stringify({ cssTheme: 'Anu', theme: 'obsidian', baseFontSize: 16 });
+    // Obsidian reescribe appearance.json con SU orden de claves: el texto cambia entero
+    // aunque semánticamente solo haya cambiado el modo. Es el caso real.
+    const localTexto = JSON.stringify({ theme: 'moonstone', baseFontSize: 18, cssTheme: 'Anu' });
+    const remotoTexto = JSON.stringify({ cssTheme: 'Cosmic', theme: 'obsidian', baseFontSize: 16 });
+
+    const storedBase = encryptBlob(CLAVES, cod.encode(baseTexto));
+    const blobIdBase = toHex(blobId(storedBase));
+    const storedRemoto = encryptBlob(CLAVES, cod.encode(remotoTexto));
+
+    const { store, base } = storeFake();
+    base.set(PATH_ID_AP, {
+      pathId: PATH_ID_AP,
+      rev: 3,
+      blobId: blobIdBase,
+      contentHash: sha256Hex(cod.encode(baseTexto)),
+    });
+    const { port, files } = portFake({ [PATH_AP]: localTexto });
+    const conn = connFake(new Map([[blobIdBase, storedBase]]));
+
+    const deps: ApplyDeps = {
+      store: store as unknown as StateStore,
+      port: port as unknown as FileSystemPort,
+      keys: CLAVES,
+      conn,
+      politicaDeConflictos: 'bloquear',
+    };
+    const revision: ApplyRevision = {
+      pathId: PATH_ID_AP,
+      path: PATH_AP,
+      kind: 'file',
+      deleted: false,
+      rev: 6,
+      blobId: toHex(blobId(storedRemoto)),
+      contentHash: null,
+    };
+
+    const resultado = await applyRevision(deps, revision, storedRemoto);
+
+    expect(resultado.status).toBe('merged');
+    const final = JSON.parse(dec.decode(files.get(PATH_AP)!)) as Record<string, unknown>;
+    expect(final.cssTheme).toBe('Cosmic'); // el tema viaja
+    expect(final.theme).toBe('moonstone'); // el modo local se conserva
+    expect(final.baseFontSize).toBe(18); // y el tamaño también
+  });
+
 describe('conflictos: política por defecto (conservar copia, estilo Obsidian Sync)', () => {
   it('el path del conflicto: sello de 12 dígitos, extensión y dispositivo saneado', () => {
     const cuando = new Date('2026-10-19T20:45:31Z');

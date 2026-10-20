@@ -21,7 +21,7 @@ import { toHex } from '@ovaultd/protocol';
 
 import { createIntent } from './apply.js';
 import type { FileSystemPort } from './file-port.js';
-import { hashDePath } from './apariencia.js';
+import { esApariencia, hashDePath, mergeDeApariencia } from './apariencia.js';
 import { esMergeablePorTipo, mergeDeTexto } from './merge.js';
 import type { IntentEntry, StateStore } from './StateStore.js';
 import type { SyncConnection } from './SyncConnection.js';
@@ -252,6 +252,17 @@ async function intentarFusionar(
     const oursHash = hashDePath(revision.path, bytesOurs);
     const textoOurs = dec.decode(bytesOurs);
     const textoTheirs = dec.decode(plaintextRemoto);
+
+    // appearance.json NO se mergea como texto: Obsidian lo reescribe con su orden de
+    // claves y el diff por caracteres se solapa aunque los cambios sean disjuntos. Acá
+    // manda el merge POR CAMPO (tema/snippets del remoto; modo y fuentes locales).
+    if (esApariencia(revision.path)) {
+      return {
+        fusion: new TextEncoder().encode(mergeDeApariencia(textoBase, textoOurs, textoTheirs)),
+        oursHash,
+        hashRemoto,
+      };
+    }
 
     const resultado = mergeDeTexto(textoBase, textoOurs, textoTheirs);
     if (resultado.tipo === 'conflicto') return null;
