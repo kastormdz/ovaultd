@@ -18,6 +18,25 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y e
   `OVAULTD_ALLOWED_ORIGINS=*` queda como escape hatch explícito; un CSV sigue
   permitiendo exactamente esos orígenes. 5 tests en `tests/cors.rs`.
 
+## [0.2.12] — 2026-10-20
+
+### Changed
+
+- **Panel: "Archivos", no "Notas".** El KPI y la columna cuentan todo lo que vive
+  en el vault (markdown + adjuntos + config), no solo notas; el label ahora dice
+  lo que el número es.
+
+### Fixed
+
+- **Barrido de uploads abandonados también al arrancar** (F-06 de la auditoría).
+  El ticker solo corría cada hora, así que un `.part` huérfano de un crash
+  esperaba hasta 60 minutos para limpiarse.
+
+### Tests
+
+- `la_ventana_vieja_se_descarta` estabilizado: espera por reloj hasta 5 s en vez
+  de 1 s fijo, que bajo la carga de los tests de Argon2 se quedaba corto (flaky).
+
 ## [Unreleased]
 
 ### Security

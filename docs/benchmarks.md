@@ -1,4 +1,4 @@
-# Benchmarks — LAN (fase 5, paso 6)
+# Benchmarks: LAN (fase 5, paso 6)
 
 Números **medidos**, no estimados: cada corrida sale de `tests/scripts/bench-lan.sh` contra
 un server real (no hay mocks ni simulación de red). El script se puede re-correr en
@@ -13,14 +13,14 @@ BENCH_EMAIL=… BENCH_PASSWORD=… BENCH_VAULT_PASSWORD=… \
   CLI del núcleo: **T1** primera subida (vault nuevo), **T2** ciclo en reposo, **T3** un
   cambio suelto y **T4** la bajada completa en un **segundo cliente aislado** (config y
   runtime propios: sin eso el segundo cliente hereda el checkpoint del primero y en vez de
-  bajar sube borrados — el script lo caza con un assert).
+  bajar sube borrados; el script lo caza con un assert).
 - Credenciales SIEMPRE por entorno; el vault de prueba se borra del server al final
   (`BENCH_LIMPIAR=0` para conservarlo).
 
 ## Resultado de referencia (2026-10-18)
 
 **1000 notas × ~100 KB = 100,0 MB** · server `0.2.7` · cliente y server en el **mismo host**
-(loopback; una LAN real y el Wi-Fi del teléfono van más lento — este número es el techo del
+(loopback; una LAN real y el Wi-Fi del teléfono van más lento; este número es el techo del
 software, no de la red) · SSD, binario `debug` del lab de desarrollo (un release real es
 más rápido).
 
@@ -40,7 +40,7 @@ más rápido).
 | **T3** un cambio suelto | editar 1 de 1000 notas y subirla | **3,4 s** |
 | **T4** bajada completa | segundo cliente baja 1001 revisiones (↓1001 · ↑0) | **39,1 s** (~2,6 MB/s) |
 
-Qué cambió: las operaciones se mandan **agrupadas (50 por batch, UNA revisión por lote —
+Qué cambió: las operaciones se mandan **agrupadas (50 por batch, UNA revisión por lote,
 el modelo del restore masivo)** y los PUT de blobs corren **en paralelo**; el escaneo reusa
 el hash del índice cuando mtime+size no cambiaron (no lee los 100 MB) y pide los stats en
 **un solo `statMany`** (antes: un POST por archivo al puente). El delta de un cambio y el
@@ -56,7 +56,7 @@ reposo bajaron ~80 %; la subida inicial, 29 %.
 | **T4** bajada | **38,7 s** |
 
 Los ~1,8 s de T2/T3 **incluyen el arranque de Chromium del CLI** (~1,5 s): **el ciclo neto
-quedó en ~0,3 s**, por debajo del target de un segundo — y en el plugin (motor persistente,
+quedó en ~0,3 s**, por debajo del target de un segundo, y en el plugin (motor persistente,
 sin arranque) el ciclo también es ~0,3 s.
 
 ### Corrida 2026-10-19 (ter) · `readMany`, puente binario y el piso criptográfico
@@ -75,10 +75,10 @@ a node, sin preflight CORS (el cache del navegador es por URL y cada blob tiene 
 
 **Descartado con medición** (cada uno era un sospechoso razonable del T1): fsync del CAS
 por blob (diferido al commit con un `syncfs` por lote: 71,9 → 70,7 s), fsync del WAL de
-SQLite (A/B `synchronous=NORMAL`: 70,1 vs 70,8 s — ruido), Nagle/delayed ACK
+SQLite (A/B `synchronous=NORMAL`: 70,1 vs 70,8 s, ruido), Nagle/delayed ACK
 (`TCP_NODELAY` en el listener: sin cambio, pero queda), base64 del puente (binario crudo:
 sin cambio medible), preflight CORS (sin cambio en el agregado) y **el hash SHA-256 del
-provider** (medido: 0,5 ms por nota de 100 KB — no es el cuello).
+provider** (medido: 0,5 ms por nota de 100 KB; no es el cuello).
 
 **Lo que sí se midió del costo por nota (~69 ms)**: el salto página→puente→server cuesta
 16-32 ms en node (`[proxy]`) y 27-142 ms medido desde la página (`[runtime]`), y el resto

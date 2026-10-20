@@ -1,7 +1,7 @@
-# Gateway cripto `sync2` — evidencia (fase 0.2)
+# Gateway cripto `sync2`: evidencia (fase 0.2)
 
 - **Fecha:** 2026-09-25
-- **Resultado:** ✅ **`INTEROP sync2 OK`** — Rust y JS derivan, envuelven, cifran y firman **byte a byte idéntico**.
+- **Resultado:** ✅ **`INTEROP sync2 OK`**: Rust y JS derivan, envuelven, cifran y firman **byte a byte idéntico**.
 - **Contrato de bytes:** `docs/decisions/0006-g1-g2-vaultid-y-firma-encadenada.md`
 - **Vectores congelados:** `tests/fixtures/crypto/sync2.json` (32 vectores)
 
@@ -67,7 +67,7 @@ En 765 líneas de cripto, `gpt-5.6-luna` produjo **4 defectos, todos mecánicos*
 tipo con `.into()`), 2 campos con formato incorrecto (imprimía el hex descifrado en lugar de `OK|FAIL`) y 1 constante
 copiada del prompt. ~0,5%. Lo caro no es arreglarlos: es **detectarlos**.
 
-### H-3 · G-6 (AEAD incremental) — medido, pendiente de decisión
+### H-3 · G-6 (AEAD incremental): medido, pendiente de decisión
 
 XChaCha20-Poly1305 **no** expone una API incremental. Medido con archivos de **8 / 64 / 256 MiB** en proceso limpio
 (`probe-o1.mjs`, node 22.23, chunks de 64 KiB):
@@ -76,12 +76,12 @@ XChaCha20-Poly1305 **no** expone una API incremental. Medido con archivos de **8
 |---|---|
 | **Pasada 1** (nonce, HMAC incremental) | el pico **no escala** con el tamaño: **+8,1 MiB** (8 MiB) · **+14,1 MiB** (64 MiB) · **+7,2 MiB** (256 MiB) sobre la base de node (39,5–66 MiB) ⇒ **O(1)** ✅ |
 | **Pasada 2** (AEAD de mensaje único) | el pico **sí escala**: **347 MiB** de RSS y **257 MiB** de `arrayBuffers` para 64 MiB ⇒ **~4× el archivo, O(n)** ❌ |
-| Nonce con chunks de 1 KiB / 64 KiB / 1 MiB / buffer completo | **OK** — la partición no cambia el nonce (es lo que habilita la pasada 1 acotada) |
+| Nonce con chunks de 1 KiB / 64 KiB / 1 MiB / buffer completo | **OK**: la partición no cambia el nonce (es lo que habilita la pasada 1 acotada) |
 | Modificación del archivo entre pasadas | **ABORT** (tamaño + hash + mtime): nunca publica ciphertext de un archivo que cambió |
 | `blob`/`blob_id` de dos pasadas vs mensaje completo | **idéntico** (`BLOB_MATCH OK`) |
 
 **Corrección de una medición previa:** el primer run reportaba `PEAK_RSS_PASS1 = 81,45 MiB`, **contaminado** por el buffer
-de 64 MiB que el propio script usaba para *generar* el archivo de prueba. Medido aparte —proceso limpio, tres tamaños—
+de 64 MiB que el propio script usaba para *generar* el archivo de prueba. Medido aparte (proceso limpio, tres tamaños)
 la pasada 1 no escala. El script ya reporta `BASE_RSS_MIB` y **deltas**, así que la contaminación queda a la vista:
 corrida corregida (64 MiB) → `BASE_RSS_MIB 80,93` · `PEAK_RSS_PASS1_DELTA_MIB 0,13` · `PEAK_RSS_PASS2_DELTA_MIB 225,54` ·
 `PEAK_ARRAYBUFFERS_PASS2_MIB 257,01`.
@@ -90,5 +90,5 @@ Moraleja: un número que no se mide aislado es un número que miente.
 
 **DECIDIDO (2026-09-25) → `docs/decisions/0007-contenido-soportado-y-tope-de-tamano.md`:** opción **(1)**, tope duro de
 **32 MiB** de contenido. El alcance del MVP son **notas**, así que el O(n) queda acotado y predecible (~130 MiB de pico
-por subida con un blob en vuelo) sin cambiar `sync2`. La opción (2) —AEAD por chunk— queda documentada como el camino a
+por subida con un blob en vuelo) sin cambiar `sync2`. La opción (2), AEAD por chunk, queda documentada como el camino a
 seguir **sólo si** el caso de uso cambia; no se traslada el problema al plugin (fase 3).

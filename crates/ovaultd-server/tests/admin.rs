@@ -377,7 +377,7 @@ async fn las_estadisticas_muestran_las_notas_reales() -> Result<()> {
 
     // Dashboard global: aparecen los contadores nuevos.
     let html = cuerpo(contexto.request(get_con_cookie("/admin", &cookie)?).await?).await?;
-    assert!(html.contains(">Notas<"));
+    assert!(html.contains(">Archivos<"));
     assert!(html.contains(">Almacenado<"));
 
     // /admin/vaults: el vault real con sus notas y el espacio (91 B del blob).
@@ -944,7 +944,7 @@ async fn vault_detalle_muestra_los_numeros_de_la_db() -> Result<()> {
     assert_eq!(resp.status(), StatusCode::OK);
     let html = cuerpo(resp).await?;
     assert!(html.contains("vault-de-integracion"), "nombre del vault");
-    assert!(html.contains("Notas vivas"), "las stats del vault están");
+    assert!(html.contains("Archivos vivos"), "las stats del vault están");
     // El link de borrado vive en el detalle.
     assert!(html.contains(&format!("/admin/vaults/borrar?id={}", contexto.vault_id)));
 

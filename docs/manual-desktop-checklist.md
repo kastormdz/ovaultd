@@ -1,8 +1,8 @@
-# Checklist manual — plugin de escritorio (`oVaultd Sync`)
+# Checklist manual: plugin de escritorio (`oVaultd Sync`)
 
 Prueba de la UI del plugin en Obsidian de **escritorio** contra un server real. No
 reemplaza a los E2E (los specs de Chromium y los E2E de contenedor cubren el motor y el
-wire): acá se mira lo que un test no ve — la UX, los modales, los mensajes, y que nada se
+wire): acá se mira lo que un test no ve: la UX, los modales, los mensajes, y que nada se
 pierda con las manos en el teclado.
 
 - **Requiere**: un server `ovaultd` accesible (el dominio propio, p. ej.
@@ -91,6 +91,6 @@ pierda con las manos en el teclado.
       cuenta SOBREVIVE (no hay que loguearse de nuevo).
 - [ ] **Vincular** de nuevo la misma carpeta. Esperado: sube el vault entero como altas en el
       primer ciclo (el índice viejo NO sobrevive: si dijera «sin cambios», el desvínculo no
-      borró el índice — bug).
+      borró el índice; bug).
 - [ ] Con el vault de A desvinculado, mirar el de B: nada cambió (desvincular no toca el
       server).

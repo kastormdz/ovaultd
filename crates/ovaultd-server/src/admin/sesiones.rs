@@ -272,16 +272,17 @@ mod tests {
         limitador.registrar("k");
         assert!(!limitador.permitir("k"));
 
-        // Bajo carga (los tests de Argon2 saturan la CPU) un sleep fijo de 10 ms puede
-        // quedarse corto y el test se vuelve flaky: se reintenta hasta 1 s.
+        // Bajo carga (los tests de Argon2 saturan la CPU) el hilo puede no ser schedulado
+        // por más de un segundo: se reintenta con un techo amplio, midiendo por reloj.
+        let inicio = std::time::Instant::now();
         let mut permitido = false;
-        for _ in 0..100 {
+        while inicio.elapsed() < Duration::from_secs(5) {
             if limitador.permitir("k") {
                 permitido = true;
                 break;
             }
-            std::thread::sleep(Duration::from_millis(10));
+            std::thread::sleep(Duration::from_millis(5));
         }
-        assert!(permitido, "la ventana de 1 ms no expiró en 1 s");
+        assert!(permitido, "la ventana de 1 ms no expiró en 5 s");
     }
 }

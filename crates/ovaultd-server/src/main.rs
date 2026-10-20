@@ -79,6 +79,13 @@ async fn iniciar_servidor() -> Result<(), String> {
             let periodo = std::time::Duration::from_secs(3600);
             let mut intervalo = tokio::time::interval_at(tokio::time::Instant::now() + periodo, periodo);
             intervalo.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            // F-06: un barrido al arrancar. El ticker solo no corre hasta la primera hora,
+            // así que un `.part` huérfano de un crash esperaba 60 minutos.
+            match ovaultd_server::uploads::barrer(&pool_barrido, &cas_raiz).await {
+                Ok(0) => {}
+                Ok(borradas) => tracing::info!(borradas, "barrido de uploads al arrancar"),
+                Err(error) => tracing::warn!(%error, "barrido de uploads al arrancar falló"),
+            }
             loop {
                 intervalo.tick().await;
                 match ovaultd_server::uploads::barrer(&pool_barrido, &cas_raiz).await {
