@@ -1,7 +1,7 @@
 # Development
 
 Building, testing and the rules that keep the protocol frozen. Nothing here is needed to *use*
-ovaultd — this is the contributor's path, kept out of the README on purpose.
+ovaultd. This is the contributor's path, kept out of the README on purpose.
 
 ## Build and test
 
@@ -40,7 +40,7 @@ import, because the same `main.js` runs on mobile.
   is the anti-drift gate.
 - `scripts/scan-leaks.sh` checks the repo for accidentally committed infrastructure details and
   credentials, in the worktree and in history. Personal patterns (your hostnames, users, subnets)
-  go in the gitignored `scripts/leaks.local` — see `scripts/leaks.local.example`. Wire it as a
+  go in the gitignored `scripts/leaks.local`; see `scripts/leaks.local.example`. Wire it as a
   pre-commit hook with `git config core.hooksPath .githooks`.
 - Client changes that touch sync are verified against a real server, not only with unit tests: a
   vault with a real file tree (empty files, subdirectories) and a second device are what find the

@@ -139,7 +139,7 @@ Los tests abren la base con `crate::db::connect(...)`. **Prohibido** armar la co
 `busy_timeout`, y el test termina fallando por un motivo ajeno al codigo que dice probar (real: `code 14 unable to
 open database file`). La regla general: **un test usa el mismo camino que produccion, o no prueba produccion.**
 
-## Commit del batch — `sync/commit.rs` (ADR-0008, opcion A)
+## Commit del batch: `sync/commit.rs` (ADR-0008, opcion A)
 
 La **unica** ruta de escritura del servidor. Un mensaje `batch` = una transaccion = **una** revision.
 
@@ -184,7 +184,7 @@ cliente que no puede firmar tampoco consulta la tabla de idempotencia.
 
 **De donde sale cada campo firmado** (es el error mas facil de cometer, y ya se cometio dos veces): `path_id`,
 `blob_id`, `t`, `op`, `size`, `mtime` y `operation_id(16)` salen **del op**; **`expected_rev` sale del sobre del
-batch** (`Batch`) —hay uno solo por batch, y es el mismo que usa el CAS—; y `epoch` sale **de la fila del
+batch** (`Batch`; hay uno solo por batch, y es el mismo que usa el CAS); y `epoch` sale **de la fila del
 vault**. El orden de los argumentos es el de `ovaultd_crypto::verify_record`, no el que uno recuerde: se lee de su
 firma.
 
@@ -214,13 +214,13 @@ vez del ack, y el cliente rebasaria una base que no cambio. Es el invariante de 
 
 ### Invariantes
 
-- **Todas las filas comparten `rev`.** Un batch entra entero o no entra.
-- **El servidor NUNCA inventa una fila de `revisions`.** Cada fila corresponde a una op del cliente y lleva **su**
+- Todas las filas comparten `rev`. Un batch entra entero o no entra.
+- El servidor NUNCA inventa una fila de `revisions`. Cada fila corresponde a una op del cliente y lleva **su**
   `sig`. Por eso un `move` no genera una fila `del` derivada: seria una fila sin firma, y el cliente rechaza historia
   sin firmar (anti-rollback).
 - `expected_rev` se persiste en cada fila (ADR-0006): sin eso la firma no se puede **re-verificar** despues del push.
 - `epoch` = el de `vaults.epoch` al momento del commit.
-- **Cero plaintext:** el servidor guarda ciphertext, hashes y metadata. Ni un nombre ni un byte de contenido.
+- Cero plaintext: el servidor guarda ciphertext, hashes y metadata. Ni un nombre ni un byte de contenido.
 
 ### Tests que este archivo tiene que dejar en verde
 
@@ -237,7 +237,7 @@ vez del ack, y el cliente rebasaria una base que no cambio. Es el invariante de 
    La consulta va contra **`batches`**: `SELECT rev FROM batches WHERE vault_id = ? AND operation_id = ? LIMIT 1`, que
    es donde vive la clave única (`idx_batches_operation`). En **`revisions`** el `operation_id` va en **cada fila**
    (es un campo **FIRMADO**: `msg_rec` cubre `operation_id(16)`) y **no es único**: las N ops de un batch comparten
-   uno solo. Si se guardara en una sola fila, el cliente **no podría re-verificar** la firma de las demás — y la
+   uno solo. Si se guardara en una sola fila, el cliente **no podría re-verificar** la firma de las demás, y la
    verificación no puede depender de cuál fila es.
    **Carrera** de dos commits con el mismo `operation_id`: el que pierde choca con `idx_batches_operation` dentro de
    la transacción -> rollback, re-lectura de `batches` y respuesta idempotente. Un reintento legítimo **nunca** puede
@@ -260,7 +260,7 @@ vez del ack, y el cliente rebasaria una base que no cambio. Es el invariante de 
 
 ---
 
-## Delta — `sync/delta.rs`
+## Delta: `sync/delta.rs`
 
 ```rust
 pub async fn changes(pool: &SqlitePool, vault_id: i64, since: i64, limit: i64) -> Result<Changes>;
@@ -309,7 +309,7 @@ Base: `crate::db::connect` + `sqlx::migrate!("../../migrations")`, como en `comm
 
 ---
 
-## Autenticación de cuenta — `auth.rs` (ADR-0011)
+## Autenticación de cuenta: `auth.rs` (ADR-0011)
 
 ```rust
 pub async fn crear_cuenta(pool: &SqlitePool, email: &str, password: &str) -> Result<Cuenta>;
@@ -332,7 +332,7 @@ pub fn verificar_password(password: &str, phc: &str) -> Result<bool>;
 5. MFA: no se implementa en este bloque. Si el transporte recibe `mfa`, responde `not_implemented` (ADR-0011 §5): **no se
    ignora en silencio**.
 6. `hash_password`/`verificar_password` son `pub` para poder probarlos sin HTTP, y `verificar_password` devuelve `Ok(false)`
-   —no error— cuando el hash no parsea o no verifica: un PHC corrupto en la base es un "no verifica", no un 500.
+   (no error) cuando el hash no parsea o no verifica: un PHC corrupto en la base es un "no verifica", no un 500.
 
 ### Tests nombrados (en `auth.rs`, junto a los 4 que ya están)
 
@@ -345,7 +345,7 @@ pub fn verificar_password(password: &str, phc: &str) -> Result<bool>;
 
 ---
 
-## Superficie HTTP — `routes.rs` (Fase 1, ADR-0011)
+## Superficie HTTP: `routes.rs` (Fase 1, ADR-0011)
 
 ### Estado
 
@@ -353,7 +353,7 @@ pub fn verificar_password(password: &str, phc: &str) -> Result<bool>;
 #[derive(Clone)]
 pub struct EstadoServidor { pub pool: SqlitePool, pub config: Config }
 ```
-Todo handler recibe `State<EstadoServidor>` y devuelve **`Result<T>`** — el alias de `error.rs`
+Todo handler recibe `State<EstadoServidor>` y devuelve **`Result<T>`**, el alias de `error.rs`
 (`pub type Result<T> = std::result::Result<T, ServerError>`, error.rs:10) que ya trae el `ServerError` adentro.
 `ServerError` **ya** implementa `IntoResponse` y la lista de códigos del protocolo es **cerrada**: no se agrega
 una variante ni un código nuevo acá.
@@ -375,7 +375,7 @@ una variante ni un código nuevo acá.
 | POST | `/admin/logout` | sesión + CSRF | revoca la sesión y expira la cookie |
 | GET/POST | `/admin/mi-cuenta` | sesión + CSRF | cambiar la password de la propia cuenta (actual + nueva ≥8); al cambiarla se revocan las demás sesiones del panel |
 | GET | `/admin/assets/{admin.css,htmx.min.js}` | no | assets embebidos en el binario (sin CDNs; htmx es progresivo: el panel funciona sin JS) |
-| GET | `/healthz` | no | liveness/readiness: `{"status":"ok"}` (503 si la base no responde) — healthcheck de compose |
+| GET | `/healthz` | no | liveness/readiness: `{"status":"ok"}` (503 si la base no responde); healthcheck de compose |
 | GET | `/metrics` | no | Prometheus mínimo de operación (`ovaultd_up`, `ovaultd_uptime_seconds`); sin secretos; restringir en el proxy |
 | POST | `/api/v1/auth/signin` | no | `{email, password, mfa?}` -> `{token, device_id}` |
 | POST | `/api/v1/auth/signout` | sí | revoca el device del token -> 204 |
@@ -420,17 +420,17 @@ impl FromRequestParts<EstadoServidor> for Autenticado {
 - `verificar_token` ya tiene que rechazar tokens revocados y vencidos. Si no lo hace, **es un bug de `auth.rs`**: se
   reporta, no se parchea en la ruta.
 - Un token de device **no-owner** del vault no ve el vault (ver aislamiento).
-- **Nunca** se loguea el token, ni entero ni recortado.
+- Nunca se loguea el token, ni entero ni recortado.
 
 ### Aislamiento: 404, no 403
 
 Toda ruta de vault resuelve primero `SELECT ... FROM vaults WHERE id = ? AND account_id = ?`. Si no hay fila -> **404**.
 Un 403 confirma que el vault existe y a quién no pertenece: es un oráculo de existencia. **Todo** acceso a `revisions`,
-`batches` y blobs pasa por ese chequeo, sin excepción — no hay consulta "por id de blob" suelta.
+`batches` y blobs pasa por ese chequeo, sin excepción: no hay consulta "por id de blob" suelta.
 
 ### Blobs
 
-**El cuerpo se lee con `axum::body::to_bytes(request.into_body(), limite)`** — no a mano con
+**El cuerpo se lee con `axum::body::to_bytes(request.into_body(), limite)`**, no a mano con
 `into_data_stream()` y `StreamExt::next`: eso necesita `futures`, que es una **dev-dependency** y no existe en la
 lib. `to_bytes` lee incrementalmente y **corta cuando pasa el límite** (no bufferea de más) y no agrega deps.
 
@@ -445,7 +445,7 @@ lib. `to_bytes` lee incrementalmente y **corta cuando pasa el límite** (no buff
   tiene el suyo) con el tope aplicado **durante** la lectura, no después de bufferear.
 - `GET`: sin `Range` -> 200 con el cuerpo completo; con `Range: bytes=a-b` -> 206 + `Content-Range`. Un `Range` que no
   parsea o fuera de rango -> 416.
-- **El cuerpo es el blob ALMACENADO**: agrega el sobre `nonce[24] ‖ tag[16] = 40 B` al contenido (ADR-0014), así que
+- El cuerpo es el blob ALMACENADO: agrega el sobre `nonce[24] ‖ tag[16] = 40 B` al contenido (ADR-0014), así que
   el tope del cuerpo es el tope de contenido + 40.
 - `Content-Type: application/octet-stream` en ambos.
 
@@ -455,7 +455,7 @@ El camino HTTP para blobs grandes es un **subset de tus 1.0** (creacion + core; 
 checksum/termination). El umbral de 1 MB es perilla del **cliente** (ADR-0004): el server no impone un
 tamano minimo. `Tus-Resumable: 1.0.0` es obligatorio en las tres rutas; si falta -> `Invalid` (400).
 
-- `POST /vaults/{id}/blobs` — crea la subida. Headers: `Upload-Length: <total>` (bytes) y
+- `POST /vaults/{id}/blobs`: crea la subida. Headers: `Upload-Length: <total>` (bytes) y
   `Upload-Metadata: blob_id <base64>` (misma forma que el `blob_head` del WS: 32 B). Respuesta 201 con
   `Location: /api/v1/vaults/{id}/uploads/{upload_id}`, `Upload-Offset`, `Upload-Length` y cuerpo
   `{upload_id, offset, total}`. El `total` se valida contra `min(vault.max_file_bytes, MAX_FILE_BYTES)`
@@ -463,13 +463,13 @@ tamano minimo. `Tus-Resumable: 1.0.0` es obligatorio en las tres rutas; si falta
   (`offset == total`; no escribe bytes ni reserva cuota). Con cuota opt-in, la fila reserva el total en
   la MISMA sentencia (`INSERT … SELECT` con guard): dos creaciones simultaneas no pueden pasar las dos;
   si no entra -> `quota_exceeded` (413).
-- `HEAD /vaults/{id}/uploads/{upload_id}` — donde reanudar: `Upload-Offset` y `Upload-Length`. 404 si no
+- `HEAD /vaults/{id}/uploads/{upload_id}`: donde reanudar: `Upload-Offset` y `Upload-Length`. 404 si no
   existe o ya vencio.
-- `PATCH /vaults/{id}/uploads/{upload_id}` — sube un bloque: `Content-Type: application/offset+octet-stream`
+- `PATCH /vaults/{id}/uploads/{upload_id}`: sube un bloque: `Content-Type: application/offset+octet-stream`
   (si no -> 400) y `Upload-Offset: <n>`. Si `n` no es el offset confirmado -> **409** con `Upload-Offset`
   actual en el header y `bad_request` en el cuerpo ("un offset no sigue: hueco o repeticion"). Exito ->
   204 + `Upload-Offset` nuevo.
-- **La longitud declarada no se cree**: un bloque que pase el `total` da 400 y **termina** esa subida
+- La longitud declarada no se cree: un bloque que pase el `total` da 400 y **termina** esa subida
   (fila + temporal afuera: "subir de nuevo desde cero", nunca un truncado silencioso). El offset
   confirmado vive en la base (sobrevive reinicios) y el `.part` se alinea a el antes de escribir.
 - Al completar, EN ESTE ORDEN: hash **real** del archivo == `blob_id` (si no -> 400 + limpieza) -> CAS
@@ -504,7 +504,7 @@ seguridad, no una feature pendiente (ADR-0011 §5).
 - El `proof` se verifica **con `vaults.vault_pubkey`** (Ed25519) contra el challenge emitido por
   `auth::emitir_challenge` y consumido con `auth::consumir_challenge` (uso único y vencimiento: los maneja `auth.rs`).
 - `host`: **el `Host` de la petición** (o `config.bind_addr` si no vino). Es lo único correcto detrás de un proxy, y no
-  hay campo de URL pública en `Config` — si algún día hay multi-nodo, sale de ahí, no de un valor fijo.
+  hay campo de URL pública en `Config`; si algún día hay multi-nodo, sale de ahí, no de un valor fijo.
 - Respuesta: `{host, rev}` con el `rev` actual del vault (0 si nunca se escribió).
 
 ### Tests nombrados (en `routes.rs`, con `tower::ServiceExt::oneshot` sobre el `Router`)
@@ -525,7 +525,7 @@ seguridad, no una feature pendiente (ADR-0011 §5).
 
 ---
 
-## Prueba de posesión de la clave del vault — `ovaultd-crypto` (la usan `/access` y el WS)
+## Prueba de posesión de la clave del vault: `ovaultd-crypto` (la usan `/access` y el WS)
 
 ```rust
 pub fn proof_msg(vault_id: i64, device_id: i64, challenge: &[u8]) -> Vec<u8>;
@@ -556,12 +556,12 @@ pub fn verify_proof(
 - `el_mismo_challenge_con_otro_device_id_no_verifica`
 - `otro_challenge_no_verifica`
 - `una_firma_de_otra_clave_no_verifica`
-- `el_layout_es_el_documentado` — los bytes exactos de `proof_msg` (largo y contenido), para que cambiarlo rompa algo
+- `el_layout_es_el_documentado`: los bytes exactos de `proof_msg` (largo y contenido), para que cambiarlo rompa algo
   en vez de romper clientes en silencio.
 
 ---
 
-## Leer el challenge pendiente — `auth.rs`
+## Leer el challenge pendiente: `auth.rs`
 
 ```rust
 pub async fn challenge_pendiente(pool: &SqlitePool, device_id: i64, vault_id: i64) -> Result<Option<Vec<u8>>>;
@@ -574,10 +574,10 @@ challenge, sólo uno gana el `UPDATE` y el otro recibe 401. Consumir primero y v
 una firma inválida.
 
 
-## Superficie WebSocket (`GET /api/v1/ws`) — lo que implementa el servidor
+## Superficie WebSocket (`GET /api/v1/ws`): lo que implementa el servidor
 
 El protocolo (docs/protocol.md, "Datos") define los mensajes. Acá va lo que el servidor tiene que garantizar. Es una capa
-**delgada**: no reimplementa nada de lo que ya existe — verifica con `ovaultd_crypto::verify_proof`, escribe con
+**delgada**: no reimplementa nada de lo que ya existe: verifica con `ovaultd_crypto::verify_proof`, escribe con
 `sync::commit::commit_batch` y resuelve el vault como el HTTP. Lo propio es la **maquina de estados** y el framing.
 
 ### 1. La maquina de estados (y el orden no es negociable)
@@ -586,22 +586,22 @@ El protocolo (docs/protocol.md, "Datos") define los mensajes. Acá va lo que el 
 Conectado  --hello-->  Saludado  --auth(proof)-->  Autenticado  --(batch/blob/ping)--> ...
 ```
 
-- **Antes de `hello`**: cualquier mensaje que no sea `hello` -> `error` y **se cierra la conexion**. Un socket abierto no
+- Antes de `hello`: cualquier mensaje que no sea `hello` -> `error` y **se cierra la conexion**. Un socket abierto no
   es un cliente: sin `hello` no hay vault, y sin vault no hay clave publica contra la cual verificar nada.
-- **Antes de `auth`**: `batch`, `pull` o frames binarios -> `error` + cierre. El `hello` **prueba que el device dice quien
+- Antes de `auth`: `batch`, `pull` o frames binarios -> `error` + cierre. El `hello` **prueba que el device dice quien
   dice**, no que pueda escribir.
-- **`hello` con un vault que no es de la cuenta del device** -> `error` (mismo criterio que el HTTP: 404, nunca 403: no se
+- `hello` con un vault que no es de la cuenta del device -> `error` (mismo criterio que el HTTP: 404, nunca 403: no se
   confirma la existencia de un vault ajeno).
-- **`proto` distinto de 1** -> `error` con detalle; la negociacion no es de seguridad, pero un cliente que habla otro
+- `proto` distinto de 1 -> `error` con detalle; la negociacion no es de seguridad, pero un cliente que habla otro
   protocolo no puede seguir.
 
 ### 2. El challenge: se consume DESPUES de verificar
 
 `hello_ok` trae un challenge de 32 B (el mismo `auth::emitir_challenge` del endpoint `/access`). El `auth` trae
 `proof = sign_proof(k_sign, challenge, vault_id, device_id)` y el server verifica con
-`ovaultd_crypto::verify_proof(vault_pubkey, vault_id, device_id, challenge, proof)` — **ese es el orden real de sus
+`ovaultd_crypto::verify_proof(vault_pubkey, vault_id, device_id, challenge, proof)`: **ese es el orden real de sus
 argumentos y se lee de su firma** (`crates/ovaultd-crypto/src/lib.rs`): primero los ids, despues el challenge, al final
-el proof. Escribirlo al reves no compila, pero *casi* compila si los tipos coinciden — por eso se cita la firma..
+el proof. Escribirlo al reves no compila, pero *casi* compila si los tipos coinciden, por eso se cita la firma.
 
 **Regla, y es la misma que en `/access`**: el challenge se consume **solo si el proof verifica**. Un proof invalido deja el
 challenge **vivo** para que el device legitimo pueda usarlo. Lo que se cierra por un proof invalido es **la conexion**, no
@@ -615,32 +615,32 @@ cabeza real del vault).
 
 El WS exige **las dos cosas**, porque responden a preguntas diferentes:
 
-- **Identidad de cuenta y device**: el bearer token del HTTP (la misma resolucion que el extractor `Autenticado`,
+- Identidad de cuenta y device: el bearer token del HTTP (la misma resolucion que el extractor `Autenticado`,
   factorizada en `routes::autenticar_token`). Un `WebSocketUpgrade` **no ejecuta extractores solo**, asi que el handler
   autentica el upgrade el mismo y guarda `account_id`/`device_id` por conexion. El token llega por `Authorization:
   Bearer` o por el subprotocolo `ovaultd.bearer.<token>` (clientes de navegador que no pueden fijar headers; **ADR-0015**)
-  — el server negocia/ecoa `ovaultd.v1` y **nunca** el bearer.
-- **Posesion de la clave del vault**: el `auth` con el proof. El token dice *quien sos*; el proof dice *que tenes la
+  ; el server negocia/ecoa `ovaultd.v1` y **nunca** el bearer.
+- Posesion de la clave del vault: el `auth` con el proof. El token dice *quien sos*; el proof dice *que tenes la
   clave*. Un token robado no alcanza para leer ni escribir el contenido.
 
 ### 3. Framing binario (ADR-0004: un solo camino por blob)
 
 - Frame binario = `transfer_id (8 B BE) | offset (8 B BE) | bytes`. El `blob_head` (JSON) lo precede y dice `transfer`, **`blob_id`** (b64: sin el, el receptor no puede verificar que los bytes hashean a lo que el emisor dice),
   `len` y `offset`.
-- **`<= MAX_INLINE_BLOB_BYTES` (1 MB)**: por WS. Al completarse los bytes -> al CAS y `ack`.
+- `<= MAX_INLINE_BLOB_BYTES` (1 MB): por WS. Al completarse los bytes -> al CAS y `ack`.
 **`> 1 MB`**: por WS **se rechaza** con `error` `max_file_exceeded`, y **el detalle del error dice** que use
 `POST /api/v1/vaults/{id}/blobs` (reanudable, `Content-Range`). El servidor **no redirige**: un WebSocket no puede
-redirigir la peticion original — **le dice al cliente donde ir y el cliente decide**. **Nunca los dos caminos para
+redirigir la peticion original: **le dice al cliente donde ir y el cliente decide**. **Nunca los dos caminos para
 el mismo blob.**
 - Un frame cuya `transfer_id` no tiene `blob_head` abierto -> `error`. Un `offset` que no sigue (hueco o repeticion) ->
   `error` (el offset explicito es el que permite reanudar sin reenviar todo).
 
 ### 4. Lo que NO esta en esta capa
 
-- **La logica de escritura**: `batch` se delega en `sync::commit::commit_batch` **tal cual** (misma verificacion de firma,
+- La logica de escritura: `batch` se delega en `sync::commit::commit_batch` **tal cual** (misma verificacion de firma,
   misma idempotencia, misma transaccion). Si un `batch` por WS se escribiera por otro camino, la regla "la firma se
   verifica antes de tocar la base" tendria una puerta de atras.
-- **El fan-out de `notify` a otros devices** del vault: fase posterior. En esta, `notify` sale del stream de revisiones y
+- El fan-out de `notify` a otros devices del vault: fase posterior. En esta, `notify` sale del stream de revisiones y
   el servidor manda lo que corresponde al cliente conectado.
 
 ### 4.b Un solo camino, y UN SOLO router

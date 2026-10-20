@@ -114,7 +114,7 @@ docker compose logs --tail 50 ovaultd     # logs JSON; nunca hay tokens ni paylo
 docker inspect ovaultd-ovaultd-1 --format '{{.State.Health.Status}}'
 ```
 
-- `unable to open database file`: permisos del volumen (uid 10001 del contenedor) — ver
+- `unable to open database file`: permisos del volumen (uid 10001 del contenedor); ver
   la sección de troubleshooting en `docs/deploy.md`.
 - Puerto ocupado: `OVAULTD_BIND`.
 - Base degradada: `/healthz` devuelve 503 y el log lo dice.
@@ -132,11 +132,10 @@ docker inspect ovaultd-ovaultd-1 --format '{{.State.Health.Status}}'
 
 ## Verificaciones periódicas
 
-- **Semanal**: `cargo xtask backup-restore` en el host de desarrollo (cadena completa en
+- Semanal: `cargo xtask backup-restore` en el host de desarrollo (cadena completa en
   ~1 minuto) y/o un restore del backup real más reciente a un tmpdir.
-- **Mensual**: revisar `.tmp-*` huérfanos en el CAS (`find <cas> -name '.tmp-*' | wc -l`) —
-  publicaciones interrumpidas; no se referencian y no entran al backup.
-- **Después de cada incidente**: un backup manual + restore de verificación antes de
+- Mensual: revisar `.tmp-*` huérfanos en el CAS (`find <cas> -name '.tmp-*' | wc -l`), publicaciones interrumpidas; no se referencian y no entran al backup.
+- Después de cada incidente: un backup manual + restore de verificación antes de
   seguir operando.
 
 ## GC de blobs huérfanos
@@ -166,14 +165,14 @@ docker compose up -d
 Si `--verify` reporta discrepancias, es un bug de un camino que ajusta referencias: NO
 borres hasta entender la diferencia (`refs` vs `esperado` dicen para dónde mirar).
 
-## Failpoints (simulación de crash — SOLO builds debug)
+## Failpoints (simulación de crash, solo builds debug)
 
 El server inyecta fallas con `OVAULTD_FAILPOINT=<punto>` y el modo con
 `OVAULTD_FAILPOINT_MODE`:
 
-- `abort` (default): `std::process::abort()` — crash real (SIGABRT), como un corte del
+- `abort` (default): `std::process::abort()`: crash real (SIGABRT), como un corte del
   proceso. Es el modo del test de proceso real.
-- `panic`: desenrolla — para los tests in-process que capturan el unwind.
+- `panic`: desenrolla, para los tests in-process que capturan el unwind.
 
 Puntos: `cas.temp`, `cas.fsync`, `cas.publish` (camino de publicación de blobs),
 `sql.commit` (commit del batch), `ack.put_blob` (entre el registro y el ACK HTTP).

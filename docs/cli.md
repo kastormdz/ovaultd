@@ -2,7 +2,7 @@
 
 The non-editor client: it links a folder to a remote vault, keeps it in sync, and gives
 an agent plain filesystem access to the decrypted vault. It is the "device-agent" from
-the plan: it holds the passphrase and decrypts **locally** — the server never sees
+the plan: it holds the passphrase and decrypts **locally**: the server never sees
 plaintext (E2EE).
 
 ## Install the `ovaultd` command
@@ -87,7 +87,7 @@ process (`RestartSec=10`) and the loop retries with backoff.
 
 **While the service runs, don't call `sync`/`history`/`preview`/`restore` by hand**: the
 runtime profile has a single owner by design, so a second process fails with
-`EADDRINUSE`. That's expected — the service is already syncing every few seconds.
+`EADDRINUSE`. That's expected: the service is already syncing every few seconds.
 `cat`, `write`, `ls` and `rm` don't touch the runtime and work fine. For a one-off command:
 
 ```bash
@@ -105,9 +105,9 @@ If you prefer a periodic pass over a long-running process, use a oneshot timer i
 
 The server is blind (E2EE): it cannot list paths or see the filesystem. A local delete
 that never went through a sync (made by hand, with the client stopped, or in an old vault)
-leaves the path alive in the server's `files` table forever — and the panel counts it.
+leaves the path alive in the server's `files` table forever, and the panel counts it.
 
-`prune-remote` is the only one who can fix that, because only the client has the keys:
+`prune-remote` is the only thing that can fix that, because only the client has the keys:
 
 ```bash
 ovaultd prune-remote            # dry-run: plan only, nothing is deleted
@@ -115,7 +115,7 @@ ovaultd prune-remote --yes      # queue the del of every orphan and publish it
 ```
 
 Safety guard (F-03 of the 2026-10-20 audit): if the **local disk has zero files**
-while the server has paths, applying the plan would delete the **whole vault** —
+while the server has paths, applying the plan would delete the **whole vault**;
 the command aborts before printing it. That is the classic "vault not mounted /
 wrong folder" accident. If it really is intentional (you *want* to empty the
 server), pass `--permitir-vacio`.
@@ -137,8 +137,7 @@ counts it prints are the honest ones: `vivos` (server), `enDisco` (this device) 
 
 The first command that needs the vault key (the first `sync`, `history`, `preview` or
 `restore`) derives the subkeys and caches them in the local vault state
-(`~/.config/ovaultd/vaults/<server>_<id>.json`, mode `0600`). Later runs — including a
-systemd timer — do not ask again. The cache is invalidated when the vault key epoch
+(`~/.config/ovaultd/vaults/<server>_<id>.json`, mode `0600`). Later runs (including a systemd timer) do not ask again. The cache is invalidated when the vault key epoch
 changes.
 
 ```bash
@@ -182,8 +181,8 @@ ovaultd restore <vault-path> --rev <n>     # uploads as a NEW revision
 
 ## Agent flow
 
-- **CRUD**: `ovaultd cat/write/ls/rm` over the linked folder (above).
-- **Search**: keep a local indexer over the linked folder (chunk + embed). Search is a
+- CRUD: `ovaultd cat/write/ls/rm` over the linked folder (above).
+- Search: keep a local indexer over the linked folder (chunk + embed). Search is a
   client-side concern by design: the server cannot index what it cannot read.
-- **Sync**: a systemd timer (or `sync --continuous`) keeps the folder current, so the
+- Sync: a systemd timer (or `sync --continuous`) keeps the folder current, so the
   agent always works on a local, decrypted copy.
