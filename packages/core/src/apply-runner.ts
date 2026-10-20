@@ -21,6 +21,7 @@ import { toHex } from '@ovaultd/protocol';
 
 import { createIntent } from './apply.js';
 import type { FileSystemPort } from './file-port.js';
+import { hashDePath } from './apariencia.js';
 import { esMergeablePorTipo, mergeDeTexto } from './merge.js';
 import type { IntentEntry, StateStore } from './StateStore.js';
 import type { SyncConnection } from './SyncConnection.js';
@@ -178,7 +179,9 @@ async function evaluarGuard(
     return { verdict: 'safe' };
   }
 
-  const hashActual = actual?.isFile ? sha256Hex(await port.read(revision.path)) : null;
+  const hashActual = actual?.isFile
+    ? hashDePath(revision.path, await port.read(revision.path))
+    : null;
 
   if (revision.deleted) {
     if (!actual) return { verdict: 'already-gone' };
@@ -246,7 +249,7 @@ async function intentarFusionar(
     const dec = new TextDecoder('utf-8', { fatal: true });
     const textoBase = dec.decode(decryptBlob(keys, storedBase));
     const bytesOurs = await port.read(revision.path);
-    const oursHash = sha256Hex(bytesOurs);
+    const oursHash = hashDePath(revision.path, bytesOurs);
     const textoOurs = dec.decode(bytesOurs);
     const textoTheirs = dec.decode(plaintextRemoto);
 
@@ -282,7 +285,7 @@ async function publicarFusion(
   intent = {
     ...intent,
     tempName,
-    contentHash: sha256Hex(fusion.fusion),
+    contentHash: hashDePath(revision.path, fusion.fusion),
     state: 'verified',
     mergeBase: {
       rev: revision.rev,

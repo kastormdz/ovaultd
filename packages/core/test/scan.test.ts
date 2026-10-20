@@ -66,6 +66,7 @@ describe('escanearVault', () => {
     const paths = entradas.map((entrada) => entrada.path).sort();
 
     expect(paths).toEqual([
+      '.obsidian/appearance.json',
       '.obsidian/snippets/mio.css',
       '.obsidian/themes/Mi Tema.css',
       'Notas/una.md',
@@ -73,8 +74,8 @@ describe('escanearVault', () => {
     expect(paths.some((path) => path.includes('data.json'))).toBe(false);
     expect(paths.some((path) => path.includes('workspace'))).toBe(false);
     expect(paths.some((path) => path.includes('.trash'))).toBe(false);
-    // Estado del dispositivo: queda afuera (Obsidian lo reescribe solo y colisiona).
-    expect(paths.some((path) => path.includes('appearance'))).toBe(false);
+    // appearance.json SÍ viaja: el merge por campo se encarga del modo (apariencia.ts).
+    expect(paths.some((path) => path.includes('appearance'))).toBe(true);
     expect(paths.some((path) => path.includes('hotkeys'))).toBe(false);
     expect(paths.some((path) => path.includes('manifest'))).toBe(false);
   });
@@ -205,5 +206,31 @@ describe('stat masivo (statMany)', () => {
     expect(statManyLlamadas).toBe(1); // UN solo round-trip para los 3
     expect(statsIndividuales).toBe(0); // ni un stat suelto
     expect(entradas).toHaveLength(3);
+  });
+  it('el modo que Obsidian reescribe solo no cambia el hash de appearance.json', async () => {
+    const cod = new TextEncoder();
+    const portCon = (texto: string): FileSystemPort =>
+      ({
+        async list(relDir: string): Promise<VaultDirEntry[]> {
+          if (relDir === '.') return [{ name: '.obsidian', isFile: false, isDirectory: true }];
+          if (relDir === '.obsidian') {
+            return [{ name: 'appearance.json', isFile: true, isDirectory: false }];
+          }
+          return [];
+        },
+        async read(): Promise<Uint8Array> {
+          return cod.encode(texto);
+        },
+        async stat() {
+          return { isFile: true, isDirectory: false, size: cod.encode(texto).length };
+        },
+      }) as unknown as FileSystemPort;
+
+    const a = await escanearVault(portCon(JSON.stringify({ cssTheme: 'Anu', theme: 'obsidian' })), CLAVES);
+    const b = await escanearVault(portCon(JSON.stringify({ cssTheme: 'Anu', theme: 'moonstone' })), CLAVES);
+    const c = await escanearVault(portCon(JSON.stringify({ cssTheme: 'Cosmic', theme: 'obsidian' })), CLAVES);
+
+    expect(a[0]!.contentHash).toBe(b[0]!.contentHash); // el modo no cuenta
+    expect(c[0]!.contentHash).not.toBe(a[0]!.contentHash); // el tema sí
   });
 });

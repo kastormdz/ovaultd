@@ -14,7 +14,8 @@
  *     JSON por líneas cualquier reformateo es conflicto.
  */
 
-import { sha256Hex } from '@ovaultd/protocol';
+import { cryptoProvider } from '@ovaultd/crypto';
+import { toHex } from '@ovaultd/protocol';
 
 /** Los únicos campos que viajan entre dispositivos. */
 const CAMPOS_PORTABLES = ['cssTheme', 'enabledCssSnippets'] as const;
@@ -60,8 +61,10 @@ export function proyeccionDeApariencia(texto: string): string {
  * Para todo lo demás, el hash de los bytes.
  */
 export function hashDePath(path: string, bytes: Uint8Array): string {
-  if (!esApariencia(path)) return sha256Hex(bytes);
-  return sha256Hex(CODIFICADOR.encode(proyeccionDeApariencia(DECODIFICADOR.decode(bytes))));
+  const datos = esApariencia(path)
+    ? CODIFICADOR.encode(proyeccionDeApariencia(DECODIFICADOR.decode(bytes)))
+    : bytes;
+  return toHex(cryptoProvider().sha256(datos));
 }
 
 /**
