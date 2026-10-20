@@ -5,6 +5,19 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y e
 [semver](https://semver.org/lang/es/): server y plugin viajan en un **release train** (mismo
 `MAJOR.MINOR` = pareja probada junta; ver ADR-0018 y la sección «Compatibilidad» del README).
 
+## [0.2.11] — 2026-10-20
+
+### Security
+
+- **CORS por defecto SOLO loopback** (F-04 de la auditoría, cierre): sin
+  `OVAULTD_ALLOWED_ORIGINS` el server ya no responde `Access-Control-Allow-Origin: *`;
+  acepta únicamente orígenes `127.0.0.1` / `localhost` / `[::1]` con cualquier puerto
+  (el runtime del CLI, cuyo puerto varía por perfil). El plugin usa `requestUrl` nativo y
+  no depende de CORS; el panel es same-origin. Una página externa ya no puede leer
+  respuestas autenticadas aunque tenga el token.
+  `OVAULTD_ALLOWED_ORIGINS=*` queda como escape hatch explícito; un CSV sigue
+  permitiendo exactamente esos orígenes. 5 tests en `tests/cors.rs`.
+
 ## [Unreleased]
 
 ### Added

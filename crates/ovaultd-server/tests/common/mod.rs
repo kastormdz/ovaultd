@@ -55,6 +55,11 @@ pub struct TestContext {
 
 impl TestContext {
     pub async fn new() -> Result<Self> {
+        Self::con_origenes(Vec::new()).await
+    }
+
+    /// Igual que `new`, pero con una política de CORS concreta (como `OVAULTD_ALLOWED_ORIGINS`).
+    pub async fn con_origenes(allowed_origins: Vec<String>) -> Result<Self> {
         let db_dir = tempfile::tempdir()?;
         let cas_dir = tempfile::tempdir()?;
         let db_path = db_dir.path().join("metadata.db");
@@ -112,7 +117,7 @@ impl TestContext {
             trust_proxy: true,
             // El modo más completo del server; los tests de `off`/`localhost` lo cambian.
             metrics: ovaultd_server::config::ModoMetrics::On,
-            allowed_origins: Vec::new(),
+            allowed_origins,
             public_host: None,
         };
         let cas = Arc::new(CasStore::new(cas_dir.path().to_path_buf())?);

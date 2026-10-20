@@ -33,11 +33,12 @@ async fn preflight_del_runtime_browser() -> Result<(), Box<dyn std::error::Error
         response.status()
     );
     let headers = response.headers();
+    // Default: SOLO loopback. Se refleja el origen (no `*`), y el navegador puede leer.
     assert_eq!(
         headers
             .get("access-control-allow-origin")
             .and_then(|valor| valor.to_str().ok()),
-        Some("*"),
+        Some("http://127.0.0.1:18950"),
     );
     let metodos = headers
         .get("access-control-allow-methods")
@@ -69,8 +70,90 @@ async fn preflight_del_runtime_browser() -> Result<(), Box<dyn std::error::Error
             .headers()
             .get("access-control-allow-origin")
             .and_then(|valor| valor.to_str().ok()),
-        Some("*"),
+        Some("http://127.0.0.1:18950"),
     );
 
+    Ok(())
+}
+
+/// `Origin: localhost` con cualquier puerto: es el mismo caso (runtime en otra máquina).
+#[tokio::test]
+async fn localhost_tambien_es_local() -> Result<(), Box<dyn std::error::Error>> {
+    let context = TestContext::new().await?;
+    let request = Request::builder()
+        .method(Method::GET)
+        .uri("/healthz")
+        .header(ORIGIN, "http://localhost:1234")
+        .body(Body::empty())?;
+    let response = context.request(request).await?;
+    assert_eq!(
+        response.headers().get("access-control-allow-origin").and_then(|v| v.to_str().ok()),
+        Some("http://localhost:1234"),
+    );
+    Ok(())
+}
+
+/// Una página externa NO puede leer la respuesta: sin `Access-Control-Allow-Origin`.
+#[tokio::test]
+async fn origen_externo_queda_afuera() -> Result<(), Box<dyn std::error::Error>> {
+    let context = TestContext::new().await?;
+    let request = Request::builder()
+        .method(Method::GET)
+        .uri("/healthz")
+        .header(ORIGIN, "https://evil.example")
+        .body(Body::empty())?;
+    let response = context.request(request).await?;
+    assert_eq!(response.status(), 200); // el request se sirve; el navegador no puede LEERLO
+    assert!(
+        response.headers().get("access-control-allow-origin").is_none(),
+        "un origen externo no debe recibir la cabecera de CORS"
+    );
+    Ok(())
+}
+
+/// `OVAULTD_ALLOWED_ORIGINS=*` es el escape hatch documentado.
+#[tokio::test]
+async fn wildcard_explicito_vuelve_a_permitir_todo() -> Result<(), Box<dyn std::error::Error>> {
+    let context = TestContext::con_origenes(vec!["*".to_string()]).await?;
+    let request = Request::builder()
+        .method(Method::GET)
+        .uri("/healthz")
+        .header(ORIGIN, "https://evil.example")
+        .body(Body::empty())?;
+    let response = context.request(request).await?;
+    assert_eq!(
+        response.headers().get("access-control-allow-origin").and_then(|v| v.to_str().ok()),
+        Some("*"),
+    );
+    Ok(())
+}
+
+/// Una lista CSV explícita permite SOLO esos orígenes.
+#[tokio::test]
+async fn lista_explicita_solo_esos() -> Result<(), Box<dyn std::error::Error>> {
+    let context = TestContext::con_origenes(vec!["https://panel.example".to_string()]).await?;
+    let permitido = context
+        .request(
+            Request::builder()
+                .method(Method::GET)
+                .uri("/healthz")
+                .header(ORIGIN, "https://panel.example")
+                .body(Body::empty())?,
+        )
+        .await?;
+    let ajeno = context
+        .request(
+            Request::builder()
+                .method(Method::GET)
+                .uri("/healthz")
+                .header(ORIGIN, "https://evil.example")
+                .body(Body::empty())?,
+        )
+        .await?;
+    assert_eq!(
+        permitido.headers().get("access-control-allow-origin").and_then(|v| v.to_str().ok()),
+        Some("https://panel.example"),
+    );
+    assert!(ajeno.headers().get("access-control-allow-origin").is_none());
     Ok(())
 }

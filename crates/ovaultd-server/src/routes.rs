@@ -45,14 +45,41 @@ pub struct EstadoServidor {
     pub notifier: Arc<crate::storage::Notifier>,
 }
 
+/// ¿El origen es de un runtime LOCAL? El CLI levanta Chromium en `http://127.0.0.1:<puerto>`
+/// (el puerto cambia por perfil/device) y el plugin de Obsidian usa `requestUrl` nativo, que
+/// NO manda `Origin`. Permitir SOLO loopback (cualquier puerto) cierra el CORS a la web
+/// pública sin cortar al cliente real: una página externa no puede leer respuestas
+/// autenticadas aunque tenga el token.
+fn es_origen_local(origin: &str) -> bool {
+    let resto = origin
+        .strip_prefix("http://")
+        .or_else(|| origin.strip_prefix("https://"));
+    let Some(resto) = resto else {
+        return false;
+    };
+    let autoridad = resto.split('/').next().unwrap_or("");
+    let host = if let Some(sin_corchete) = autoridad.strip_prefix('[') {
+        sin_corchete.split(']').next().unwrap_or("")
+    } else {
+        autoridad.split(':').next().unwrap_or("")
+    };
+    matches!(host, "127.0.0.1" | "localhost" | "::1")
+}
+
 pub fn router(estado: EstadoServidor) -> Router {
     // Marca de arranque para `/metrics` (idempotente: el primer router montado manda).
     let _ = ARRANQUE.set(std::time::Instant::now());
 
-    // CORS: sin `OVAULTD_ALLOWED_ORIGINS` sigue siendo `*` (el plugin no manda `Origin`);
-    // con la lista, solo esos orígenes pueden leer respuestas autenticadas desde un navegador.
-    let origen_permitido = if estado.config.allowed_origins.is_empty() {
+    // CORS. Tres modos, en este orden:
+    //  - `OVAULTD_ALLOWED_ORIGINS=*` explícito → cualquier origen (escape hatch documentado);
+    //  - lista vacía (default) → SOLO loopback: el runtime del CLI (`127.0.0.1:<puerto>`,
+    //    el puerto cambia por perfil) sigue entrando y la web pública queda afuera;
+    //  - lista CSV → exactamente esos orígenes.
+    // El plugin no manda `Origin` (usa `requestUrl` nativo): no depende de esta capa.
+    let origen_permitido = if estado.config.allowed_origins.iter().any(|origen| origen == "*") {
         AllowOrigin::any()
+    } else if estado.config.allowed_origins.is_empty() {
+        AllowOrigin::predicate(|origin, _| origin.to_str().map(es_origen_local).unwrap_or(false))
     } else {
         AllowOrigin::list(
             estado

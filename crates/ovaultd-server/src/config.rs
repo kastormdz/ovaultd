@@ -30,7 +30,8 @@ pub struct Config {
     /// `off`: las métricas exponen la disponibilidad del proceso y no tienen por qué ser
     /// públicas.
     pub metrics: ModoMetrics,
-    /// Orígenes CORS permitidos (`OVAULTD_ALLOWED_ORIGINS`, CSV). Vacío = `*`
+    /// Orígenes CORS (`OVAULTD_ALLOWED_ORIGINS`, CSV). Vacío = SOLO loopback (el runtime
+    /// del CLI); `*` = cualquier origen; CSV = exactamente esos.
     /// (desarrollo). En producción, la lista explícita que debe poder leer respuestas con
     /// `Authorization` desde un navegador.
     pub allowed_origins: Vec<String>,
