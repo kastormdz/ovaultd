@@ -1,0 +1,9 @@
+# Advisorys ignoradas, con motivo. Cada entrada se revisa cuando cambia la cadena.
+#
+# RUSTSEC-2026-0374 — `basic-toml` is unmaintained (no es una CVE y no tiene severidad):
+# llega por `askama_derive 0.14` (panel), un proc-macro que corre al COMPILAR; no va al
+# binario ni tiene superficie en runtime. No existe versión con fix; la alternativa sería
+# migrar askama a una versión que use `toml`, que es un cambio mayor del panel.
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0374"
+reason = "unmaintained (no CVE): basic-toml viene de askama_derive como proc-macro de build; sin fix disponible y sin superficie en runtime."
