@@ -307,6 +307,11 @@ export class BrowserRuntime {
     readonly port: number,
     /** Puente de archivos confinado al vault (si se abrió con `vaultRoot`). */
     readonly vault: NodeFileAdapter | null,
+    /**
+     * Token de ESTA sesión del puente. El dueño del proceso (el CLI, o un test que abrió el
+     * runtime) ya tiene acceso al vault; la página lo recibe por `route`, nunca por JS.
+     */
+    readonly bridgeToken: string,
   ) {}
 
   static async open(opciones: BrowserRuntimeOptions = {}): Promise<BrowserRuntime> {
@@ -405,7 +410,7 @@ export class BrowserRuntime {
       writeFileSync(archivoOrigen, `${origin}\n`, { mode: 0o600 });
       chmodSync(archivoOrigen, 0o600);
 
-      return new BrowserRuntime(contexto, pagina, servidor, origin, dataDir, port, vault);
+      return new BrowserRuntime(contexto, pagina, servidor, origin, dataDir, port, vault, tokenPuente);
     } catch (error) {
       await contexto.close().catch(() => undefined);
       servidor.close();

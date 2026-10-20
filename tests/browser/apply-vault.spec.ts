@@ -91,7 +91,7 @@ test.describe('puente de archivos (confinamiento)', () => {
       const fsCall = async (op: string, params: Record<string, unknown>) => {
         const r = await fetch(`http://127.0.0.1:18946/fs/${op}`, {
           method: 'POST',
-          headers: { 'content-type': 'application/json' },
+          headers: { 'content-type': 'application/json', 'x-ovaultd-bridge': runtime.bridgeToken },
           body: JSON.stringify(params),
         });
         return r.json() as Promise<{ ok: boolean; result?: unknown; error?: { message: string } }>;
