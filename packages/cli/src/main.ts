@@ -453,6 +453,82 @@ programa
     },
   );
 
+// ---------------------------------------------------------------- prune-remote
+
+programa
+  .command('prune-remote [vault]')
+  .description('borra del server los paths que ya no existen en el disco local (reconciliación)')
+  .option('--yes', 'aplica los borrados (sin esto solo muestra el plan)')
+  .option('--json', 'salida JSON')
+  .option('--password-stdin', 'lee la password de stdin (para scripts)')
+  .action(
+    async (
+      vaultTexto: string | undefined,
+      opciones: { yes?: boolean; json?: boolean; passwordStdin?: boolean },
+    ) => {
+      const abierto = await abrirVaultLocal(vaultTexto, opciones);
+      try {
+        const checkpoint = (await abierto.runtime.call('store.checkpoint.read')) as {
+          since: number;
+        } | null;
+        await abierto.runtime.call('sync.open', {
+          baseUrl: abierto.sesion.server,
+          token: abierto.token,
+          vault: abierto.vault.vault,
+          device: abierto.sesion.device_id,
+          since: checkpoint?.since ?? 0,
+          vaultUuid: abierto.vault.vault_id,
+          epoch: abierto.vault.epoch,
+        });
+
+        type Plan = {
+          vivos: number;
+          enDisco: number;
+          huerfanos: string[];
+          ilegibles: number;
+          bloqueadas: number;
+        };
+        const plan = (await abierto.runtime.call('sync.pruneRemote', { aplicar: false })) as Plan;
+
+        if (opciones.json) {
+          console.log(JSON.stringify(plan, null, 2));
+        } else {
+          console.log(
+            `vivos en el server: ${plan.vivos} · en disco: ${plan.enDisco} · huérfanos: ${plan.huerfanos.length}`,
+          );
+          if (plan.ilegibles > 0) console.log(`  ilegibles (no descifran): ${plan.ilegibles}`);
+          if (plan.bloqueadas > 0) console.log(`  bloqueadas (ruta inválida): ${plan.bloqueadas}`);
+          for (const ruta of plan.huerfanos.slice(0, 40)) console.log(`  - ${ruta}`);
+          if (plan.huerfanos.length > 40) {
+            console.log(`  … y ${plan.huerfanos.length - 40} más`);
+          }
+        }
+
+        if (!opciones.yes || plan.huerfanos.length === 0) {
+          if (!opciones.yes && plan.huerfanos.length > 0) {
+            console.log('\ndry-run: no se borró nada. Para aplicarlo: ovaultd prune-remote --yes');
+          }
+          await abierto.runtime.call('sync.close');
+          return;
+        }
+
+        const aplicado = (await abierto.runtime.call('sync.pruneRemote', { aplicar: true })) as Plan & {
+          encolados: number;
+        };
+        const empujado = (await abierto.runtime.call('sync.pushOnce')) as {
+          empujadas: number;
+          headRev: number;
+        };
+        console.log(
+          `del encolados: ${aplicado.encolados} · publicados: ${empujado.empujadas} (rev ${empujado.headRev})`,
+        );
+        await abierto.runtime.call('sync.close');
+      } finally {
+        await abierto.cerrar();
+      }
+    },
+  );
+
 // ---------------------------------------------------------------- list-local
 
 programa
