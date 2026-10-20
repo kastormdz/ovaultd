@@ -87,7 +87,7 @@ test.describe('sync E2E (stack real)', () => {
 
     const vaultRoot = mkdtempSync(join(tmpdir(), 'ovaultd-sync-'));
     const dataDir = mkdtempSync(join(tmpdir(), 'ovaultd-rt-'));
-    const runtime = await BrowserRuntime.open({ dataDir, port: 18_950, vaultRoot });
+    const runtime = await BrowserRuntime.open({ dataDir, port: 18_950, vaultRoot, serverUrl: BASE });
     try {
       await runtime.call('store.open', { name: 'sync-pull' });
       await runtime.call('apply.configure', { keys: clavesHex });

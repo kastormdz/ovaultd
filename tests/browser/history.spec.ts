@@ -88,7 +88,7 @@ test.describe('historia E2E (stack real)', () => {
 
     const vaultRoot = mkdtempSync(join(tmpdir(), 'ovaultd-hist-'));
     const dataDir = mkdtempSync(join(tmpdir(), 'ovaultd-hist-rt-'));
-    const runtime = await BrowserRuntime.open({ dataDir, port: 18_951, vaultRoot });
+    const runtime = await BrowserRuntime.open({ dataDir, port: 18_951, vaultRoot, serverUrl: BASE });
     try {
       await runtime.call('store.open', { name: 'history-e2e' });
       await runtime.call('apply.configure', { keys: clavesHex });
