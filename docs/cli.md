@@ -112,6 +112,16 @@ leaves the path alive in the server's `files` table forever — and the panel co
 ```bash
 ovaultd prune-remote            # dry-run: plan only, nothing is deleted
 ovaultd prune-remote --yes      # queue the del of every orphan and publish it
+```
+
+Safety guard (F-03 of the 2026-10-20 audit): if the **local disk has zero files**
+while the server has paths, applying the plan would delete the **whole vault** —
+the command aborts before printing it. That is the classic "vault not mounted /
+wrong folder" accident. If it really is intentional (you *want* to empty the
+server), pass `--permitir-vacio`.
+
+```bash
+ovaultd prune-remote --permitir-vacio --yes   # deliberately empty the server
 ovaultd prune-remote --json     # machine-readable plan
 ```
 

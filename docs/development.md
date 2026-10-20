@@ -12,6 +12,7 @@ npm test                 # TS suites (crypto vectors, wire conformance, CLI)
 npm run test:browser     # durability specs against a real Chromium
 cargo test --workspace   # Rust suites
 cargo xtask protocol-check          # the SAME conformance fixture, both sides
+osv-scanner scan -r .               # SCA: exceptions live in osv-scanner.toml and EXPIRE
 bash tests/scripts/server-smoke.sh  # full server flow, live crypto + WebSocket
 bash tests/scripts/scan-canary.sh   # no plaintext anywhere in server storage
 bash tests/scripts/container-e2e.sh # everything: real build + smoke + persistence

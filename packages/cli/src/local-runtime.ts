@@ -116,6 +116,8 @@ export async function abrirVaultLocal(
   const runtime = await BrowserRuntime.open({
     dataDir: runtimeDirDe(sesion.server, vault.vault),
     vaultRoot: vault.dir,
+    // Único destino al que el puente reenvía: el server de ESTA sesión (F-01).
+    serverUrl: sesion.server,
   });
 
   try {

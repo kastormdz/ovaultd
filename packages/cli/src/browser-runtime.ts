@@ -36,6 +36,35 @@ import { NodeFileAdapter, VaultBoundaryError } from './NodeFileAdapter.js';
 
 export const RUNTIME_PORT_DEFAULT = 18_931;
 
+/**
+ * `proxyFetch` existe para que la página no pague un preflight CORS por blob, pero un proxy
+ * abierto es SSRF local: cualquier proceso puede alcanzar servicios internos y reenviar
+ * credenciales. Solo se permite el MISMO ORIGEN que el server de la sesión; sin `serverUrl`
+ * el proxy queda cerrado (fail closed).
+ */
+export function destinoPermitido(destino: string, serverUrl: string | undefined): boolean {
+  if (!serverUrl) return false;
+  try {
+    const d = new URL(destino);
+    const s = new URL(serverUrl);
+    return (d.protocol === 'http:' || d.protocol === 'https:') && d.origin === s.origin;
+  } catch {
+    return false;
+  }
+}
+
+/** Headers que el proxy NO reenvía: los de control del puente y los de conexión. */
+export function sanearHeaders(headers: Record<string, string>): Record<string, string> {
+  const prohibidos = new Set(['cookie', 'host', 'connection', 'transfer-encoding', 'content-length']);
+  const salida: Record<string, string> = {};
+  for (const [clave, valor] of Object.entries(headers)) {
+    const k = clave.toLowerCase();
+    if (k.startsWith('x-ovaultd-') || prohibidos.has(k)) continue;
+    salida[clave] = valor;
+  }
+  return salida;
+}
+
 export interface BrowserRuntimeOptions {
   /** Directorio del perfil (default: `~/.local/share/ovaultd/runtime`). */
   dataDir?: string;
@@ -46,6 +75,8 @@ export interface BrowserRuntimeOptions {
   headless?: boolean;
   /** Si se define, habilita el puente `/fs/*` confinado a esta raíz (el vault). */
   vaultRoot?: string;
+  /** URL base del server de la sesión: es el ÚNICO destino al que `proxyFetch` reenvía. */
+  serverUrl?: string;
 }
 
 export interface RuntimeInfo {
@@ -81,7 +112,12 @@ function responder(res: ServerResponse, cuerpo: unknown): void {
   res.end(texto);
 }
 
-function ejecutarOp(vault: NodeFileAdapter, op: string, p: Record<string, unknown>): unknown {
+function ejecutarOp(
+  vault: NodeFileAdapter,
+  op: string,
+  p: Record<string, unknown>,
+  serverUrl: string | undefined,
+): unknown {
   switch (op) {
     case 'stat':
       return vault.stat(String(p.path));
@@ -120,11 +156,16 @@ function ejecutarOp(vault: NodeFileAdapter, op: string, p: Record<string, unknow
           headers: Record<string, string>;
           b64: string | null;
         };
+        if (!destinoPermitido(peticion.url, serverUrl)) {
+          throw new VaultBoundaryError(
+            'proxyFetch solo puede hablar con el server de la sesión (destino rechazado)',
+          );
+        }
         const cuerpo = peticion.b64 ? Buffer.from(peticion.b64, 'base64') : undefined;
         const t0 = Date.now();
         const respuesta = await fetch(peticion.url, {
           method: peticion.method,
-          headers: peticion.headers,
+          headers: sanearHeaders(peticion.headers),
           body: cuerpo,
         });
         const bytes = Buffer.from(await respuesta.arrayBuffer());
@@ -148,7 +189,12 @@ function ejecutarOp(vault: NodeFileAdapter, op: string, p: Record<string, unknow
   }
 }
 
-function manejarFs(req: IncomingMessage, res: ServerResponse, vault: NodeFileAdapter): void {
+function manejarFs(
+  req: IncomingMessage,
+  res: ServerResponse,
+  vault: NodeFileAdapter,
+  serverUrl: string | undefined,
+): void {
   const op = req.url!.slice('/fs/'.length);
   const partes: Buffer[] = [];
   let total = 0;
@@ -173,6 +219,16 @@ function manejarFs(req: IncomingMessage, res: ServerResponse, vault: NodeFileAda
         try {
           const destino = decodeURIComponent(String(req.headers['x-ovaultd-url'] ?? ''));
           const metodo = String(req.headers['x-ovaultd-method'] ?? 'PUT');
+          if (!destinoPermitido(destino, serverUrl)) {
+            responder(res, {
+              ok: false,
+              error: {
+                message: 'proxyFetch solo puede hablar con el server de la sesión (destino rechazado)',
+                name: 'VaultBoundaryError',
+              },
+            });
+            return;
+          }
           let headers: Record<string, string> = {};
           try {
             headers = JSON.parse(String(req.headers['x-ovaultd-headers'] ?? '{}'));
@@ -182,7 +238,7 @@ function manejarFs(req: IncomingMessage, res: ServerResponse, vault: NodeFileAda
           const crudo = Buffer.concat(partes);
           const respuesta = await fetch(destino, {
             method: metodo,
-            headers,
+            headers: sanearHeaders(headers),
             body: crudo.length ? crudo : undefined,
           });
           const bytes = Buffer.from(await respuesta.arrayBuffer());
@@ -210,7 +266,7 @@ function manejarFs(req: IncomingMessage, res: ServerResponse, vault: NodeFileAda
     try {
       // Proxy binario: la página manda los bytes crudos y los metadatos en headers; acá
       // se reenvían con node (evita el preflight CORS por URL y el base64 de 180 KB).
-      const resultado = ejecutarOp(vault, op, params);
+      const resultado = ejecutarOp(vault, op, params, serverUrl);
       // `proxyFetch` devuelve una promesa (el HTTP real corre en node, fuera del bridge).
       if (resultado instanceof Promise) {
         resultado.then(
@@ -257,6 +313,7 @@ export class BrowserRuntime {
       RUNTIME_PORT_DEFAULT;
     const bundle = opciones.coreBundlePath ?? bundlePorDefecto();
     const vault = opciones.vaultRoot ? new NodeFileAdapter(opciones.vaultRoot) : null;
+    const serverUrl = opciones.serverUrl;
 
     if (!existsSync(bundle)) {
       throw new Error(
@@ -294,7 +351,7 @@ export class BrowserRuntime {
         return;
       }
       if (vault && req.method === 'POST' && req.url?.startsWith('/fs/')) {
-        manejarFs(req, res, vault);
+        manejarFs(req, res, vault, serverUrl);
         return;
       }
       res.writeHead(404).end();

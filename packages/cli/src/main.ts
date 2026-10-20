@@ -47,6 +47,7 @@ import {
 import { ApiError, OvaultdClient, normalizeServer } from './api.js';
 import { preguntarVisible, resolvePassword } from './credentials.js';
 import { abrirVaultLocal, purgarRuntimeDir, runtimeDirDe, type VaultAbierto } from './local-runtime.js';
+import { guardaDePrune } from './prune-guard.js';
 import {
   clearSession,
   configDir,
@@ -483,12 +484,13 @@ programa
   .command('prune-remote [vault]')
   .description('borra del server los paths que ya no existen en el disco local (reconciliación)')
   .option('--yes', 'aplica los borrados (sin esto solo muestra el plan)')
+  .option('--permitir-vacio', 'permite aplicar aunque el disco local esté vacío (borra TODO el server)')
   .option('--json', 'salida JSON')
   .option('--password-stdin', 'lee la password de stdin (para scripts)')
   .action(
     async (
       vaultTexto: string | undefined,
-      opciones: { yes?: boolean; json?: boolean; passwordStdin?: boolean },
+      opciones: { yes?: boolean; json?: boolean; passwordStdin?: boolean; permitirVacio?: boolean },
     ) => {
       const abierto = await abrirVaultLocal(vaultTexto, opciones);
       try {
@@ -513,6 +515,15 @@ programa
           bloqueadas: number;
         };
         const plan = (await abierto.runtime.call('sync.pruneRemote', { aplicar: false })) as Plan;
+
+        // F-03: si el disco está vacío, el plan borraría el vault ENTERO del server.
+        const guarda = guardaDePrune(plan, Boolean(opciones.permitirVacio));
+        if (guarda) {
+          console.error(`✗ ${guarda}`);
+          await abierto.runtime.call('sync.close');
+          process.exitCode = 1;
+          return;
+        }
 
         if (opciones.json) {
           console.log(JSON.stringify(plan, null, 2));

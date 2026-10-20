@@ -7,3 +7,5 @@
 [[IgnoredVulns]]
 id = "RUSTSEC-2026-0374"
 reason = "unmaintained (no CVE): basic-toml viene de askama_derive como proc-macro de build; sin fix disponible y sin superficie en runtime."
+# F-05: la excepción vence. Si basic-toml/askama cambian, el gate vuelve a romper solo.
+ignoreUntil = 2027-01-31

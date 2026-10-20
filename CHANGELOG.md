@@ -20,6 +20,21 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y e
 
 ## [Unreleased]
 
+### Security
+
+- **Bridge del CLI: `proxyFetch` con allowlist** (F-01 de la auditoría 2026-10-20).
+  El puente reenviaba a cualquier URL tomada de un header; ahora solo al **mismo
+  origen que el server de la sesión** (`serverUrl`), con esquema `http`/`https`, y
+  **fail closed** si no hay server configurado. No reenvía `x-ovaultd-*`, `cookie`,
+  `host`, `connection`, `transfer-encoding` ni `content-length`. Tests:
+  `proxy-allowlist.test.ts`.
+- **`prune-remote`: guarda de "disco vacío"** (F-03). Si el disco local tiene 0
+  archivos y el server tiene paths, el plan borraría el vault entero: la comanda
+  aborta antes de imprimirlo. Escape hatch explícito: `--permitir-vacio`.
+  Tests: `prune-guard.test.ts`.
+- **SCA: la excepción de `osv-scanner.toml` vence** (F-05) con `ignoreUntil =
+  2027-01-31`: si `basic-toml`/`askama` cambian, el gate vuelve a romper solo.
+
 ### Added
 
 - **CLI: `prune-remote`** — reconcilia los paths vivos del server contra el disco local.
