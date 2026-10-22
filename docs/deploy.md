@@ -145,6 +145,18 @@ Dos formas, ambas válidas:
    peer por una interfaz fuera de esas listas (p.ej. Tailscale, 100.64/10) y comprobar que
    la auditoría registra la IP del peer y no el header.
 
+### CORS
+
+Por defecto el server solo responde CORS al runtime loopback del CLI (cualquier puerto), al
+origen de Capacitor en Android y a los dos orígenes desde los que hace `fetch` el plugin de
+Obsidian: `app://obsidian.md` (renderer de escritorio) y `capacitor://localhost` (móvil).
+Cualquier otra web no recibe `Access-Control-Allow-Origin`, así que no puede leer respuestas
+autenticadas aunque tenga un token. Si un cliente falla con `TypeError: Failed to fetch` y el
+log del server está vacío, es CORS: agregá el origen a `OVAULTD_ALLOWED_ORIGINS` (separados
+por coma) y recreá el contenedor. Ojo: `docker compose up -d` no recrea por un cambio de
+`.env`; usá `--force-recreate`, y declarala bajo `environment:` en el compose, porque ese
+compose lista las variables explícitamente.
+
 nginx mínimo de referencia:
 
 ```nginx

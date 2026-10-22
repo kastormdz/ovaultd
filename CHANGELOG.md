@@ -37,6 +37,18 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y e
 - `la_ventana_vieja_se_descarta` estabilizado: espera por reloj hasta 5 s en vez
   de 1 s fijo, que bajo la carga de los tests de Argon2 se quedaba corto (flaky).
 
+## [0.2.13] — 2026-10-22
+
+### Fixed
+
+- **CORS: el default conoce a los clientes reales.** El modo por defecto (sin
+  `OVAULTD_ALLOWED_ORIGINS`) permitía solo loopback, y eso rompía el **plugin de
+  Obsidian**: su core usa `fetch` desde `app://obsidian.md` (desktop) y
+  `capacitor://localhost` (móvil), que no son loopback. El síntoma era
+  `TypeError: Failed to fetch` en el plugin con el log del server vacío. Ahora el
+  default incluye esos dos orígenes además de loopback; la web pública sigue
+  cerrada. Test: `origenes_del_plugin_entran` en `tests/cors.rs`.
+
 ## [Unreleased]
 
 ### Security

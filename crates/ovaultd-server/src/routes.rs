@@ -45,12 +45,18 @@ pub struct EstadoServidor {
     pub notifier: Arc<crate::storage::Notifier>,
 }
 
-/// ¿El origen es de un runtime LOCAL? El CLI levanta Chromium en `http://127.0.0.1:<puerto>`
-/// (el puerto cambia por perfil/device) y el plugin de Obsidian usa `requestUrl` nativo, que
-/// NO manda `Origin`. Permitir SOLO loopback (cualquier puerto) cierra el CORS a la web
-/// pública sin cortar al cliente real: una página externa no puede leer respuestas
-/// autenticadas aunque tenga el token.
+/// ¿El origen es de un cliente legítimo? Dos familias:
+///  - loopback con cualquier puerto: el runtime del CLI (`http://127.0.0.1:<puerto>`, que
+///    cambia por perfil/device) y el Capacitor de Android (`http://localhost`);
+///  - los orígenes propios del plugin: `app://obsidian.md` (renderer desktop) y
+///    `capacitor://localhost` (móvil), que el core usa con `fetch` (no con `requestUrl`).
+/// Cualquier otra web queda afuera: no puede leer respuestas autenticadas aunque tenga el token.
 fn es_origen_local(origin: &str) -> bool {
+    // Los clientes reales del plugin: el renderer de Obsidian en desktop y en móvil.
+    // El CLI ya entra por el caso de loopback de abajo.
+    if matches!(origin, "app://obsidian.md" | "capacitor://localhost") {
+        return true;
+    }
     let resto = origin
         .strip_prefix("http://")
         .or_else(|| origin.strip_prefix("https://"));

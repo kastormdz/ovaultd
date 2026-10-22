@@ -157,3 +157,31 @@ async fn lista_explicita_solo_esos() -> Result<(), Box<dyn std::error::Error>> {
     assert!(ajeno.headers().get("access-control-allow-origin").is_none());
     Ok(())
 }
+
+/// Los orígenes del plugin de Obsidian también son legítimos: el core usa `fetch` desde el
+/// renderer (`app://obsidian.md`) y desde Capacitor (`capacitor://localhost`). Sin esto, el
+/// plugin muere con `TypeError: Failed to fetch` y el log del server queda vacío.
+#[tokio::test]
+async fn origenes_del_plugin_entran() -> Result<(), Box<dyn std::error::Error>> {
+    let context = TestContext::new().await?;
+    for origen in ["app://obsidian.md", "capacitor://localhost"] {
+        let response = context
+            .request(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri("/healthz")
+                    .header(ORIGIN, origen)
+                    .body(Body::empty())?,
+            )
+            .await?;
+        assert_eq!(
+            response
+                .headers()
+                .get("access-control-allow-origin")
+                .and_then(|v| v.to_str().ok()),
+            Some(origen),
+            "el origen del plugin debe recibir Access-Control-Allow-Origin"
+        );
+    }
+    Ok(())
+}
