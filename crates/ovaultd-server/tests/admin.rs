@@ -798,6 +798,21 @@ async fn reset_password_cambia_y_viejo_login_muere() -> Result<()> {
         .fetch_one(&contexto.pool)
         .await?;
 
+    // Un device ya logueado: el reset tiene que matar su token EN LA MISMA transacción.
+    let resp = contexto
+        .request(post_json(
+            "/api/v1/auth/signin",
+            &format!(r#"{{"email":"reset@ejemplo.com","password":"{PASSWORD}","name":"dev"}}"#),
+        )?)
+        .await?;
+    assert_eq!(resp.status(), StatusCode::OK, "signin previo al reset");
+    let tokens_antes: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM device_tokens WHERE account_id = ?")
+            .bind(cuenta_id)
+            .fetch_one(&contexto.pool)
+            .await?;
+    assert!(tokens_antes > 0);
+
     // El admin genera el link: se renderiza UNA vez con el token adentro.
     let resp = contexto
         .request(post_form_con_cookie(
@@ -832,6 +847,13 @@ async fn reset_password_cambia_y_viejo_login_muere() -> Result<()> {
         .await?;
     assert_eq!(resp.status(), StatusCode::OK);
 
+    let tokens_despues: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM device_tokens WHERE account_id = ?")
+            .bind(cuenta_id)
+            .fetch_one(&contexto.pool)
+            .await?;
+    assert_eq!(tokens_despues, 0, "el reset revoca los tokens de los devices en la misma tx");
+
     // La nueva entra; la vieja murió.
     let resp = contexto
         .request(post_form(
@@ -861,6 +883,26 @@ async fn reset_password_cambia_y_viejo_login_muere() -> Result<()> {
     assert_eq!(resp.status(), StatusCode::OK);
     let html = cuerpo(resp).await?;
     assert!(html.contains("no es válido"), "un token usado no vuelve a valer");
+
+    // Y el intento de reuso NO cambió nada: sigue valiendo la password del primer reset y la
+    // que el atacante quiso poner no entra.
+    let resp = contexto
+        .request(post_form(
+            "/admin/login",
+            "email=reset%40ejemplo.com&password=password-nueva-99",
+        )?)
+        .await?;
+    assert_eq!(resp.status(), StatusCode::SEE_OTHER, "la password no se pisó");
+    let resp = contexto
+        .request(post_form(
+            "/admin/login",
+            "email=reset%40ejemplo.com&password=otra-password-77",
+        )?)
+        .await?;
+    assert!(
+        resp.headers().get(header::SET_COOKIE).is_none(),
+        "el reuso no aplicó la password nueva"
+    );
 
     Ok(())
 }

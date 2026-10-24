@@ -149,6 +149,29 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y e
   responden como `error` y la sesión sigue; sólo `unauthorized` (credenciales) e
   `internal` (estado en duda) cierran. El `hello` sí cierra en cualquier error.
 
+## [0.2.25] — 2026-10-24
+
+### Fixed
+
+- **El reset de password es una sola transacción (C1).** Antes eran cuatro escrituras
+  sueltas con tres `let _ =` que se comían los errores:
+  - si fallaba el `used_at`, **el link de reset quedaba reutilizable** (quien lo tuviera
+    volvía a cambiar la password);
+  - si fallaba la revocación, el usuario creía haber cerrado todas sus sesiones y la vieja
+    seguía abierta.
+  Ahora el hash nuevo, el consumo del token y la revocación de `sessions`/`device_tokens`
+  van en una `BEGIN IMMEDIATE` que se confirma junta o no se confirma. El consumo del token
+  usa `WHERE used_at IS NULL` + `rows_affected`: dos POST con el mismo link, el segundo no
+  cambia nada (rollback).
+- Nuevo texto de UI: «Ese link ya se usó. Pedí uno nuevo.»
+
+### Nota de cobertura
+
+El camino feliz está cubierto (password nueva entra, la vieja muere, tokens de devices a 0,
+el reuso no aplica nada). **No** hay test que fuerce un fallo en el medio de la transacción:
+el arnés de integración no permite hacerlo de forma determinista, y un test que no falla con
+el código viejo no vale. Queda anotado como deuda de test.
+
 ## [0.2.24] — 2026-10-24
 
 ### Fixed

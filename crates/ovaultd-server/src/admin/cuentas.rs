@@ -972,27 +972,74 @@ async fn reset_post(
         Err(error) => return panel::error_interno("reset_hash", error),
     };
 
-    let resultado = sqlx::query("UPDATE accounts SET password_hash = ? WHERE id = ?")
+    // Todo o nada: el hash nuevo, el token consumido y la revocación de sesiones/tokens viven
+    // en la MISMA transacción. Antes eran cuatro escrituras sueltas con `let _ =`: si fallaba
+    // el `used_at` el link quedaba reutilizable; si fallaba la revocación, el usuario creía
+    // haber cerrado todas las sesiones y la vieja seguía viva.
+    let mut tx = match estado.pool.begin().await {
+        Ok(tx) => tx,
+        Err(error) => return panel::error_interno("reset_begin", error),
+    };
+
+    let actualizo = sqlx::query("UPDATE accounts SET password_hash = ? WHERE id = ?")
         .bind(hash)
         .bind(fila.account_id)
-        .execute(&estado.pool)
+        .execute(&mut *tx)
         .await;
-    if let Err(error) = resultado {
-        return panel::error_interno("reset_update", error);
+    match actualizo {
+        Ok(filas) if filas.rows_affected() == 1 => {}
+        Ok(_) => {
+            return pintar(
+                Some(t.msg_cuenta_no_existe.to_owned()),
+                false,
+                false,
+                String::new(),
+            )
+        }
+        Err(error) => return panel::error_interno("reset_update", error),
     }
 
-    let _ = sqlx::query("UPDATE password_resets SET used_at = datetime('now') WHERE token_hash = ?")
-        .bind(auth::hash_token(&formulario.token))
-        .execute(&estado.pool)
-        .await;
+    // Garantía anti-replay: el UPDATE condicional es lo que impide usar el link dos veces.
+    // Dos POST simultáneos con el mismo token: el segundo toca 0 filas y no se confirma nada.
+    let consumido = sqlx::query(
+        "UPDATE password_resets SET used_at = datetime('now')
+          WHERE token_hash = ? AND used_at IS NULL",
+    )
+    .bind(auth::hash_token(&formulario.token))
+    .execute(&mut *tx)
+    .await;
+    match consumido {
+        Ok(filas) if filas.rows_affected() == 1 => {}
+        Ok(_) => {
+            // `tx` se dropea sin commit: rollback, la password no cambia.
+            return pintar(
+                Some(t.msg_reset_ya_usado.to_owned()),
+                false,
+                false,
+                String::new(),
+            );
+        }
+        Err(error) => return panel::error_interno("reset_consumir", error),
+    }
 
     // Emergencia (password comprometida): mueren TODAS las sesiones web y los tokens de los
     // devices de la cuenta. Los clientes vuelven a loguear con la password nueva.
-    let _ = sesiones::revocar_todas(&estado.pool, fila.account_id).await;
-    let _ = sqlx::query("DELETE FROM device_tokens WHERE account_id = ?")
-        .bind(fila.account_id)
-        .execute(&estado.pool)
-        .await;
+    for sentencia in [
+        "DELETE FROM sessions WHERE account_id = ?",
+        "DELETE FROM device_tokens WHERE account_id = ?",
+    ] {
+        if let Err(error) = sqlx::query(sentencia)
+            .bind(fila.account_id)
+            .execute(&mut *tx)
+            .await
+        {
+            return panel::error_interno("reset_revocar", error);
+        }
+    }
+
+    if let Err(error) = tx.commit().await {
+        return panel::error_interno("reset_commit", error);
+    }
 
     sesiones::auditar(
         &estado.pool,
