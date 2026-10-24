@@ -20,6 +20,9 @@ use crate::auth;
 use crate::routes::EstadoServidor;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
+/// Tope de página: evita offsets absurdos (`?pagina=999999`) y que el paginador muestre
+/// números que no existen.
+const PAGINA_MAX: i64 = 10_000;
 const POR_PAGINA: i64 = 25;
 
 pub fn rutas() -> Router<EstadoServidor> {
@@ -94,7 +97,7 @@ async fn lista(
     pintar(
         &estado,
         &sesion,
-        params.pagina.unwrap_or(1).max(1),
+        params.pagina.unwrap_or(1).clamp(1, PAGINA_MAX),
         params.todos.unwrap_or(0) != 0,
         params.ok,
         params.error,

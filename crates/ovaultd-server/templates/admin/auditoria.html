@@ -38,9 +38,9 @@
     </tbody>
   </table>
   <div class="paginacion">
-    <span>{% if pagina > 1 %}<a class="boton mini" href="/admin/auditoria?pagina={{ pagina - 1 }}{% if q != "" %}&q={{ q }}{% endif %}">{{ t.btn_anterior }}</a>{% endif %}</span>
+    <span>{% if pagina > 1 %}<a class="boton mini" href="/admin/auditoria?pagina={{ pagina - 1 }}{% if q != "" %}&amp;q={{ q|urlencode }}{% endif %}">{{ t.btn_anterior }}</a>{% endif %}</span>
     <span class="ayuda">{{ t.pagina }} {{ pagina }}</span>
-    <span>{% if hay_mas %}<a class="boton mini" href="/admin/auditoria?pagina={{ pagina + 1 }}{% if q != "" %}&q={{ q }}{% endif %}">{{ t.btn_siguiente }}</a>{% endif %}</span>
+    <span>{% if hay_mas %}<a class="boton mini" href="/admin/auditoria?pagina={{ pagina + 1 }}{% if q != "" %}&amp;q={{ q|urlencode }}{% endif %}">{{ t.btn_siguiente }}</a>{% endif %}</span>
   </div>
   {% endif %}
 </section>

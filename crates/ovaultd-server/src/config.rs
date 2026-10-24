@@ -11,6 +11,8 @@ pub struct Config {
     /// TTL de una subida reanudable sin actividad (horas): vencida, el barrido la borra y
     /// libera su reserva de cuota (ADR-0012).
     pub upload_ttl_hours: i64,
+    /// Vigencia de un link de reset de password (horas): `OVAULTD_RESET_TTL_HOURS`, default 24.
+    pub reset_ttl_hours: i64,
     /// Token de instalación del bootstrap por web (`/setup`, ADR-0016). Seteado, el formulario
     /// de la primera cuenta exige `?token=…`; ausente/vacío, queda abierto MIENTRAS el servidor
     /// no tenga ninguna cuenta. Nunca se imprime en logs (el `Display` solo dice set/unset).
@@ -98,6 +100,14 @@ impl Config {
             24,
         )?;
 
+        let reset_ttl_hours = leer_entero_en_rango(
+            &get,
+            "OVAULTD_RESET_TTL_HOURS",
+            24,
+            1,
+            24 * 30,
+        )?;
+
         let tz_offset_minutos =
             leer_entero_en_rango(&get, "OVAULTD_TZ_OFFSET_MINUTES", 0, -1440, 1440)? as i32;
 
@@ -156,6 +166,7 @@ impl Config {
             token_ttl_hours,
             challenge_ttl_seconds,
             upload_ttl_hours,
+            reset_ttl_hours,
             setup_token,
             secure_cookies,
             trust_proxy,
@@ -403,4 +414,33 @@ mod tests {
             .to_string()
             .contains("OVAULTD_TRUST_PROXY"));
     }
+}
+
+
+/// Config del proceso, instalada una vez al arrancar (`main`). Los módulos que no reciben
+/// `EstadoServidor` (auth, por ejemplo) leen los TTL de acá en vez de la env en cada request:
+/// así se validan con rango UNA vez y un test no depende del entorno.
+static GLOBAL: std::sync::OnceLock<std::sync::Arc<Config>> = std::sync::OnceLock::new();
+
+pub fn instalar_global(config: std::sync::Arc<Config>) {
+    let _ = GLOBAL.set(config);
+}
+
+fn global() -> Option<&'static std::sync::Arc<Config>> {
+    GLOBAL.get()
+}
+
+/// TTL del token de device (horas). Default 720 (30 días) si nadie instaló la config (tests).
+pub fn ttl_token_horas() -> i64 {
+    global().map_or(720, |config| config.token_ttl_hours)
+}
+
+/// TTL del challenge del WS (segundos). Default 300 (5 min).
+pub fn ttl_challenge_segundos() -> i64 {
+    global().map_or(300, |config| config.challenge_ttl_seconds)
+}
+
+/// Vigencia del link de reset (horas). Default 24.
+pub fn ttl_reset_horas() -> i64 {
+    global().map_or(24, |config| config.reset_ttl_hours)
 }

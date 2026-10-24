@@ -12,10 +12,10 @@
       <input type="password" name="actual" required autocomplete="current-password">
     </label>
     <label>{{ t.mi_cuenta_password_nueva }}
-      <input type="password" name="nueva" required minlength="8" autocomplete="new-password">
+      <input type="password" name="nueva" required minlength="{{ t.min_password }}" autocomplete="new-password">
     </label>
     <label>{{ t.register_repetir }}
-      <input type="password" name="repetir" required minlength="8" autocomplete="new-password">
+      <input type="password" name="repetir" required minlength="{{ t.min_password }}" autocomplete="new-password">
     </label>
     <button class="boton primario" type="submit">{{ t.btn_guardar }}</button>
   </form>

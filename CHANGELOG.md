@@ -149,6 +149,37 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y e
   responden como `error` y la sesión sigue; sólo `unauthorized` (credenciales) e
   `internal` (estado en duda) cierran. El `hello` sí cierra en cualquier error.
 
+## [0.3.1] — 2026-10-24
+
+Fase D completa: higiene (sin cambios de wire ni de API).
+
+### Fixed
+
+- **El `minlength` del form sale de `MIN_PASSWORD`.** Los tres formularios pedían 8 y el
+  server exige 12: se podía escribir una password que el server rechazaba. El texto también
+  decía 8; ahora los dos salen de la constante.
+- **El link de reset usa `OVAULTD_PUBLIC_HOST`.** Detrás del proxy el `Host` del request es
+  el interno (`127.0.0.1:8096`) y el link que se copiaba no funcionaba desde afuera.
+- **`pagina` clampeada** a `[1, 10 000]` en cuentas, devices y auditoría: un `?pagina=999999`
+  ya no genera offsets absurdos ni un paginador con números que no existen.
+- **El `q` de la auditoría va URL-encoded** en los links de paginación (un `&` o `#` en el
+  filtro rompía el link).
+- **Los TTL salen de `Config`** (validados con rango al arrancar, no de la env en cada
+  request): `OVAULTD_RESET_TTL_HOURS` (nuevo, 1–720), `OVAULTD_CHALLENGE_TTL`,
+  `OVAULTD_TOKEN_TTL_HOURS`. `Config` se instala como global al arrancar para que `auth` los
+  lea sin arrastrar el estado por todas las firmas.
+- **`state.ts` escribe atómico** (temporal + rename) y **tolera un JSON corrupto**: un corte
+  de luz a mitad de escritura dejaba el CLI sin arrancar (`SyntaxError` sin contexto). Un
+  `session.json` inválido ahora se lee como "no hay sesión".
+- **`create-remote` imprime la recovery aunque falle el archivo.** Si `--recovery-out` no se
+  puede escribir (permisos, disco), la clave se muestra igual: es la única forma de
+  recuperar el vault.
+
+### Nota
+
+- Los temporales `.ovaultd-tmp-*` ya estaban excluidos del escaneo y la hora local con rótulo
+  de zona ya estaba desde 0.2.17: los otros dos puntos de la fase estaban hechos.
+
 ## [0.3.0] — 2026-10-24
 
 Fase C completa: transacciones y concurrencia (C1–C10). El salto de minor es por el cambio

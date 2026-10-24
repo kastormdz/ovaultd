@@ -2,7 +2,7 @@
  * Estado local: roundtrip, permisos 0600 y nombres de archivo por server+vault.
  */
 
-import { mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -96,10 +96,12 @@ describe('estado del CLI', () => {
     }
   });
 
-  it('sobrevive a un session.json corrupto con error claro', () => {
+  it('un session.json corrupto se tolera (se lee como null, sin tumbar el CLI)', () => {
+    // Contrato de la Fase D: un archivo a medio escribir no puede dejar el CLI sin arrancar.
+    // Antes lanzaba el JSON.parse crudo y el comando moría con un SyntaxError sin contexto.
     saveSession(sesion);
     writeFileSync(join(configDir(), 'session.json'), '{no soy json');
-    expect(() => readSession()).toThrow();
+    expect(readSession()).toBeNull();
   });
 });
 
@@ -122,5 +124,31 @@ describe('subclaves cacheadas', () => {
     expect(leido?.subkeys).toEqual(hex);
     expect(leido?.subkeys_epoch).toBe(1);
     expect(statSync(vaultPath(vault.server, vault.vault)).mode & 0o777).toBe(0o600);
+  });
+});
+
+describe('estado corrupto y escritura atómica (Fase D)', () => {
+  it('un session.json inválido se lee como null y no tumba el CLI', () => {
+    // Un archivo a medio escribir (corte de luz) no puede dejar el CLI sin arrancar.
+    writeFileSync(join(configDir(), 'session.json'), '{"server": "http://x", "tok');
+    expect(readSession()).toBeNull();
+  });
+
+  it('un vault.json inválido se ignora en la lista', () => {
+    saveVaultState({
+      server: 'http://127.0.0.1:8096',
+      vault: 1,
+    } as Parameters<typeof saveVaultState>[0]);
+    writeFileSync(join(configDir(), 'vaults', 'roto.json'), '{no es json');
+
+    const estados = listVaultStates();
+    expect(estados).toHaveLength(1);
+  });
+
+  it('la escritura es atómica: no deja temporales al lado', () => {
+    saveSession({ server: 'http://127.0.0.1:8096', token: 't' } as Parameters<typeof saveSession>[0]);
+
+    const restos = readdirSync(configDir()).filter((nombre) => nombre.includes('.tmp-'));
+    expect(restos).toEqual([]);
   });
 });

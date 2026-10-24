@@ -332,7 +332,7 @@ pub async fn emitir_device(
 ) -> Result<String> {
     let token = token_string(&token_bytes());
     let token_hash = hash_token(&token);
-    let ttl_hours = env_i64("OVAULTD_TOKEN_TTL_HOURS", 720);
+    let ttl_hours = crate::config::ttl_token_horas();
     let expires_modifier = format!("+{ttl_hours} hours");
 
     let mut transaction = pool.begin().await?;
@@ -424,7 +424,7 @@ pub async fn emitir_challenge(
         .await;
 
     let challenge = token_bytes();
-    let ttl_seconds = env_i64("OVAULTD_CHALLENGE_TTL", 300);
+    let ttl_seconds = crate::config::ttl_challenge_segundos();
     let expires_modifier = format!("+{ttl_seconds} seconds");
 
     sqlx::query(

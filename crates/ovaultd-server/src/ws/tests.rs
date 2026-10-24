@@ -64,7 +64,7 @@ impl TestContext {
             auth::PASSWORD_DE_PRUEBA,
             "test-device",
             Some("test"),
-        )
+    )
         .await?;
 
         let vault_key = ovaultd_crypto::VaultKey([7u8; 32]);
@@ -95,6 +95,7 @@ impl TestContext {
             token_ttl_hours: 720,
             challenge_ttl_seconds: 300,
             upload_ttl_hours: 24,
+            reset_ttl_hours: 24,
             setup_token: None,
             secure_cookies: crate::config::ModoSecureCookies::Auto,
             trust_proxy: true,

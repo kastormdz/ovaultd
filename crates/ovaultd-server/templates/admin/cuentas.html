@@ -24,7 +24,7 @@
         <input type="email" name="email" required autocomplete="off">
       </label>
       <label>{{ t.cuentas_password_inicial }}
-        <input type="password" name="password" required minlength="8" autocomplete="new-password">
+        <input type="password" name="password" required minlength="{{ t.min_password }}" autocomplete="new-password">
       </label>
       <label>{{ t.th_rol }}
         <select name="rol">

@@ -16,6 +16,9 @@ use super::textos::{self, Textos};
 use crate::routes::EstadoServidor;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
+/// Tope de página: evita offsets absurdos (`?pagina=999999`) y que el paginador muestre
+/// números que no existen.
+const PAGINA_MAX: i64 = 10_000;
 const POR_PAGINA: i64 = 50;
 
 pub fn rutas() -> axum::Router<EstadoServidor> {
@@ -71,7 +74,7 @@ async fn lista(
     SesionAdmin(sesion): SesionAdmin,
     Query(params): Query<ParamsLista>,
 ) -> Response {
-    let pagina = params.pagina.unwrap_or(1).max(1);
+    let pagina = params.pagina.unwrap_or(1).clamp(1, PAGINA_MAX);
     let offset = (pagina - 1) * POR_PAGINA;
 
     // Filtro chico y honesto: la MISMA subcadena contra action y detail.

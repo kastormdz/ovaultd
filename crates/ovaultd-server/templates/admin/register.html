@@ -25,10 +25,10 @@
       <input type="email" name="email" required autocomplete="username">
     </label>
     <label>{{ t.login_password }}
-      <input type="password" name="password" required minlength="8" autocomplete="new-password">
+      <input type="password" name="password" required minlength="{{ t.min_password }}" autocomplete="new-password">
     </label>
     <label>{{ t.register_repetir }}
-      <input type="password" name="repetir" required minlength="8" autocomplete="new-password">
+      <input type="password" name="repetir" required minlength="{{ t.min_password }}" autocomplete="new-password">
     </label>
     <button class="boton primario" type="submit">{{ t.register_titulo }}</button>
   </form>

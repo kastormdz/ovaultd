@@ -99,6 +99,20 @@ pub(crate) fn es_https(headers: &HeaderMap, confiar_en_proxy: bool) -> bool {
         .unwrap_or(false)
 }
 
+/// Host que se escribe en los links que salen del panel (reset). `OVAULTD_PUBLIC_HOST` manda:
+/// detrás de un proxy el `Host` del request es el interno (`127.0.0.1:8096`) y el link que se
+/// copia y se manda por chat no funciona desde afuera.
+pub(crate) fn host_publico(config: &crate::config::Config, headers: &HeaderMap) -> String {
+    if let Some(host) = config.public_host.as_deref() {
+        return host.to_owned();
+    }
+    headers
+        .get(axum::http::header::HOST)
+        .and_then(|valor| valor.to_str().ok())
+        .unwrap_or("localhost")
+        .to_owned()
+}
+
 fn cookie_segura(estado: &EstadoServidor, headers: &HeaderMap) -> bool {
     match estado.config.secure_cookies {
         ModoSecureCookies::Siempre => true,

@@ -222,17 +222,30 @@ programa
     console.log(`vault creado: #${id} «${name}» (uuid ${bytesToUuid(vaultUuid)})`);
     console.log(`material público guardado en ${vaultPath(sesion.server, id)}`);
 
-    if (opciones.recoveryOut) {
-      const destino = resolve(opciones.recoveryOut);
-      writeFileSync(destino, `${recoveryHex}\n`, { mode: 0o600 });
-      chmodSync(destino, 0o600);
-      console.log(`recovery key escrita en ${destino} (0600) — guardala FUERA de este equipo también`);
-    } else {
+    // Se muestra UNA vez. Si el archivo falla (permisos, disco lleno), se imprime igual: la
+    // recovery no se puede perder por un error de escritura.
+    const mostrarRecovery = (): void => {
       console.log('');
       console.log('  ⚠️  RECOVERY KEY (no se vuelve a mostrar):');
       console.log(`      ${recoveryHex}`);
       console.log('  Guardala ahora. Es la única forma de recuperar el vault si olvidás la password.');
       console.log('  (Mejor: repetí con --recovery-out <archivo> y guardala en tu gestor de secretos.)');
+    };
+
+    if (opciones.recoveryOut) {
+      const destino = resolve(opciones.recoveryOut);
+      try {
+        writeFileSync(destino, `${recoveryHex}\n`, { mode: 0o600 });
+        chmodSync(destino, 0o600);
+        console.log(`recovery key escrita en ${destino} (0600) — guardala FUERA de este equipo también`);
+      } catch (error) {
+        console.error(
+          `⚠️ no pude escribir ${destino}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+        mostrarRecovery();
+      }
+    } else {
+      mostrarRecovery();
     }
   });
 
@@ -575,7 +588,7 @@ programa
         }
 
         if (!opciones.yes || plan.huerfanos.length === 0) {
-          if (!opciones.yes && plan.huerfanos.length > 0) {
+          if (!opciones.json && !opciones.yes && plan.huerfanos.length > 0) {
             console.log('\ndry-run: no se borró nada. Para aplicarlo: ovaultd prune-remote --yes');
           }
           await abierto.runtime.call('sync.close');
@@ -598,9 +611,13 @@ programa
           empujadas: number;
           headRev: number;
         };
-        console.log(
-          `del encolados: ${aplicado.encolados} · publicados: ${empujado.empujadas} (rev ${empujado.headRev})`,
-        );
+        if (opciones.json) {
+          console.log(JSON.stringify({ ...aplicado, publicados: empujado.empujadas, rev: empujado.headRev }));
+        } else {
+          console.log(
+            `del encolados: ${aplicado.encolados} · publicados: ${empujado.empujadas} (rev ${empujado.headRev})`,
+          );
+        }
         await abierto.runtime.call('sync.close');
       } finally {
         await abierto.cerrar();

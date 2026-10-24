@@ -7,7 +7,16 @@
  *   lo único que queda en disco es la env del token, si el usuario la usa).
  */
 
-import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
@@ -92,9 +101,28 @@ const asegurarDir = (ruta: string): void => {
   chmodSync(ruta, 0o700);
 };
 
+/**
+ * Escritura ATÓMICA: un corte de luz entre el truncado y el contenido dejaba el archivo a
+ * medio escribir y el CLI arrancaba sin estado (o peor, con un `session.json` inválido).
+ * Se escribe al lado y se renombra (mismo filesystem: el rename es atómico).
+ */
 const escribirPrivado = (ruta: string, contenido: string): void => {
-  writeFileSync(ruta, contenido, { mode: 0o600 });
-  chmodSync(ruta, 0o600);
+  const temporal = `${ruta}.tmp-${process.pid}`;
+  writeFileSync(temporal, contenido, { mode: 0o600 });
+  chmodSync(temporal, 0o600);
+  renameSync(temporal, ruta);
+};
+
+/**
+ * Lee un JSON privado y devuelve `null` si está corrupto: un archivo inválido no puede
+ * tumbar el CLI, se trata como "no hay estado" y se regenera.
+ */
+const leerJson = <T>(ruta: string): T | null => {
+  try {
+    return JSON.parse(readFileSync(ruta, 'utf8')) as T;
+  } catch {
+    return null;
+  }
 };
 
 export const saveSession = (sesion: SessionState): void => {
@@ -105,7 +133,7 @@ export const saveSession = (sesion: SessionState): void => {
 export const readSession = (): SessionState | null => {
   const ruta = sessionPath();
   if (!existsSync(ruta)) return null;
-  return JSON.parse(readFileSync(ruta, 'utf8')) as SessionState;
+  return leerJson<SessionState>(ruta);
 };
 
 export const clearSession = (): void => {
@@ -127,7 +155,7 @@ export const saveVaultState = (estado: VaultLocalState): void => {
 export const readVaultState = (servidor: string, vault: number): VaultLocalState | null => {
   const ruta = vaultPath(servidor, vault);
   if (!existsSync(ruta)) return null;
-  return JSON.parse(readFileSync(ruta, 'utf8')) as VaultLocalState;
+  return leerJson<VaultLocalState>(ruta);
 };
 
 export const listVaultStates = (): VaultLocalState[] => {
@@ -135,7 +163,8 @@ export const listVaultStates = (): VaultLocalState[] => {
   if (!existsSync(dir)) return [];
   return readdirSync(dir)
     .filter((nombre) => nombre.endsWith('.json'))
-    .map((nombre) => JSON.parse(readFileSync(join(dir, nombre), 'utf8')) as VaultLocalState);
+    .map((nombre) => leerJson<VaultLocalState>(join(dir, nombre)))
+    .filter((estado): estado is VaultLocalState => estado !== null);
 };
 
 /** Borra el estado local de un vault (`unlink`). Devuelve si existía. */

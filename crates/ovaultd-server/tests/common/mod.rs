@@ -74,7 +74,7 @@ impl TestContext {
             PASSWORD,
             "test-device",
             Some("integracion"),
-        )
+    )
         .await?;
 
         let vault_key = VaultKey([7u8; 32]);
@@ -110,6 +110,7 @@ impl TestContext {
             token_ttl_hours: 720,
             challenge_ttl_seconds: 300,
             upload_ttl_hours: 24,
+            reset_ttl_hours: 24,
             setup_token: None,
             secure_cookies: ovaultd_server::config::ModoSecureCookies::Auto,
             // Los tests simulan el deploy real (detrás de un borde de confianza); los tests
@@ -118,7 +119,7 @@ impl TestContext {
             // El modo más completo del server; los tests de `off`/`localhost` lo cambian.
             metrics: ovaultd_server::config::ModoMetrics::On,
             allowed_origins,
-            public_host: None,
+            public_host: Some("panel.ejemplo.com".to_owned()),
             tz_offset_minutos: -180,
         };
         let cas = Arc::new(CasStore::new(cas_dir.path().to_path_buf())?);
@@ -173,7 +174,7 @@ impl TestContext {
             PASSWORD,
             "device-ajeno",
             Some("integracion"),
-        )
+    )
         .await?;
 
         let vault_key = VaultKey([9u8; 32]);

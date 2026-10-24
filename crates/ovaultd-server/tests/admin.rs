@@ -1329,3 +1329,48 @@ async fn la_invariante_del_ultimo_admin_se_mantiene() -> Result<()> {
 
     Ok(())
 }
+
+/// Fase D: el `minlength` del form sale del mismo `MIN_PASSWORD` que valida el server, el
+/// link de reset usa `OVAULTD_PUBLIC_HOST`, y una página absurda no rompe la lista.
+#[tokio::test]
+async fn higiene_de_panel() -> Result<()> {
+    let contexto = TestContext::new().await?;
+    hacer_admin(&contexto).await?;
+    let cookie = login(&contexto).await?;
+    let csrf = csrf_de_la_ultima_sesion(&contexto).await?;
+
+    // 1) El mínimo del form es el que valida el server (antes decía 8 y el server pedía 12).
+    let resp = contexto
+        .request(get_con_cookie("/admin/cuentas", &cookie)?)
+        .await?;
+    assert_eq!(resp.status(), StatusCode::OK);
+    let html = cuerpo(resp).await?;
+    assert!(
+        html.contains(&format!("minlength=\"{}\"", auth::MIN_PASSWORD)),
+        "el form tiene que pedir {} caracteres",
+        auth::MIN_PASSWORD
+    );
+
+    // 2) El link de reset usa el host público, no el Host interno del request.
+    let cuenta = auth::crear_cuenta(&contexto.pool, "link@ejemplo.com", PASSWORD).await?;
+    let resp = contexto
+        .request(post_form_con_cookie(
+            "/admin/cuentas/accion",
+            &format!("csrf={csrf}&id={}&accion=reset", cuenta.id),
+            &cookie,
+        )?)
+        .await?;
+    let html = cuerpo(resp).await?;
+    assert!(
+        html.contains("panel.ejemplo.com/reset?token="),
+        "el link tiene que usar OVAULTD_PUBLIC_HOST"
+    );
+
+    // 3) Una página absurda se clampea (no 500 ni offset negativo).
+    let resp = contexto
+        .request(get_con_cookie("/admin/cuentas?pagina=999999", &cookie)?)
+        .await?;
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    Ok(())
+}

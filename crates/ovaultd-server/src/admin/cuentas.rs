@@ -25,8 +25,9 @@ use crate::auth;
 use crate::routes::{purgar_vault, EstadoServidor};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
+/// Tope de página: evita offsets absurdos y que el paginador muestre números que no existen.
+const PAGINA_MAX: i64 = 10_000;
 const POR_PAGINA: i64 = 25;
-const RESET_VIGENCIA_HORAS: i64 = 24;
 
 pub fn rutas() -> Router<EstadoServidor> {
     Router::new()
@@ -165,7 +166,7 @@ async fn cuentas_lista(
     pintar_cuentas(
         &estado,
         &sesion,
-        params.pagina.unwrap_or(1).max(1),
+        params.pagina.unwrap_or(1).clamp(1, PAGINA_MAX),
         params.error,
         params.ok,
         None,
@@ -431,6 +432,7 @@ async fn cuentas_accion(
             }
         }
         "reset" => {
+            let vigencia_horas = crate::config::ttl_reset_horas();
             let token = auth::token_string(&auth::token_bytes());
             let insercion = sqlx::query(
                 "INSERT INTO password_resets (token_hash, account_id, expires_at)
@@ -438,7 +440,7 @@ async fn cuentas_accion(
             )
             .bind(auth::hash_token(&token))
             .bind(target.0)
-            .bind(format!("+{RESET_VIGENCIA_HORAS} hours"))
+            .bind(format!("+{vigencia_horas} hours"))
             .execute(&estado.pool)
             .await;
 
@@ -455,10 +457,8 @@ async fn cuentas_accion(
             )
             .await;
 
-            let host = headers
-                .get("host")
-                .and_then(|valor| valor.to_str().ok())
-                .unwrap_or("localhost");
+            // `OVAULTD_PUBLIC_HOST` manda: detrás del proxy el Host del request es el interno.
+            let host = panel::host_publico(&estado.config, &headers);
             let esquema = if panel::es_https(&headers, estado.config.trust_proxy) { "https" } else { "http" };
             let link = format!("{esquema}://{host}/reset?token={token}");
 
@@ -469,7 +469,7 @@ async fn cuentas_accion(
                 1,
                 None,
                 Some(format!(
-                    "Link de reset para {} (copialo y pasáselo: se muestra UNA vez, vale {RESET_VIGENCIA_HORAS} h).",
+                    "Link de reset para {} (copialo y pasáselo: se muestra UNA vez, vale {vigencia_horas} h).",
                     target.1
                 )),
                 Some(link),

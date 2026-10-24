@@ -49,6 +49,7 @@ impl Contexto {
             token_ttl_hours: 720,
             challenge_ttl_seconds: 300,
             upload_ttl_hours: 24,
+            reset_ttl_hours: 24,
             setup_token: setup_token.map(str::to_owned),
             secure_cookies: ovaultd_server::config::ModoSecureCookies::Auto,
             trust_proxy: true,

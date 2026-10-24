@@ -203,6 +203,8 @@ pub struct Textos {
     // ── mensajes del server (flash / errores accionables) ───────────────────
     pub msg_email_invalido: &'static str,
     pub msg_password_corta: &'static str,
+    /// Mínimo de la password, para que el `minlength` del form no mienta.
+    pub min_password: usize,
     pub msg_passwords_no_coinciden: &'static str,
     pub msg_cuenta_creada: &'static str,
     pub msg_cuenta_ya_existe: &'static str,
@@ -430,7 +432,8 @@ pub static ES: Textos = Textos {
     mi_cuenta_actual_incorrecta: "La password actual no es correcta.",
 
     msg_email_invalido: "Ese email no parece válido.",
-    msg_password_corta: "La password necesita 8+ caracteres.",
+    msg_password_corta: "La password necesita 12+ caracteres.",
+    min_password: crate::auth::MIN_PASSWORD,
     msg_passwords_no_coinciden: "Las passwords no coinciden.",
     msg_cuenta_creada: "Cuenta creada.",
     msg_cuenta_ya_existe: "Ya existe una cuenta con ese email.",

@@ -58,6 +58,9 @@ async fn iniciar_servidor() -> Result<(), String> {
     let cas = CasStore::new(config.cas_root.clone())
         .map_err(|error| format!("no se pudo inicializar el almacenamiento CAS: {error}"))?;
 
+    // Los módulos sin acceso al estado (auth) leen los TTL de acá.
+    ovaultd_server::config::instalar_global(std::sync::Arc::new(config.clone()));
+
     let estado = routes::EstadoServidor {
         pool,
         config,
