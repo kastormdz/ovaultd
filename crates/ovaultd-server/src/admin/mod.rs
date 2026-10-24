@@ -11,6 +11,7 @@
 pub mod auditoria;
 pub mod cuentas;
 pub mod devices;
+pub mod hora;
 pub mod panel;
 pub mod sesiones;
 pub mod textos;

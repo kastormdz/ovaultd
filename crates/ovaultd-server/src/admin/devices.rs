@@ -14,7 +14,7 @@ use axum::{
 };
 use serde::Deserialize;
 
-use super::{flash, panel, sesiones, SesionAdmin};
+use super::{flash, hora, panel, sesiones, SesionAdmin};
 use super::textos::{self, Textos};
 use crate::auth;
 use crate::routes::EstadoServidor;
@@ -39,6 +39,7 @@ struct PlantillaDevices {
     rol: String,
     csrf: String,
     devices: Vec<VistaDevice>,
+    zona: String,
     pagina: i64,
     hay_mas: bool,
     ver_todos: bool,
@@ -164,6 +165,8 @@ async fn pintar(
     };
 
     let hay_mas = filas.len() as i64 > POR_PAGINA;
+    let zona = hora::etiqueta_zona(estado.config.tz_offset_minutos);
+    let desplazamiento = estado.config.tz_offset_minutos;
     let devices = filas
         .into_iter()
         .take(POR_PAGINA as usize)
@@ -172,8 +175,11 @@ async fn pintar(
             cuenta: fila.cuenta,
             nombre: fila.nombre,
             plataforma: fila.plataforma.unwrap_or_else(|| "—".to_owned()),
-            creado: fila.creado,
-            ultima_actividad: fila.ultima_actividad,
+            creado: hora::hora_local(&fila.creado, desplazamiento),
+            ultima_actividad: fila
+                .ultima_actividad
+                .as_deref()
+                .map(|ts| hora::hora_local(ts, desplazamiento)),
             revocado: fila.revocado.is_some(),
             tokens_vivos: fila.tokens_vivos,
         })
@@ -190,6 +196,7 @@ async fn pintar(
                 rol: sesion.role.clone(),
                 csrf: sesion.csrf_token.clone(),
                 devices,
+                zona,
                 pagina,
                 hay_mas,
                 ver_todos: todos,

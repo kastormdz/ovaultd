@@ -34,7 +34,7 @@
     <p class="empty">{{ t.vaults_sin_vaults }}</p>
     {% else %}
     <table class="tabla">
-      <thead><tr><th>{{ t.th_vault }}</th><th class="num">{{ t.th_notas }}</th><th class="num">{{ t.th_rev }}</th><th class="num">{{ t.th_tamano }}</th><th>{{ t.th_ultima_act }}</th><th>{{ t.th_estado }}</th></tr></thead>
+      <thead><tr><th>{{ t.th_vault }}</th><th class="num">{{ t.th_notas }}</th><th class="num">{{ t.th_rev }}</th><th class="num">{{ t.th_tamano }}</th><th>{{ t.th_ultima_act }} <span class="sub">({{ zona }})</span></th><th>{{ t.th_estado }}</th></tr></thead>
       <tbody>
         {% for v in vaults_lista %}
         <tr>
@@ -57,7 +57,7 @@
     <p class="empty">{{ t.dispositivos_sin }}</p>
     {% else %}
     <table class="tabla">
-      <thead><tr><th>{{ t.th_dispositivo }}</th><th>{{ t.th_cuenta }}</th><th>{{ t.th_ultima_act }}</th></tr></thead>
+      <thead><tr><th>{{ t.th_dispositivo }}</th><th>{{ t.th_cuenta }}</th><th>{{ t.th_ultima_act }} <span class="sub">({{ zona }})</span></th></tr></thead>
       <tbody>
         {% for d in dispositivos %}
         <tr>
@@ -73,7 +73,7 @@
 </div>
 
 <section class="tarjeta">
-  <h2>{{ t.seccion_actividad }} <a href="/admin/auditoria">{{ t.auditoria_completa }}</a></h2>
+  <h2>{{ t.seccion_actividad }} <span class="sub">({{ zona }})</span> <a href="/admin/auditoria">{{ t.auditoria_completa }}</a></h2>
   {% if actividad.len() == 0 %}
   <p class="empty">{{ t.cero_eventos }}</p>
   {% else %}

@@ -38,6 +38,10 @@ pub struct Config {
     /// Host que devuelve `/access` (`OVAULTD_PUBLIC_HOST`). Sin configurar se refleja el
     /// `Host` del request; con esto, el cliente aprende SIEMPRE el host del despliegue.
     pub public_host: Option<String>,
+    /// Huso horario para MOSTRAR fechas en el panel (`OVAULTD_TZ_OFFSET_MINUTES`, minutos
+    /// respecto de UTC; -180 = UTC-03:00). Default 0 (UTC). La base sigue guardando UTC:
+    /// esto sólo cambia la presentación.
+    pub tz_offset_minutos: i32,
 }
 
 /// Modo de exposición de `/metrics`.
@@ -93,6 +97,19 @@ impl Config {
             "OVAULTD_UPLOAD_TTL_HOURS",
             24,
         )?;
+
+        let tz_offset_minutos = {
+            let minutos = leer_entero(&get, "OVAULTD_TZ_OFFSET_MINUTES", 0)?;
+            let minutos = i32::try_from(minutos).map_err(|_| {
+                ServerError::Invalid("OVAULTD_TZ_OFFSET_MINUTES fuera de rango".to_owned())
+            })?;
+            if !(-1440..=1440).contains(&minutos) {
+                return Err(ServerError::Invalid(
+                    "OVAULTD_TZ_OFFSET_MINUTES fuera de rango (-1440..1440)".to_owned(),
+                ));
+            }
+            minutos
+        };
 
         let setup_token = valor(&get, "OVAULTD_SETUP_TOKEN");
 
@@ -155,6 +172,7 @@ impl Config {
             metrics,
             allowed_origins,
             public_host,
+            tz_offset_minutos,
         })
     }
 }
@@ -163,7 +181,7 @@ impl fmt::Display for Config {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             formatter,
-            "bind_addr={}, database_path={}, cas_root={}, token_ttl_hours={}, challenge_ttl_seconds={}, upload_ttl_hours={}, setup_token={}, secure_cookies={:?}, trust_proxy={}",
+            "bind_addr={}, database_path={}, cas_root={}, token_ttl_hours={}, challenge_ttl_seconds={}, upload_ttl_hours={}, setup_token={}, secure_cookies={:?}, trust_proxy={}, tz_offset_minutos={}",
             self.bind_addr,
             self.database_path,
             self.cas_root.display(),
@@ -173,6 +191,7 @@ impl fmt::Display for Config {
             if self.setup_token.is_some() { "set" } else { "unset" },
             self.secure_cookies,
             self.trust_proxy,
+            self.tz_offset_minutos,
         )
     }
 }

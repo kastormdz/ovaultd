@@ -11,7 +11,7 @@ use axum::{
 
 use serde::Deserialize;
 
-use super::{panel, SesionAdmin};
+use super::{hora, panel, SesionAdmin};
 use super::textos::{self, Textos};
 use crate::routes::EstadoServidor;
 
@@ -38,6 +38,7 @@ struct PlantillaAuditoria {
     /// Filtro aplicado (por acción o detalle), si hay.
     q: String,
     total: i64,
+    zona: String,
 }
 
 struct VistaEvento {
@@ -132,11 +133,13 @@ async fn lista(
     };
 
     let hay_mas = filas.len() as i64 > POR_PAGINA;
+    let desplazamiento = estado.config.tz_offset_minutos;
+    let zona = hora::etiqueta_zona(desplazamiento);
     let eventos = filas
         .into_iter()
         .take(POR_PAGINA as usize)
         .map(|fila| VistaEvento {
-            ts: fila.ts,
+            ts: hora::hora_local(&fila.ts, desplazamiento),
             actor: fila.actor.unwrap_or_else(|| "—".to_owned()),
             action: fila.action,
             detail: fila.detail,
@@ -159,6 +162,7 @@ async fn lista(
                 hay_mas,
                 q,
                 total,
+                zona,
             }
             .render()
         },

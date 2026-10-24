@@ -21,6 +21,7 @@ use axum::routing::{get, post};
 use axum::{Form, Router};
 use serde::Deserialize;
 
+use super::hora;
 use super::textos::{self, Textos};
 use crate::admin::sesiones::{self, CAMPO_CSRF, COOKIE_SESION, SESION_TTL_DIAS};
 use crate::auth;
@@ -253,6 +254,7 @@ struct PlantillaDashboard {
     vaults_lista: Vec<VistaVault>,
     dispositivos: Vec<VistaDeviceMini>,
     actividad: Vec<VistaEventoMini>,
+    zona: String,
 }
 
 /// Vista de un vault para las tablas: SOLO lo que el server puede ver (es ciego a los
@@ -290,6 +292,7 @@ struct PlantillaVaults {
     rol: String,
     csrf: String,
     vaults: Vec<VistaVault>,
+    zona: String,
 }
 
 #[derive(Template)]
@@ -524,11 +527,13 @@ async fn dashboard(State(estado): State<EstadoServidor>, Sesion(sesion): Sesion)
     .ok()
     .flatten();
 
+    let desplazamiento = estado.config.tz_offset_minutos;
+    let zona = hora::etiqueta_zona(desplazamiento);
     let (hace, ultimo_device, ultima_sync) = match hero {
         Some(fila) => (
             hace_texto(fila.segundos.max(0)),
             fila.device.unwrap_or_else(|| t.sin_datos.to_owned()),
-            Some(fila.ultima),
+            Some(hora::hora_local(&fila.ultima, desplazamiento)),
         ),
         None => (t.salud_hace_nada.to_owned(), t.sin_datos.to_owned(), None),
     };
@@ -547,7 +552,7 @@ async fn dashboard(State(estado): State<EstadoServidor>, Sesion(sesion): Sesion)
     .await
     .unwrap_or_default()
     .into_iter()
-    .map(vista_de_fila)
+    .map(|fila| vista_de_fila(fila, desplazamiento))
     .collect();
 
     let dispositivos = sqlx::query_as::<_, (String, String, Option<String>)>(
@@ -566,12 +571,14 @@ async fn dashboard(State(estado): State<EstadoServidor>, Sesion(sesion): Sesion)
     .map(|(nombre, cuenta, ultima_actividad)| VistaDeviceMini {
         nombre,
         cuenta,
-        ultima_actividad,
+        ultima_actividad: ultima_actividad
+            .as_deref()
+            .map(|ts| hora::hora_local(ts, desplazamiento)),
     })
     .collect();
 
     let actividad = sqlx::query_as::<_, (String, String, String, Option<String>)>(
-        "SELECT substr(ts, 12, 5) AS hora, action, COALESCE(detail, '') AS detail, ip
+        "SELECT ts AS hora, action, COALESCE(detail, '') AS detail, ip
          FROM audit_log
          ORDER BY id DESC
          LIMIT 5",
@@ -580,11 +587,15 @@ async fn dashboard(State(estado): State<EstadoServidor>, Sesion(sesion): Sesion)
     .await
     .unwrap_or_default()
     .into_iter()
-    .map(|(hora, action, detail, ip)| VistaEventoMini {
-        hora,
-        action,
-        detail,
-        ip,
+    .map(|(hora, action, detail, ip)| {
+        let local = hora::hora_local(&hora, desplazamiento);
+        VistaEventoMini {
+            // HH:MM del huso configurado (el `ts` completo vive en /admin/auditoria).
+            hora: local.get(11..16).unwrap_or(&local).to_owned(),
+            action,
+            detail,
+            ip,
+        }
     })
     .collect();
 
@@ -615,6 +626,7 @@ async fn dashboard(State(estado): State<EstadoServidor>, Sesion(sesion): Sesion)
                 vaults_lista,
                 dispositivos,
                 actividad,
+                zona,
             }
             .render()
         },
@@ -644,14 +656,17 @@ struct FilaVault {
     ultima_revision: Option<String>,
 }
 
-fn vista_de_fila(fila: FilaVault) -> VistaVault {
+fn vista_de_fila(fila: FilaVault, offset_minutos: i32) -> VistaVault {
     VistaVault {
         id: fila.id,
         name: fila.name,
         notas: fila.notas,
         revisiones: fila.revisiones,
         espacio: formato_bytes(fila.bytes),
-        ultima_revision: fila.ultima_revision,
+        ultima_revision: fila
+            .ultima_revision
+            .as_deref()
+            .map(|ts| hora::hora_local(ts, offset_minutos)),
     }
 }
 
@@ -677,7 +692,12 @@ async fn vaults(State(estado): State<EstadoServidor>, Sesion(sesion): Sesion) ->
         Err(error) => return error_interno("vaults", error),
     };
 
-    let vista = filas.into_iter().map(vista_de_fila).collect();
+    let desplazamiento = estado.config.tz_offset_minutos;
+    let zona = hora::etiqueta_zona(desplazamiento);
+    let vista = filas
+        .into_iter()
+        .map(|fila| vista_de_fila(fila, desplazamiento))
+        .collect();
 
     render(
         || {
@@ -690,6 +710,7 @@ async fn vaults(State(estado): State<EstadoServidor>, Sesion(sesion): Sesion) ->
                 rol: sesion.role.clone(),
                 csrf: sesion.csrf_token.clone(),
                 vaults: vista,
+                zona,
             }
             .render()
         },

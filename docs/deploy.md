@@ -121,6 +121,13 @@ Dos formas, ambas válidas:
 
 ### Los cuatro puntos que cualquier borde tiene que respetar
 
+### Zona horaria del panel
+
+La base guarda todas las fechas en **UTC** (`datetime('now')` de SQLite). El panel las
+muestra en el huso que diga `OVAULTD_TZ_OFFSET_MINUTES` (minutos respecto de UTC, ej.
+`-180` para Argentina). Sin la variable el panel rotula y muestra **UTC**, que es correcto
+pero poco amable; no es un bug de los datos.
+
 1. Preservar el `Host` (o fijarlo con `OVAULTD_PUBLIC_HOST`): `POST /access` devuelve el
    host que **ve el server** (`{host, rev}`) y los clientes lo usan para subir. Con
    `OVAULTD_PUBLIC_HOST=obs.ejemplo.com` el server devuelve SIEMPRE ese valor (recomendado

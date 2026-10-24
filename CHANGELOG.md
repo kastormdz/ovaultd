@@ -108,6 +108,18 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y e
   argumentos devuelve NULL si falta uno (un device read-only mostraba "sin actividad");
   ahora es `NULLIF(max(COALESCE(batch), COALESCE(last_seen)), '')`.
 
+## [0.2.16] — 2026-10-24
+
+### Fixed
+
+- **El panel mostraba las fechas en UTC como si fueran locales.** `datetime('now')` es
+  siempre UTC y las tablas imprimían el string crudo: en Argentina la "última actividad"
+  aparecía tres horas adelantado. Ahora todas las fechas del panel (devices, vaults,
+  cuentas, auditoría y la actividad del dashboard) se convierten al huso configurado con
+  `OVAULTD_TZ_OFFSET_MINUTES` (minutos respecto de UTC, `-180` = UTC-03:00), y cada
+  columna rotula la zona. Sin la variable se muestra UTC, explícito. La base sigue en UTC.
+  La conversión es aritmética civil sin dependencias (la imagen no garantiza `tzdata`).
+
 ## [Unreleased]
 
 ### Security

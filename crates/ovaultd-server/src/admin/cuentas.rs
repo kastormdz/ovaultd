@@ -19,7 +19,7 @@ use axum::{
 };
 use serde::Deserialize;
 
-use super::{flash, panel, sesiones, SesionAdmin};
+use super::{flash, hora, panel, sesiones, SesionAdmin};
 use super::textos::{self, Textos};
 use crate::auth;
 use crate::routes::{purgar_vault, EstadoServidor};
@@ -61,6 +61,7 @@ struct PlantillaCuentas {
     ok: Option<String>,
     /// Link de reset recién generado (se muestra UNA vez en la respuesta).
     reset_link: Option<String>,
+    zona: String,
 }
 
 struct VistaCuenta {
@@ -203,6 +204,8 @@ async fn pintar_cuentas(
     };
 
     let hay_mas = filas.len() as i64 > POR_PAGINA;
+    let desplazamiento = estado.config.tz_offset_minutos;
+    let zona = hora::etiqueta_zona(desplazamiento);
     let cuentas = filas
         .into_iter()
         .take(POR_PAGINA as usize)
@@ -210,11 +213,14 @@ async fn pintar_cuentas(
             id: fila.id,
             email: fila.email,
             role: fila.role,
-            creada: fila.creada,
+            creada: hora::hora_local(&fila.creada, desplazamiento),
             deshabilitada: fila.disabled_at.is_some(),
             es_yo: fila.id == sesion.account_id,
             vaults: fila.vaults,
-            ultima: fila.ultima,
+            ultima: fila
+                .ultima
+                .as_deref()
+                .map(|ts| hora::hora_local(ts, desplazamiento)),
         })
         .collect();
 
@@ -235,6 +241,7 @@ async fn pintar_cuentas(
                 error,
                 ok,
                 reset_link,
+                zona,
             }
             .render()
         },

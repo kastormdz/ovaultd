@@ -1166,3 +1166,34 @@ async fn devices_oculta_los_inactivos_y_los_muestra_con_todos() -> Result<()> {
 
     Ok(())
 }
+
+#[tokio::test]
+async fn devices_muestra_la_ultima_actividad_en_el_huso_configurado() -> Result<()> {
+    let contexto = TestContext::new().await?;
+    hacer_admin(&contexto).await?;
+    let cookie = login(&contexto).await?;
+
+    // El TestContext fija OVAULTD_TZ_OFFSET_MINUTES en -180 (UTC-03:00).
+    sqlx::query("UPDATE devices SET last_seen = '2026-10-24 02:44:36' WHERE id = ?")
+        .bind(contexto.device_id)
+        .execute(&contexto.pool)
+        .await?;
+
+    let resp = contexto
+        .request(get_con_cookie("/admin/devices", &cookie)?)
+        .await?;
+    assert_eq!(resp.status(), StatusCode::OK);
+    let html = cuerpo(resp).await?;
+
+    assert!(
+        html.contains("2026-10-23 23:44:36"),
+        "la última actividad tiene que mostrarse en UTC-03:00"
+    );
+    assert!(
+        !html.contains("2026-10-24 02:44:36"),
+        "no puede mostrar el UTC crudo como si fuera local"
+    );
+    assert!(html.contains("UTC-03:00"), "el encabezado tiene que rotular la zona");
+
+    Ok(())
+}

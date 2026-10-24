@@ -23,7 +23,7 @@
   {% else %}
   <table class="tabla">
     <thead>
-      <tr><th>{{ t.th_cuando }}</th><th>{{ t.th_actor }}</th><th>{{ t.th_accion }}</th><th>{{ t.th_detalle }}</th><th>{{ t.th_ip }}</th></tr>
+      <tr><th>{{ t.th_cuando }} <span class="sub">({{ zona }})</span></th><th>{{ t.th_actor }}</th><th>{{ t.th_accion }}</th><th>{{ t.th_detalle }}</th><th>{{ t.th_ip }}</th></tr>
     </thead>
     <tbody>
       {% for e in eventos %}

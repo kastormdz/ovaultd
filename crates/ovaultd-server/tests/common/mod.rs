@@ -119,6 +119,7 @@ impl TestContext {
             metrics: ovaultd_server::config::ModoMetrics::On,
             allowed_origins,
             public_host: None,
+            tz_offset_minutos: -180,
         };
         let cas = Arc::new(CasStore::new(cas_dir.path().to_path_buf())?);
 
