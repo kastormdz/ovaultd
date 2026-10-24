@@ -39,6 +39,9 @@ services:
       OVAULTD_TRUST_PROXY: "${OVAULTD_TRUST_PROXY:-0}"
       # /metrics: off (default) | localhost | on (ver docs/deploy.md).
       OVAULTD_METRICS: "${OVAULTD_METRICS:-off}"
+      # Huso SOLO para mostrar fechas en el panel (minutos respecto de UTC; -180 = UTC-03:00).
+      # La base guarda UTC igual: esto no cambia los datos.
+      OVAULTD_TZ_OFFSET_MINUTES: "${OVAULTD_TZ_OFFSET_MINUTES:-0}"
     volumes:
       # Default: volumen nombrado. Para un bind mount (backups con rsync, NFS, etc.):
       # OVAULTD_DATA=/ruta/absoluta/en/el/host
