@@ -15,7 +15,6 @@ pub struct CommitOutcome {
 
 #[derive(Debug, FromRow)]
 struct VaultRow {
-    head_rev: i64,
     epoch: i64,
     max_file_bytes: Option<i64>,
     vault_pubkey: Vec<u8>,
@@ -366,7 +365,7 @@ pub async fn commit_batch(
     }
 
     let vault = sqlx::query_as::<_, VaultRow>(
-        "SELECT head_rev, epoch, max_file_bytes, vault_pubkey
+        "SELECT epoch, max_file_bytes, vault_pubkey
          FROM vaults
          WHERE id = ?",
     )

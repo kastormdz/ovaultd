@@ -207,8 +207,11 @@ const MAX_BYTES_MANIFEST: i64 = 64 * 1024 * 1024;
 const MAX_LABEL: usize = 128;
 
 /// Crea un snapshot etiquetado sobre un corte coherente en `rev` (default: el head,
-/// clampeado al head si piden uno futuro). El manifest sale del índice (`files` vivos
-/// a esa revisión) y cada blob suma una referencia en la MISMA transacción.
+/// clampeado al head si piden uno futuro). El manifest sale del **oplog** hasta `rev`
+/// (la última operación de cada path en ese corte), NO del índice `files`, que es el
+/// estado ACTUAL: filtrar el índice por `rev` devolvía "los que nadie tocó desde R" y
+/// omitía todo lo editado o borrado después. Cada blob suma una referencia en la MISMA
+/// transacción.
 pub async fn crear_snapshot(
     pool: &SqlitePool,
     vault_id: i64,
@@ -238,10 +241,25 @@ pub async fn crear_snapshot(
 
     let mut tx = pool.begin().await?;
 
+    // La última operación de cada path con `rev <= R`. `NOT EXISTS` de una op posterior
+    // (desempatando por rowid si alguna revisión vieja tenía dos ops del mismo path) deja
+    // exactamente una fila por path. Los `del` quedan afuera: en el corte R ese path no
+    // existía.
     let filas = sqlx::query(
-        "SELECT path_id, blob_hash
-         FROM files
-         WHERE vault_id = ? AND rev <= ? AND deleted = 0 AND is_folder = 0 AND blob_hash IS NOT NULL",
+        "SELECT r.path_id, r.blob_hash
+         FROM revisions r
+         WHERE r.vault_id = ?1
+           AND r.rev <= ?2
+           AND r.op <> 'del'
+           AND r.blob_hash IS NOT NULL
+           AND NOT EXISTS (
+               SELECT 1
+               FROM revisions r2
+               WHERE r2.vault_id = r.vault_id
+                 AND r2.path_id = r.path_id
+                 AND r2.rev <= ?2
+                 AND (r2.rev > r.rev OR (r2.rev = r.rev AND r2.rowid > r.rowid))
+           )",
     )
     .bind(vault_id)
     .bind(rev)
@@ -288,7 +306,7 @@ pub async fn crear_snapshot(
 
     for blob_hex in manifest.values() {
         if let Some(bytes) = decodificar_hex32(blob_hex) {
-            sqlx::query(
+            let afectadas = sqlx::query(
                 "UPDATE blobs
                  SET refs = refs + 1
                  WHERE vault_id = ? AND hash = ?",
@@ -296,7 +314,16 @@ pub async fn crear_snapshot(
             .bind(vault_id)
             .bind(&bytes[..])
             .execute(&mut *tx)
-            .await?;
+            .await?
+            .rows_affected();
+
+            // Sin la fila del blob, el snapshot se serviría como restaurable y no lo es.
+            if afectadas != 1 {
+                return Err(ServerError::Invalid(
+                    "el snapshot referencia un blob que ya no existe (el GC se lo llevó)"
+                        .to_owned(),
+                ));
+            }
         }
     }
 

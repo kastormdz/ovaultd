@@ -352,3 +352,48 @@ async fn rename_edit_conflict_preserves_both_versions() -> Result<(), Box<dyn st
 
     Ok(())
 }
+
+#[tokio::test]
+async fn el_snapshot_con_rev_explicito_es_el_estado_de_esa_revision(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let ctx = TestContext::new().await?;
+    ctx.registrar_blob(1, 10).await?;
+    ctx.registrar_blob(2, 20).await?;
+    ctx.registrar_blob(3, 30).await?;
+
+    // rev 1: A (blob 1). rev 2: B (blob 2). rev 3: B pasa al blob 3. rev 4: se borra A.
+    ctx.commit(vec![add_op(1, 1, 10)], 0).await?;
+    ctx.commit(vec![add_op(2, 2, 20)], 1).await?;
+    ctx.commit(vec![mod_op(2, 3, 30)], 2).await?;
+    ctx.commit(vec![del_op(1)], 3).await?;
+
+    // Corte en rev 2: A sigue vivo (se borró DESPUÉS) y B tiene el blob de rev 2, no el de 3.
+    // El manifest viejo salía de `files` (estado ACTUAL): omitía A por el tombstone y B por
+    // tener `rev = 3 > 2`, así que el snapshot quedaba vacío y el GC se llevaba los blobs.
+    let snapshot = history::crear_snapshot(&ctx.pool, ctx.vault_id, Some(2), None).await?;
+
+    assert_eq!(snapshot.rev, 2);
+    assert_eq!(snapshot.manifest.len(), 2, "A y B existían en la rev 2");
+    assert_eq!(
+        snapshot.manifest.get(hex_lower(&[1u8; 32]).as_str()),
+        Some(&hex_lower(&[1u8; 32])),
+        "A tiene que estar con su blob de la rev 1"
+    );
+    assert_eq!(
+        snapshot.manifest.get(hex_lower(&[2u8; 32]).as_str()),
+        Some(&hex_lower(&[2u8; 32])),
+        "B tiene que estar con el blob que tenía en la rev 2"
+    );
+    assert_ne!(
+        snapshot.manifest.get(hex_lower(&[2u8; 32]).as_str()),
+        Some(&hex_lower(&[3u8; 32])),
+        "el blob de la rev 3 no existía en el corte"
+    );
+
+    // El snapshot protege los blobs que referencia y no toca los que no.
+    assert_eq!(refs_de(&ctx, 1).await?, 2, "rev 1 + snapshot");
+    assert_eq!(refs_de(&ctx, 2).await?, 2, "rev 2 + snapshot");
+    assert_eq!(refs_de(&ctx, 3).await?, 1, "sólo la rev 3, fuera del corte");
+
+    Ok(())
+}

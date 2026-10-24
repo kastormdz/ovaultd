@@ -149,6 +149,22 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y e
   responden como `error` y la sesión sigue; sólo `unauthorized` (credenciales) e
   `internal` (estado en duda) cierran. El `hello` sí cierra en cualquier error.
 
+## [0.2.19] — 2026-10-24
+
+### Fixed
+
+- **Los snapshots con `rev` explícito ahora son el estado real de esa revisión.** El
+  manifest se armaba desde `files` (el estado ACTUAL) filtrando `rev <= R`, así que
+  omitía todo path modificado o borrado después de R: un snapshot de la rev 10 se
+  listaba como punto de restauración y no contenía la mitad de las notas. Ahora sale del
+  **oplog** (la última operación de cada path con `rev <= R`, sin los `del`), que es lo
+  que el struct prometía desde el principio. Test: A (rev 1) borrada en la 4 y B (rev 2)
+  editada en la 3, snapshot en la 2 → incluye A y la versión de B de la rev 2, y no el
+  blob de la 3.
+- **Un snapshot que referencia un blob ya recolectado falla en vez de mentir.** El
+  `UPDATE blobs SET refs = refs + 1` no miraba `rows_affected`: si el GC se había
+  llevado el blob, el snapshot se servía como restaurable. Ahora devuelve error.
+
 ## [Unreleased]
 
 ### Security
