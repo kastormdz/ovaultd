@@ -105,6 +105,15 @@ enum ServerMessage {
         code: String,
         detail: String,
     },
+    /// CAS perdido (`expected_rev` no coincide con el head). Es un resultado NORMAL del
+    /// protocolo multi-device, no un error de transporte: el cliente rebasea esa operación
+    /// y reintenta sin reconectar. La spec lo define con estos cuatro campos.
+    Conflict {
+        path_id: PathId,
+        base_rev: u64,
+        server_rev: u64,
+        client_rev: u64,
+    },
     Ping,
     /// `notify`: "hay revisiones nuevas en este vault". Lleva el registro completo, como lo define
     /// la spec, y quien lo recibe hace un pull: el aviso NO es la fuente de verdad, es el empujón.
@@ -224,7 +233,15 @@ impl Connection {
 
         resolve_vault(&self.pool, account_id, hello.vault)
             .await
-            .map_err(WsFailure::from_server_error)?;
+            // En el handshake no hay nada que reintentar sobre el mismo socket: un vault
+            // ajeno, un device inválido o una firma mala CIERRAN la conexión. El `from_server_error`
+            // tolerante es para los mensajes de una sesión ya autenticada.
+            .map_err(|error: ServerError| {
+                WsFailure::close(
+                    error.error_code().unwrap_or(ErrorCode::Internal),
+                    error.to_string(),
+                )
+            })?;
 
         // SIEMPRE un challenge NUEVO: reusar el pendiente rompía las conexiones PARALELAS
         // del mismo device (el motor + una lectura al vuelo al recargar el plugin: las dos
@@ -369,9 +386,27 @@ impl Connection {
         .execute(&self.pool)
         .await;
 
-        let outcome = commit_batch(&self.pool, vault_id, device_id, &message.batch)
-            .await
-            .map_err(WsFailure::from_server_error)?;
+        let outcome = match commit_batch(&self.pool, vault_id, device_id, &message.batch).await {
+            Ok(outcome) => outcome,
+            // El CAS perdido se responde como `conflict` y el socket sigue abierto: antes
+            // salía como `error/internal` + close, el cliente abortaba el push entero y una
+            // escritura concurrente de otro device congelaba la sincronización.
+            Err(ServerError::Conflict {
+                path_id,
+                expected,
+                head,
+            }) => {
+                return Ok(ServerMessage::Conflict {
+                    path_id,
+                    base_rev: expected,
+                    server_rev: head,
+                    // El sobre del batch no lleva una revisión propia del cliente: la base
+                    // declarada ES lo que el cliente conoce.
+                    client_rev: expected,
+                });
+            }
+            Err(error) => return Err(WsFailure::from_server_error(error)),
+        };
 
         // Sincronizar el CAS ANTES del ack: los blobs del batch tienen que estar en disco
         // (un blob confirmado no se re-sube nunca más). Es el ÚNICO fsync del camino de
@@ -704,7 +739,14 @@ impl WsFailure {
 
     fn from_server_error(error: ServerError) -> Self {
         let code = error.error_code().unwrap_or(ErrorCode::Internal);
-        Self::close(code, error.to_string())
+        match code {
+            // Cortar el socket sólo cuando seguir hablando no tiene sentido: sin
+            // credenciales válidas o con el estado interno en duda. Un bad_request, un
+            // not_found o una cuota excedida son problemas del mensaje: se responde y la
+            // conexión sigue viva (el cliente decide si reintenta o no).
+            ErrorCode::Unauthorized | ErrorCode::Internal => Self::close(code, error.to_string()),
+            _ => Self::error(code, error.to_string()),
+        }
     }
 }
 

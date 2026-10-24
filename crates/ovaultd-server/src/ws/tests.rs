@@ -392,6 +392,7 @@ fn batch_value(
     context: &TestContext,
     operation_id: &str,
     valid_signature: bool,
+    expected_rev: u64,
 ) -> Value {
     use ovaultd_protocol::{Batch, BatchOp, BlobId, Op, PathId};
 
@@ -439,7 +440,7 @@ fn batch_value(
         op_code,
         op.size.unwrap_or(0),
         op.mtime.unwrap_or(0),
-        0,
+        expected_rev,
         op_id.as_bytes(),
         context.epoch,
     );
@@ -456,7 +457,7 @@ fn batch_value(
         // `OperationId::from_wire`, que lee nibbles hex y tolera guiones). La doc decia
         // "base64" hasta que esta caceria lo corrigio: el parser es UNO solo (wire + delta).
         operation_id: op_id.to_string(),
-        expected_rev: 0,
+        expected_rev,
         ops: vec![op],
     };
     // Que el batch del test pase SU PROPIA validacion de protocolo: si el helper arma un sobre
@@ -562,7 +563,7 @@ async fn batch_antes_de_auth_da_error_y_cierra(
 
     send_json(
         &mut ws.socket,
-        batch_value(&context, &Uuid::new_v4().to_string(), true),
+        batch_value(&context, &Uuid::new_v4().to_string(), true, 0),
     )
     .await?;
 
@@ -712,7 +713,7 @@ async fn batch_valido_da_batch_ack_con_la_rev_y_una_sola_revision(
     subir_blob(&mut ws.socket, 1, CONTENIDO_DEL_BLOB).await?;
 
     let operation_id = Uuid::new_v4().to_string();
-    let batch = batch_value(&context, &operation_id, true);
+    let batch = batch_value(&context, &operation_id, true, 0);
     let batch_id = batch["batch_id"].clone();
 
     // El batch es un latido: con `last_seen` viejo, el commit tiene que ponerlo al día.
@@ -768,6 +769,7 @@ async fn batch_con_firma_invalida_da_error_y_no_escribe_nada(
         &context,
         &Uuid::new_v4().to_string(),
         false,
+        0,
     );
 
     send_json(&mut ws.socket, batch).await?;
@@ -803,7 +805,7 @@ async fn batch_con_operation_id_repetido_da_el_mismo_ack(
     subir_blob(&mut ws.socket, 1, CONTENIDO_DEL_BLOB).await?;
 
     let operation_id = Uuid::new_v4().to_string();
-    let batch = batch_value(&context, &operation_id, true);
+    let batch = batch_value(&context, &operation_id, true, 0);
 
     send_json(&mut ws.socket, batch.clone()).await?;
     let first_response = recv_json(&mut ws.socket).await?;
@@ -1225,7 +1227,7 @@ async fn aviso_entre_dispositivos() -> Result<(), Box<dyn std::error::Error>> {
 
     subir_blob(&mut sube.socket, 1, CONTENIDO_DEL_BLOB).await?;
     let operation_id = Uuid::new_v4().to_string();
-    send_json(&mut sube.socket, batch_value(&context, &operation_id, true)).await?;
+    send_json(&mut sube.socket, batch_value(&context, &operation_id, true, 0)).await?;
 
     let ack = recv_json(&mut sube.socket).await?;
     assert_eq!(ack["t"], "batch_ack", "el que sube recibe su ack: {ack}");
@@ -1324,5 +1326,53 @@ async fn paralelas() -> Result<(), Box<dyn std::error::Error>> {
 
     una.server.abort();
     otra.server.abort();
+    Ok(())
+}
+
+#[tokio::test]
+async fn un_expected_rev_viejo_da_conflict_y_el_socket_sigue_vivo(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let context = TestContext::new().await?;
+    let mut ws = connect(&context, Some(&context.token)).await?;
+    authenticate(&mut ws.socket, &context).await?;
+    subir_blob(&mut ws.socket, 1, CONTENIDO_DEL_BLOB).await?;
+
+    // Primer batch: rev 1.
+    send_json(
+        &mut ws.socket,
+        batch_value(&context, &Uuid::new_v4().to_string(), true, 0),
+    )
+    .await?;
+    let ack = recv_json(&mut ws.socket).await?;
+    assert_eq!(ack["t"], "batch_ack");
+
+    // Segundo batch con la base vieja: el CAS se pierde.
+    send_json(
+        &mut ws.socket,
+        batch_value(&context, &Uuid::new_v4().to_string(), true, 0),
+    )
+    .await?;
+    let conflicto = recv_json(&mut ws.socket).await?;
+    assert_eq!(
+        conflicto["t"], "conflict",
+        "el server tiene que emitir conflict y no un error: {conflicto}"
+    );
+    assert_eq!(conflicto["base_rev"], 0);
+    assert_eq!(conflicto["server_rev"], 1);
+
+    // Y el socket sigue funcional: con la rev correcta, el batch commitea.
+    send_json(
+        &mut ws.socket,
+        batch_value(&context, &Uuid::new_v4().to_string(), true, 1),
+    )
+    .await?;
+    let ack2 = recv_json(&mut ws.socket).await?;
+    assert_eq!(
+        ack2["t"], "batch_ack",
+        "el socket no puede cerrarse después de un conflict: {ack2}"
+    );
+    assert_eq!(ack2["rev"], 2);
+
+    ws.server.abort();
     Ok(())
 }
