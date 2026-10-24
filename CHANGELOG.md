@@ -149,6 +149,22 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y e
   responden como `error` y la sesión sigue; sólo `unauthorized` (credenciales) e
   `internal` (estado en duda) cierran. El `hello` sí cierra en cualquier error.
 
+## [0.2.21] — 2026-10-24
+
+### Fixed
+
+- **Un conflicto estructural ya no congela el dispositivo.** `pullOnce` cortaba el ciclo en
+  la primera revisión `blocked` y el checkpoint no avanzaba: una sola carpeta en conflicto
+  dejaba al device sin bajar **nada más**, para siempre. Ahora el intent queda `blocked`
+  (visible y resoluble desde el Resolver) y el resto del vault sigue bajando. El report
+  expone `bloqueados[]`.
+- **El conflicto carpeta ↔ archivo se conserva en vez de bloquear.** Si el remoto trae una
+  carpeta donde hay un archivo (o al revés), el local se preserva: el archivo se copia a
+  `… (conflicto <device> <fecha>)` y el **directorio se renombra entero** (atómico, con sus
+  hijos). Antes quedaba bloqueado esperando que un humano lo tocara.
+- **Aplicar una revisión `folder` nueva explotaba** con "blobId es obligatorio salvo en un
+  borrado": una carpeta no tiene blob y el intent la rechazaba antes de crear nada.
+
 ## [0.2.20] — 2026-10-24
 
 ### Added

@@ -79,11 +79,12 @@ function storeFake() {
   return { store, intents, base, index, descartados, checkpoint: () => checkpoint };
 }
 
-function portFake(archivos: Record<string, string>) {
+function portFake(archivos: Record<string, string>, dirsIniciales: string[] = []) {
   const files = new Map<string, Uint8Array>(
     Object.entries(archivos).map(([ruta, texto]) => [ruta, cod.encode(texto)]),
   );
   const temps = new Map<string, Uint8Array>();
+  const dirs = new Set<string>(dirsIniciales);
   let tempSeq = 0;
 
   // El port real (adapter del FS) ve los temporales como archivos: `stat`/`read` tienen
@@ -93,7 +94,9 @@ function portFake(archivos: Record<string, string>) {
   const port = {
     async stat(ruta: string) {
       const bytes = ver(ruta);
-      return bytes === undefined ? null : { isFile: true, isDirectory: false, size: bytes.length };
+      if (bytes !== undefined) return { isFile: true, isDirectory: false, size: bytes.length };
+      if (dirs.has(ruta)) return { isFile: false, isDirectory: true, size: null };
+      return null;
     },
     async read(ruta: string) {
       const bytes = ver(ruta);
@@ -107,21 +110,48 @@ function portFake(archivos: Record<string, string>) {
     },
     async rename(tempName: string, ruta: string) {
       const bytes = temps.get(tempName);
-      if (bytes === undefined) throw new Error('temporal ausente');
-      temps.delete(tempName);
-      files.set(ruta, bytes);
+      if (bytes !== undefined) {
+        temps.delete(tempName);
+        files.set(ruta, bytes);
+        return;
+      }
+      // Rename de un DIRECTORIO: se mueve el árbol entero (lo que hace fs.rename real).
+      if (!dirs.has(tempName)) throw new Error(`no existe: ${tempName}`);
+      for (const [rutaArchivo, contenido] of [...files]) {
+        if (rutaArchivo.startsWith(`${tempName}/`)) {
+          files.delete(rutaArchivo);
+          files.set(`${ruta}${rutaArchivo.slice(tempName.length)}`, contenido);
+        }
+      }
+      for (const dir of [...dirs]) {
+        if (dir === tempName || dir.startsWith(`${tempName}/`)) {
+          dirs.delete(dir);
+          dirs.add(`${ruta}${dir.slice(tempName.length)}`);
+        }
+      }
+      dirs.add(ruta);
     },
     async unlink(ruta: string) {
       files.delete(ruta);
       temps.delete(ruta);
     },
-    async mkdirp(_dir: string) {},
-    async list(_dir: string) {
-      return [];
+    async mkdirp(dir: string) {
+      dirs.add(dir);
+    },
+    async list(dir: string) {
+      const prefijo = dir === '.' || dir === '' ? '' : `${dir}/`;
+      const nombres = new Set<string>();
+      for (const ruta of [...files.keys(), ...dirs]) {
+        if (!ruta.startsWith(prefijo) || ruta === dir) continue;
+        const resto = ruta.slice(prefijo.length);
+        if (resto === '' || resto.includes('/')) continue;
+        nombres.add(resto);
+      }
+      return [...nombres].map((nombre) => ({ name: nombre }));
     },
   };
 
-  return { port, files, temps };
+  return { port, files, temps, dirs };
 }
 
 function connFake(blobs: Map<string, Uint8Array>): SyncConnection {
@@ -148,6 +178,15 @@ function armarCaso(opciones: {
   base?: string;
   ruta?: string;
   pathId?: string;
+  /** Carpetas que existen en el "disco" del fake (para el conflicto estructural). */
+  dirs?: string[];
+  /** Archivos extra del fake (los hijos de una carpeta, por ejemplo). */
+  extra?: Record<string, string>;
+  /** El path NO existe como archivo: lo que hay es la carpeta de `dirs`. */
+  sinLocal?: boolean;
+  kind?: 'file' | 'folder';
+  /** Los casos de conflicto manual fijan 'bloquear'; C-b prueba el default 'conservar'. */
+  politica?: 'bloquear' | 'conservar';
 }) {
   const ruta = opciones.ruta ?? PATH;
   const pathId = opciones.pathId ?? PATH_ID;
@@ -164,7 +203,10 @@ function armarCaso(opciones: {
     contentHash: sha256Hex(cod.encode(baseTexto)),
   });
 
-  const { port, files, temps } = portFake({ [ruta]: opciones.local });
+  const archivos = opciones.sinLocal
+    ? { ...(opciones.extra ?? {}) }
+    : { [ruta]: opciones.local, ...(opciones.extra ?? {}) };
+  const { port, files, temps, dirs } = portFake(archivos, opciones.dirs);
   const conn = connFake(new Map([[blobIdBase, storedBase]]));
 
   const deps: ApplyDeps = {
@@ -174,19 +216,33 @@ function armarCaso(opciones: {
     conn,
     // Los casos de conflicto de este archivo prueban la política MANUAL (bloquear); la
     // política por defecto (conservar copia) tiene sus propios tests al final.
-    politicaDeConflictos: 'bloquear',
+    politicaDeConflictos: opciones.politica ?? 'bloquear',
   };
+  const kind = opciones.kind ?? 'file';
   const revision: ApplyRevision = {
     pathId,
     path: ruta,
-    kind: 'file',
+    kind,
     deleted: false,
     rev: 6,
-    blobId: toHex(blobId(storedRemoto)),
+    blobId: kind === 'folder' ? null : toHex(blobId(storedRemoto)),
     contentHash: null,
   };
 
-  return { deps, revision, storedRemoto, files, temps, intents, base, index, descartados, checkpoint, store };
+  return {
+    deps,
+    revision,
+    storedRemoto: kind === 'folder' ? null : storedRemoto,
+    files,
+    temps,
+    dirs,
+    intents,
+    base,
+    index,
+    descartados,
+    checkpoint,
+    store,
+  };
 }
 
 // ------------------------------------------------------------------ tests
@@ -529,5 +585,49 @@ describe('appearance.json: el modo es del dispositivo', () => {
     expect(caso.index.get(caso.revision.pathId)?.contentHash).toBe(
       sha256Hex(cod.encode(publicado)),
     );
+  });
+});
+
+describe('conflicto estructural: se conserva en vez de congelar (C-b)', () => {
+  it('un directorio local donde va un archivo: se renombra entero y el remoto ocupa el nombre', async () => {
+    const caso = armarCaso({
+      local: '',
+      remoto: 'ahora soy un archivo\n',
+      base: 'lo que hubiera\n',
+      ruta: 'carpeta',
+      dirs: ['carpeta'],
+      extra: { 'carpeta/hijo.md': 'hola\n' },
+      sinLocal: true,
+      politica: 'conservar',
+    });
+
+    const resultado = await applyRevision(caso.deps, caso.revision, caso.storedRemoto);
+    expect(resultado.status).toBe('conflicted-copy');
+
+    expect(dec.decode(caso.files.get('carpeta'))).toBe('ahora soy un archivo\n');
+    const copiaDir = [...caso.dirs].find((dir) => dir.includes('(conflicto'));
+    expect(copiaDir).toBeDefined();
+    expect(dec.decode(caso.files.get(`${copiaDir}/hijo.md`))).toBe('hola\n');
+    expect(caso.files.has('carpeta/hijo.md')).toBe(false);
+  });
+
+  it('un archivo local donde va una carpeta: se copia y la carpeta se crea', async () => {
+    const caso = armarCaso({
+      local: 'soy un archivo\n',
+      remoto: '',
+      base: 'lo que hubiera\n',
+      ruta: 'carpeta',
+      kind: 'folder',
+      politica: 'conservar',
+    });
+
+    const resultado = await applyRevision(caso.deps, caso.revision, caso.storedRemoto);
+    expect(resultado.status).toBe('conflicted-copy');
+
+    expect(caso.files.has('carpeta')).toBe(false);
+    expect(caso.dirs.has('carpeta')).toBe(true);
+    const copia = [...caso.files.keys()].find((ruta) => ruta.includes('(conflicto'));
+    expect(copia).toBeDefined();
+    expect(dec.decode(caso.files.get(copia!))).toBe('soy un archivo\n');
   });
 });

@@ -50,8 +50,12 @@ export function createIntent(candidate: ApplyCandidate): IntentEntry {
   if (candidate.pathId.length === 0) {
     throw new Error('pathId es obligatorio');
   }
-  if (candidate.blobId.length === 0 && candidate.deleted !== true) {
-    throw new Error('blobId es obligatorio salvo en un borrado');
+  // Una carpeta no tiene blob: el guard la trata aparte y lo único que se publica es el
+  // `mkdirp`. Antes esto explotaba con "blobId es obligatorio salvo en un borrado" y una
+  // revisión `folder` nueva cortaba el ciclo con una excepción.
+  const esCarpeta = candidate.kind === 'folder' && candidate.deleted !== true;
+  if (candidate.blobId.length === 0 && candidate.deleted !== true && !esCarpeta) {
+    throw new Error('blobId es obligatorio salvo en un borrado o una carpeta');
   }
   return {
     intentId: intentIdFor(candidate),

@@ -110,7 +110,10 @@ describe('reconcile: el cursor avanza por revisión completa', () => {
     expect(escrituras.map((e) => e.since)).toEqual([7]);
   });
 
-  it('si la segunda operación bloquea, el cursor NO pasa la revisión', async () => {
+  it('una operación bloqueada se registra y NO frena al resto de la revisión (C-a)', async () => {
+    // Antes: la bloqueada cortaba el ciclo y el cursor quedaba en 6, así que las ops 2 y 3
+    // de la rev 7 no se entregaban NUNCA. Ahora el intent queda `blocked` (resoluble desde
+    // el Resolver) y el resto del vault sigue bajando.
     const { escrituras, store, conn } = armar(
       [registro(7, 0x10), registro(7, 0x11), registro(7, 0x12)],
       7,
@@ -122,8 +125,11 @@ describe('reconcile: el cursor avanza por revisión completa', () => {
 
     const report = await pullOnce(conn as unknown as SyncConnection, { store, port: {}, keys: {} } as never);
 
-    expect(report.status).toBe('blocked');
-    expect(report.headRev).toBe(6);
-    expect(escrituras).toEqual([]);
+    expect(report.status).toBe('pulled');
+    expect(report.applied).toBe(2);
+    expect(report.headRev).toBe(7);
+    expect(report.bloqueados).toHaveLength(1);
+    expect(report.bloqueados?.[0]?.reason).toBe('tercera versión');
+    expect(escrituras).toEqual([{ since: 7, minRev: null }]);
   });
 });
