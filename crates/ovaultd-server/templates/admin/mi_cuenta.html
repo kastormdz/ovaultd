@@ -5,6 +5,7 @@
   <h1>{{ t.mi_cuenta_titulo }}</h1>
   {% if let Some(texto) = error %}<div class="alerta error">{{ texto }}</div>{% endif %}
   {% if let Some(texto) = ok %}<div class="alerta bien">{{ texto }}</div>{% endif %}
+  <div class="alerta aviso">{{ t.mi_cuenta_aviso_dispositivos }}</div>
   <form method="post" action="/admin/mi-cuenta" class="formulario">
     <input type="hidden" name="csrf" value="{{ csrf }}">
     <label>{{ t.mi_cuenta_password_actual }}

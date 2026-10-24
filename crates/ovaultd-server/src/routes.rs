@@ -211,7 +211,7 @@ pub(crate) fn uptime_segundos() -> u64 {
 
 /// Versión mínima del plugin con la que este server declara compatibilidad (ADR-0018:
 /// release train, mismo `MAJOR.MINOR` = pareja probada junta).
-const MIN_PLUGIN_VERSION: &str = "0.2.0";
+const MIN_PLUGIN_VERSION: &str = "0.3.0";
 
 /// Features que este server anuncia en `/meta`. Los nombres son CONTRATO: un cliente
 /// decide capacidades por acá, no por número de versión.
@@ -607,7 +607,7 @@ async fn signin(
         request.email.trim().to_ascii_lowercase()
     );
 
-    if !state.limitador_login.permitir(&clave) {
+    if !state.limitador_login.permitir_y_registrar(&clave) {
         crate::admin::sesiones::auditar(
             &state.pool,
             None,
@@ -638,7 +638,7 @@ async fn signin(
             // INEXISTENTE incluida (es el caso que más prueba un password spraying); un
             // error interno del server no (no es señal de fuerza bruta).
             if !matches!(error, ServerError::Db(_) | ServerError::Io(_)) {
-                state.limitador_login.registrar(&clave);
+                // El slot ya se reservó en `permitir_y_registrar`.
             }
             Err(error)
         }
@@ -1367,7 +1367,13 @@ async fn put_blob(
         .await
         .map_err(|_| ServerError::Protocol(ovaultd_protocol::ErrorCode::MaxFileExceeded))?;
 
-    let digest = Sha256::digest(&bytes);
+    // El sha256 de un blob de hasta 32 MiB en el hilo del handler bloquea un worker del
+    // runtime (y con varios PUT en paralelo, el server entero deja de atender). `Bytes`
+    // clona por Arc, así que mover la copia al blocking pool no duplica memoria.
+    let para_hashear = bytes.clone();
+    let digest = tokio::task::spawn_blocking(move || Sha256::digest(&para_hashear))
+        .await
+        .map_err(|error| ServerError::Invalid(format!("hash interrumpido: {error}")))?;
     if digest.as_slice() != blob_id.as_bytes() {
         return Err(ServerError::Invalid(
             "el hash del cuerpo no coincide con el hash solicitado".to_owned(),
@@ -1575,6 +1581,7 @@ async fn crear_upload(
 
     let creada = crate::uploads::crear(
         &state.pool,
+        &state.cas,
         vault_id,
         &blob_id,
         total,

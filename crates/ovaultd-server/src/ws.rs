@@ -466,23 +466,27 @@ impl Connection {
             .flatten()
             .unwrap_or_else(|| device_id.to_string());
 
-        let avisos: Vec<Arc<String>> = registros
-            .iter()
-            .filter_map(|registro| aviso_de_registro(registro, &device))
-            .map(Arc::new)
-            .collect();
+        // UN aviso por LOTE, no uno por registro. El `notify` es una señal ("hay algo
+        // nuevo, hacé pull con tu since"), no el dato: el cliente lo único que hace es
+        // marcar sucio. Con un batch de 500 ops se mandaban 500 mensajes por cada otro
+        // device, y el cliente reaccionaba 500 veces. Se manda el último: cubre la rev más
+        // alta del lote, que es lo que el pull necesita saber.
+        let aviso = registros
+            .last()
+            .and_then(|registro| aviso_de_registro(registro, &device))
+            .map(Arc::new);
 
         tracing::debug!(
             vault = vault_id,
             rev,
             registros = registros.len(),
-            avisos = avisos.len(),
+            aviso = aviso.is_some(),
             device = %device,
             "aviso de lote"
         );
 
-        if !avisos.is_empty() {
-            self.notifier.avisar(vault_id, device_id, &avisos);
+        if let Some(aviso) = aviso {
+            self.notifier.avisar(vault_id, device_id, &[aviso]);
         }
     }
 

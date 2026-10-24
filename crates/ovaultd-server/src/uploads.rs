@@ -93,6 +93,7 @@ fn candado(upload_id: &str) -> Arc<tokio::sync::Mutex<()>> {
 /// ya está registrado para el vault, la subida nace completa (dedupe) y no reserva nada.
 pub async fn crear(
     pool: &SqlitePool,
+    cas: &crate::storage::CasStore,
     vault_id: i64,
     blob_id: &BlobId,
     total: i64,
@@ -100,11 +101,15 @@ pub async fn crear(
 ) -> Result<Creada> {
     let upload_id = Uuid::new_v4().to_string();
 
-    let offset_inicial = if blob_registrado(pool, vault_id, blob_id).await? {
-        total
-    } else {
-        0
-    };
+    // Dedupe contra el CAS FÍSICO, no sólo contra la tabla `blobs`: el mismo contenido puede
+    // estar subido por otro vault y no tiene sentido reenviarlo entero. Si el archivo ya
+    // está, se registra para este vault y la subida nace completa.
+    let registrado = blob_registrado(pool, vault_id, blob_id).await?;
+    let en_disco = cas.exists(blob_id);
+    if !registrado && en_disco {
+        crate::storage::registrar_blob(pool, vault_id, blob_id, total).await?;
+    }
+    let offset_inicial = if registrado || en_disco { total } else { 0 };
 
     // ?1..?6 densos y en orden: sqlx binda posicional contra el índice máximo de SQLite.
     let insertadas = sqlx::query(
@@ -270,6 +275,17 @@ async fn escribir_bloque(ruta: PathBuf, offset: i64, bytes: Vec<u8>) -> Result<(
             .write(true)
             .truncate(false) // el largo lo fija `set_len` contra el offset confirmado
             .open(&ruta)?;
+
+        // Si el `.part` quedó MÁS CORTO que el offset confirmado (crash, limpieza, disco
+        // nuevo), `set_len` lo extendería con CEROS y el hash final fallaría culpando al
+        // cliente. Mejor 409: el cliente reinicia la subida desde cero.
+        let largo = archivo.metadata()?.len();
+        if largo < offset {
+            return Err(ServerError::UploadOffset {
+                actual: i64::try_from(offset).unwrap_or(0),
+                requested: i64::try_from(largo).unwrap_or(0),
+            });
+        }
 
         archivo.set_len(offset)?;
         archivo.seek(SeekFrom::Start(offset))?;

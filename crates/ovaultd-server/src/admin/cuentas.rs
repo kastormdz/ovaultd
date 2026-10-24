@@ -820,10 +820,9 @@ async fn register_post(
 
     // Freno simple por IP (mismo limitador que el login): 5 altas por minuto.
     let clave = format!("registro:{}", panel::ip_del_cliente(&headers).unwrap_or_default());
-    if !estado.limitador_login.permitir(&clave) {
+    if !estado.limitador_login.permitir_y_registrar(&clave) {
         return pintar(Some(t.msg_demasiados_intentos.to_owned()), false);
     }
-    estado.limitador_login.registrar(&clave);
 
     let email = formulario.email.trim().to_lowercase();
     if !email.contains('@') || email.len() > 254 {

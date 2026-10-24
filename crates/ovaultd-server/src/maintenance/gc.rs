@@ -206,9 +206,13 @@ pub async fn borrar(
     let mut bytes = 0i64;
 
     for candidato in candidatos {
+        // Cualquier upload VIGENTE protege su hash: las de `offset = total` ya están
+        // completas pero pueden no haber commiteado todavía. Antes sólo se miraban las de
+        // `offset < total`, así que el GC podía borrar un blob recién subido en esa ventana
+        // (el commit del cliente después fallaba con "blob ausente").
         let en_curso: i64 = sqlx::query_scalar(
             "SELECT COUNT(*) FROM uploads
-             WHERE vault_id = ? AND hash = ? AND offset < total",
+             WHERE vault_id = ? AND hash = ? AND expires_at > datetime('now')",
         )
         .bind(candidato.vault_id)
         .bind(&candidato.hash)

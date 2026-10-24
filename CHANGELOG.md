@@ -149,6 +149,48 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y e
   responden como `error` y la sesión sigue; sólo `unauthorized` (credenciales) e
   `internal` (estado en duda) cierran. El `hello` sí cierra en cualquier error.
 
+## [0.3.0] — 2026-10-24
+
+Fase C completa: transacciones y concurrencia (C1–C10). El salto de minor es por el cambio
+de comportamiento del WebSocket (un aviso por lote).
+
+### Fixed
+
+- **C3 · El limitador de login reserva el slot al entrar.** Antes `permitir` y `registrar`
+  eran dos llamadas con dos locks: una ráfaga de 20 peticiones veía `len < 5` en todas y
+  pasaba entera. Ahora la reserva va dentro del mismo lock (pasan exactamente 5) y el mapa
+  se poda al superar 1024 claves (antes crecía con cada IP para siempre).
+- **C5 · Cambiar la password desde «Mi cuenta» revoca los tokens de TODOS los devices**, en
+  la misma transacción que el hash y las sesiones. Antes sólo morían las sesiones web: un
+  dispositivo logueado seguía sincronizando con la password vieja. La UI lo avisa antes.
+  De paso, la comparación del token de sesión usaba el crudo contra el hash guardado y
+  tumbaba también la pestaña actual.
+- **C7 · Un `.part` más corto que el offset confirmado da 409 (reiniciar)**, no se extiende
+  con ceros. Antes el hash final fallaba y el cliente quedaba acusado de un contenido
+  corrupto que había producido el server.
+- **C7 · Dedupe contra el CAS físico**: si el blob ya está en disco (aunque lo haya subido
+  otro vault), la subida nace completa y no se reenvía.
+- **C8 · El GC protege las uploads VIGENTES completas** (`offset = total`) y no sólo las que
+  están a medio llegar: entre subir y commitear había una ventana donde el barrido podía
+  llevarse el blob.
+- **C9 · El sha256 de un blob (hasta 32 MiB) va a `spawn_blocking`**: en el hilo del handler
+  bloqueaba un worker del runtime y, con varios PUT en paralelo, el server dejaba de atender.
+
+### Changed
+
+- **C10 · Un `notify` por LOTE, no por registro.** El aviso es una señal (el cliente hace
+  pull con su `since`): un batch de 500 ops mandaba 500 mensajes por cada otro device y el
+  cliente reaccionaba 500 veces.
+
+### Notas de la fase
+
+- **C4 (challenge) se evaluó y se dejó como estaba.** Invalidar el challenge anterior al
+  emitir uno nuevo rompe dos conexiones del mismo device (el plugin abre una al vuelo para
+  el resolver): los tests `auth_con_proof_invalido…` y `dos_conexiones_paralelas…` lo
+  detectaron. El diseño actual (varios pendientes, verify contra el último + consumo
+  atómico por `rows_affected`) ya no tiene ventana de replay.
+- **C6** (latido de `last_seen`) ya estaba desde 0.2.14.
+
 ## [0.2.25] — 2026-10-24
 
 ### Fixed

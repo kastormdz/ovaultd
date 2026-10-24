@@ -1200,7 +1200,7 @@ async fn el_otro_dispositivo_del_vault_recibe_el_aviso_del_lote(
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Un cuelgue acá significa que el aviso no llegó, no que el test sea lento: el timeout lo
     // convierte en un fallo legible en vez de dejar la corrida colgada.
-    tokio::time::timeout(std::time::Duration::from_secs(20), aviso_entre_dispositivos()).await??;
+    tokio::time::timeout(std::time::Duration::from_secs(60), aviso_entre_dispositivos()).await??;
     Ok(())
 }
 

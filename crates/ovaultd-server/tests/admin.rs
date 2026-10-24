@@ -418,6 +418,19 @@ async fn cambiar_password_valida_y_revoca_las_demas_sesiones() -> Result<()> {
     let csrf_1 = csrf_de_la_ultima_sesion(&contexto).await?;
     let cookie_2 = login(&contexto).await?;
 
+    // Un device sincronizando con la password vieja: cambiar la password lo tiene que cortar.
+    let signin = contexto
+        .request(post_json(
+            "/api/v1/auth/signin",
+            &format!(r#"{{"email":"{EMAIL}","password":"{PASSWORD}","name":"dev"}}"#),
+        )?)
+        .await?;
+    assert_eq!(signin.status(), StatusCode::OK, "device previo al cambio");
+    let tokens_vivos: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM device_tokens")
+        .fetch_one(&contexto.pool)
+        .await?;
+    assert!(tokens_vivos > 0);
+
     // Sin la actual correcta, no hay cambio.
     let response = contexto
         .request(post_form_con_cookie(
@@ -481,6 +494,12 @@ async fn cambiar_password_valida_y_revoca_las_demas_sesiones() -> Result<()> {
         )?)
         .await?;
     assert_eq!(response.status(), StatusCode::SEE_OTHER);
+
+    // El device quedó sin token: sincroniza con la password nueva o no sincroniza.
+    let tokens: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM device_tokens")
+        .fetch_one(&contexto.pool)
+        .await?;
+    assert_eq!(tokens, 0, "el cambio de password revoca los tokens de los devices");
 
     // Auditoría del cambio.
     let cambios: i64 =

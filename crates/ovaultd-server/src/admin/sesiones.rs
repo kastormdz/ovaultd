@@ -192,25 +192,31 @@ impl LimitadorDeLogin {
         }
     }
 
-    /// ¿Le queda margen a esta clave (típicamente ip|email)?
-    pub fn permitir(&self, clave: &str) -> bool {
+    /// ¿Le queda margen a esta clave (típicamente ip|email)? **Reserva el slot en el acto**.
+    ///
+    /// Antes eran dos llamadas (`permitir` y después `registrar`) con dos locks distintos:
+    /// entre una y otra N peticiones concurrentes veían `len < max` y todas pasaban, así que
+    /// una ráfaga de 50 intentos contra el mismo usuario no la frenaba el límite de 5. Con
+    /// la reserva dentro del mismo lock, el que no entra no reserva.
+    pub fn permitir_y_registrar(&self, clave: &str) -> bool {
         let mut intentos = self.intentos.lock().unwrap_or_else(|poison| poison.into_inner());
-        let cola = intentos.entry(clave.to_owned()).or_default();
         let corte = Instant::now() - self.ventana;
+
+        // Poda global: sin esto el mapa crece con cada IP que se equivoca una vez y nunca
+        // se libera (el proceso vive semanas).
+        if intentos.len() > 1024 {
+            intentos.retain(|_, cola| cola.back().is_some_and(|instante| *instante >= corte));
+        }
+
+        let cola = intentos.entry(clave.to_owned()).or_default();
         while cola.front().is_some_and(|instante| *instante < corte) {
             cola.pop_front();
         }
-
-        cola.len() < self.max
-    }
-
-    /// Registra un intento (fallido o no: la ventana se corre igual).
-    pub fn registrar(&self, clave: &str) {
-        let mut intentos = self.intentos.lock().unwrap_or_else(|poison| poison.into_inner());
-        intentos
-            .entry(clave.to_owned())
-            .or_default()
-            .push_back(Instant::now());
+        if cola.len() >= self.max {
+            return false;
+        }
+        cola.push_back(Instant::now());
+        true
     }
 
     /// Login exitoso: se limpia la clave.
@@ -251,38 +257,74 @@ mod tests {
     fn el_limitador_frena_y_se_limpia() {
         let limitador = LimitadorDeLogin::nuevo(3, Duration::from_secs(60));
 
-        assert!(limitador.permitir("yo@ejemplo.com"));
-        limitador.registrar("yo@ejemplo.com");
-        limitador.registrar("yo@ejemplo.com");
-        assert!(limitador.permitir("yo@ejemplo.com"));
-        limitador.registrar("yo@ejemplo.com");
-        assert!(!limitador.permitir("yo@ejemplo.com"));
+        assert!(limitador.permitir_y_registrar("yo@ejemplo.com"));
+        assert!(limitador.permitir_y_registrar("yo@ejemplo.com"));
+        assert!(limitador.permitir_y_registrar("yo@ejemplo.com"));
+        assert!(!limitador.permitir_y_registrar("yo@ejemplo.com"));
 
         // otra clave no se contamina
-        assert!(limitador.permitir("otro@ejemplo.com"));
+        assert!(limitador.permitir_y_registrar("otro@ejemplo.com"));
 
         // un login exitoso limpia
         limitador.limpiar("yo@ejemplo.com");
-        assert!(limitador.permitir("yo@ejemplo.com"));
+        assert!(limitador.permitir_y_registrar("yo@ejemplo.com"));
     }
 
     #[test]
     fn la_ventana_vieja_se_descarta() {
         let limitador = LimitadorDeLogin::nuevo(1, Duration::from_millis(1));
-        limitador.registrar("k");
-        assert!(!limitador.permitir("k"));
+        assert!(limitador.permitir_y_registrar("k"));
+        assert!(!limitador.permitir_y_registrar("k"));
 
         // Bajo carga (los tests de Argon2 saturan la CPU) el hilo puede no ser schedulado
         // por más de un segundo: se reintenta con un techo amplio, midiendo por reloj.
         let inicio = std::time::Instant::now();
         let mut permitido = false;
         while inicio.elapsed() < Duration::from_secs(5) {
-            if limitador.permitir("k") {
+            if limitador.permitir_y_registrar("k") {
                 permitido = true;
                 break;
             }
             std::thread::sleep(Duration::from_millis(5));
         }
         assert!(permitido, "la ventana de 1 ms no expiró en 5 s");
+    }
+
+    #[test]
+    fn una_rafaga_concurrente_no_se_cuela_el_limite() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+
+        // Antes: `permitir` y `registrar` en dos locks, así que las 20 peticiones veían
+        // `len < 3` y las 20 pasaban. Ahora reservan dentro del mismo lock: pasan 3.
+        let limitador = Arc::new(LimitadorDeLogin::nuevo(3, Duration::from_secs(60)));
+        let permitidos = Arc::new(AtomicUsize::new(0));
+
+        let hilos: Vec<_> = (0..20)
+            .map(|_| {
+                let limitador = Arc::clone(&limitador);
+                let permitidos = Arc::clone(&permitidos);
+                std::thread::spawn(move || {
+                    if limitador.permitir_y_registrar("misma-clave") {
+                        permitidos.fetch_add(1, Ordering::SeqCst);
+                    }
+                })
+            })
+            .collect();
+        for hilo in hilos {
+            hilo.join().unwrap();
+        }
+
+        assert_eq!(permitidos.load(Ordering::SeqCst), 3);
+    }
+
+    #[test]
+    fn la_ventana_se_poda_y_el_mapa_no_crece_para_siempre() {
+        // Una vez que la ventana pasó, la clave no puede seguir bloqueada para siempre.
+        let limitador = LimitadorDeLogin::nuevo(1, Duration::from_millis(20));
+        assert!(limitador.permitir_y_registrar("k"));
+        assert!(!limitador.permitir_y_registrar("k"));
+        std::thread::sleep(Duration::from_millis(40));
+        assert!(limitador.permitir_y_registrar("k"));
     }
 }

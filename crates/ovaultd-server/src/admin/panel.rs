@@ -350,7 +350,7 @@ async fn login_post(
         formulario.email.trim().to_ascii_lowercase()
     );
 
-    if !estado.limitador_login.permitir(&clave) {
+    if !estado.limitador_login.permitir_y_registrar(&clave) {
         sesiones::auditar(
             &estado.pool,
             None,
@@ -399,7 +399,7 @@ async fn login_post(
             }
         }
         Ok(None) => {
-            estado.limitador_login.registrar(&clave);
+            // El slot ya se reservó en `permitir_y_registrar`.
             sesiones::auditar(
                 &estado.pool,
                 None,
@@ -826,19 +826,50 @@ async fn mi_cuenta_post(
         Err(error) => return error_interno("mi_cuenta_hash", error),
     };
 
-    let resultado = sqlx::query("UPDATE accounts SET password_hash = ? WHERE id = ?")
+    // Todo junto: si cambia la password, los devices que quedaron logueados con la vieja
+    // dejan de valer EN LA MISMA transacción. Antes sólo morían las sesiones web y un
+    // dispositivo robado seguía sincronizando con la password que se acababa de cambiar.
+    let mut tx = match estado.pool.begin().await {
+        Ok(tx) => tx,
+        Err(error) => return error_interno("mi_cuenta_begin", error),
+    };
+
+    let actualizo = sqlx::query("UPDATE accounts SET password_hash = ? WHERE id = ?")
         .bind(hash)
         .bind(sesion.account_id)
-        .execute(&estado.pool)
+        .execute(&mut *tx)
         .await;
-
-    if let Err(error) = resultado {
-        return error_interno("mi_cuenta_update", error);
+    match actualizo {
+        Ok(filas) if filas.rows_affected() == 1 => {}
+        Ok(_) => return error_interno("mi_cuenta_update", "la cuenta ya no existe".to_owned()),
+        Err(error) => return error_interno("mi_cuenta_update", error),
     }
 
-    // Las demás sesiones mueren (la actual sobrevive: tiene el token).
+    // Las demás sesiones web mueren (la actual sobrevive: la pestaña sigue abierta).
     if let Some(token) = cookie_de(&headers, COOKIE_SESION) {
-        let _ = sesiones::revocar_otras_sesiones(&estado.pool, sesion.account_id, &token).await;
+        // El token se guarda HASHEADO: comparar contra el crudo borraba también la sesión
+        // actual (la pestaña que cambió la password se caía en el acto).
+        if let Err(error) = sqlx::query("DELETE FROM sessions WHERE account_id = ? AND token_hash != ?")
+            .bind(sesion.account_id)
+            .bind(auth::hash_token(&token))
+            .execute(&mut *tx)
+            .await
+        {
+            return error_interno("mi_cuenta_sesiones", error);
+        }
+    }
+
+    // Y los tokens de TODOS los devices de la cuenta: vuelven a loguear con la password nueva.
+    if let Err(error) = sqlx::query("DELETE FROM device_tokens WHERE account_id = ?")
+        .bind(sesion.account_id)
+        .execute(&mut *tx)
+        .await
+    {
+        return error_interno("mi_cuenta_devices", error);
+    }
+
+    if let Err(error) = tx.commit().await {
+        return error_interno("mi_cuenta_commit", error);
     }
     sesiones::auditar(
         &estado.pool,
