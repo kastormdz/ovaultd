@@ -163,7 +163,9 @@ describe('resolución de conflictos', () => {
     );
 
     expect(resultado.status).toBe('applied');
-    expect(checkpoint().since).toBe(6);
+    // El cursor lo cierra `pullOnce` al terminar la revisión completa, no el resolver:
+    // resolver una revisión suelta no puede mover el cursor global (podía retroceder).
+    expect(checkpoint().since).toBe(0);
   });
 
   it('«remoto» pisa el local con el contenido del server', async () => {
@@ -192,7 +194,9 @@ describe('resolución de conflictos', () => {
     expect(resultado.status).toBe('applied');
     expect(dec.decode(files.get('nota.md'))).toBe('versión del server');
     expect(await store.listIntents('blocked')).toHaveLength(0);
-    expect(checkpoint().since).toBe(6);
+    // El cursor lo cierra `pullOnce` al terminar la revisión completa, no el resolver:
+    // resolver una revisión suelta no puede mover el cursor global (podía retroceder).
+    expect(checkpoint().since).toBe(0);
   });
 
   it('«local» deja el archivo intacto y la base avanza al remoto', async () => {
@@ -223,6 +227,8 @@ describe('resolución de conflictos', () => {
     expect(base.get(PATH_ID)?.contentHash).toBe(sha256Hex(remoto));
     expect(base.get(PATH_ID)?.rev).toBe(6);
     expect(await store.listIntents('blocked')).toHaveLength(0);
-    expect(checkpoint().since).toBe(6);
+    // El cursor lo cierra `pullOnce` al terminar la revisión completa, no el resolver:
+    // resolver una revisión suelta no puede mover el cursor global (podía retroceder).
+    expect(checkpoint().since).toBe(0);
   });
 });

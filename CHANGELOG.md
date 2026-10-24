@@ -70,6 +70,44 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y e
   (`max(...)` en vez de `COALESCE`, que priorizaba un `last_seen` viejo). Test:
   `batch_valido_da_batch_ack_con_la_rev_y_una_sola_revision` verifica el latido.
 
+## [0.2.15] — 2026-10-24
+
+### Fixed (pérdida de datos)
+
+- **Un batch con dos operaciones del mismo path ya no deja el device sin poder
+  pushear.** `revisions` tiene PK `(vault_id, rev, path_id)` y el commit insertaba una
+  fila por operación: dos ops del mismo path (un `pending` re-editado, `del`+`add` del
+  mismo nombre, o `move`+`mod` del protocolo) violaban la PK, el commit devolvía 500 y
+  el reintento idéntico volvía a fallar. Ahora se aplica la última op de cada path y un
+  `move`+`mod` colapsa en una sola fila conservando el `prev_path_id` (y tombstoneando
+  el origen). Tests: `dos_ops_del_mismo_path_colapsan_en_una_revision` y
+  `move_mas_edit_en_una_revision_conserva_el_origen_borrado`.
+
+- **Un archivo que no se puede leer ya no se propaga como borrado.** `stat` devolvía
+  `null` ante cualquier error (EACCES, EIO, ELOOP) y el scan lo leía como "no existe":
+  el push publicaba `del` y todos los devices borraban esas notas. Ahora esos paths se
+  marcan `ilegibles` y el diff los excluye (ni suben ni se borran este ciclo). Test:
+  un `readMany` que falla en 1 de 3 ya no produce ningún `del`.
+
+- **El cursor del pull avanza sólo con la revisión completa.** `completeApply` escribía
+  `since = rev` por cada registro, pero una revisión del server trae N operaciones y el
+  delta pagina `rev > since`: si la op 2 fallaba, las demás no se entregaban nunca (y
+  `prune-remote` después las borraba del server). Ahora `pullOnce` cierra el cursor al
+  terminar todas las ops de la revisión, `writeCheckpoint` nunca retrocede y conserva
+  `minRev`. Tests: revisión de 3 ops (avanza a la 3.ª) y bloqueo en la 2.ª (no avanza).
+
+- **El import del plugin escribe los bytes exactos.** `Buffer#slice()` no copia: su
+  `.buffer` es el pool de 8 KB de Node, así que todo archivo menor a 4 KB se escribía
+  con 8192 bytes (con memoria ajena) y se publicaba así. `copiaExacta()` copia en un
+  `Uint8Array` del tamaño justo; lo usan el import y el adapter. Test con un Buffer del
+  pool (100 B reales → 100 B, no 8192).
+
+### Fixed
+
+- **Panel: última actividad con el más reciente real.** `max(a, subselect)` de dos
+  argumentos devuelve NULL si falta uno (un device read-only mostraba "sin actividad");
+  ahora es `NULLIF(max(COALESCE(batch), COALESCE(last_seen)), '')`.
+
 ## [Unreleased]
 
 ### Security

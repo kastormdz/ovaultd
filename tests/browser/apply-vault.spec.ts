@@ -144,7 +144,9 @@ test.describe('orquestación de apply', () => {
       const base = (await runtime.call('store.base.get', { pathId: revision.pathId })) as { rev: number; contentHash: string };
       expect(base.rev).toBe(1);
       expect(base.contentHash).toBe(revision.contentHash);
-      expect(((await runtime.call('store.checkpoint.read')) as { since: number }).since).toBe(1);
+      // El cursor NO se mueve en el apply: lo cierra `pullOnce` al terminar la revisión
+      // completa (una rev trae N ops; avanzar por registro dejaba el resto inalcanzable).
+      expect(await runtime.call('store.checkpoint.read')).toBeNull();
       expect(await runtime.call('apply.pending')).toEqual([]);
 
       // Re-aplicar la misma revisión: el contenido local ya coincide ⇒ commit sin reescribir
@@ -202,7 +204,7 @@ test.describe('orquestación de apply', () => {
       const pendientes = (await runtime.call('apply.pending')) as Array<{ state: string }>;
       expect(pendientes).toHaveLength(0);
       expect((await runtime.call('store.base.get', { pathId: v2.revision.pathId })) as { rev: number }).toHaveProperty('rev', 2);
-      expect(((await runtime.call('store.checkpoint.read')) as { since: number }).since).toBe(2);
+      expect(await runtime.call('store.checkpoint.read')).toBeNull();
     } finally {
       await runtime.close();
       rmSync(vault, { recursive: true, force: true });
@@ -280,7 +282,7 @@ test.describe('failpoints reales', () => {
       expect(await segunda.call('apply.pending')).toEqual([]);
       const baseA = (await segunda.call('store.base.get', { pathId: candA.pathId })) as { rev: number };
       expect(baseA.rev).toBe(1);
-      expect(((await segunda.call('store.checkpoint.read')) as { since: number }).since).toBe(1);
+      expect(await segunda.call('store.checkpoint.read')).toBeNull();
     } finally {
       if (segunda) await segunda.close();
       rmSync(vault, { recursive: true, force: true });

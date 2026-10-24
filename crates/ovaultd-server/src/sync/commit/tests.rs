@@ -989,6 +989,130 @@ async fn una_firma_de_otro_vault_no_vale(
     Ok(())
 }
 
+
+#[tokio::test]
+async fn dos_ops_del_mismo_path_colapsan_en_una_revision(
+) -> std::result::Result<(), Box<dyn std::error::Error>> {
+    let context = TestContext::new().await?;
+    let primero = blob(0x03);
+    let segundo = blob(0x04);
+    context.insert_blob(primero, 10).await?;
+    context.insert_blob(segundo, 10).await?;
+
+    // La outbox puede mandar dos ops del mismo path (un `pending` que se vuelve a editar).
+    // Antes esto violaba la PK `(vault_id, rev, path_id)` y el device quedaba con 500 fijo.
+    let request = batch(
+        "op-duplicada",
+        0,
+        context.epoch,
+        vec![
+            add_op(path(0x10), primero),
+            add_op(path(0x10), segundo),
+        ],
+    );
+
+    let outcome = commit_batch(
+        &context.pool,
+        context.vault_id,
+        context.device_id,
+        &request,
+    )
+    .await?;
+
+    assert_eq!(outcome.rev, 1, "el batch tenía que commitear una sola revisión");
+
+    let filas: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM revisions WHERE vault_id = ? AND rev = 1",
+    )
+    .bind(context.vault_id)
+    .fetch_one(&context.pool)
+    .await?;
+    assert_eq!(filas, 1, "una fila de revisión por path, no una por op");
+
+    let (blob_hash, deleted): (Vec<u8>, i64) = sqlx::query_as(
+        "SELECT blob_hash, deleted FROM files WHERE vault_id = ? AND path_id = ?",
+    )
+    .bind(context.vault_id)
+    .bind(path(0x10).as_bytes().as_slice())
+    .fetch_one(&context.pool)
+    .await?;
+    assert_eq!(
+        blob_hash,
+        segundo.as_bytes().to_vec(),
+        "tiene que ganar la última op del path"
+    );
+    assert_eq!(deleted, 0);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn move_mas_edit_en_una_revision_conserva_el_origen_borrado(
+) -> std::result::Result<(), Box<dyn std::error::Error>> {
+    let context = TestContext::new().await?;
+    let original = blob(0x03);
+    let editado = blob(0x04);
+    context.insert_blob(original, 10).await?;
+    context.insert_blob(editado, 10).await?;
+
+    let alta = batch(
+        "op-alta-origen",
+        0,
+        context.epoch,
+        vec![add_op(path(0x12), original)],
+    );
+    commit_batch(&context.pool, context.vault_id, context.device_id, &alta).await?;
+
+    // `rename + edit` es UNA revisión según el protocolo: move A->X seguido de mod X.
+    let request = batch(
+        "op-rename-edit",
+        1,
+        context.epoch,
+        vec![
+            move_op(path(0x11), path(0x12), original),
+            mod_op(path(0x11), editado),
+        ],
+    );
+
+    commit_batch(&context.pool, context.vault_id, context.device_id, &request).await?;
+
+    let filas: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM revisions WHERE vault_id = ? AND rev = 2",
+    )
+    .bind(context.vault_id)
+    .fetch_one(&context.pool)
+    .await?;
+    assert_eq!(filas, 1, "rename + edit cae en una sola fila de revisión");
+
+    let (prev, destino_blob): (Option<Vec<u8>>, Vec<u8>) = sqlx::query_as(
+        "SELECT r.prev_path_id, f.blob_hash
+         FROM revisions r
+         JOIN files f ON f.vault_id = r.vault_id AND f.path_id = r.path_id
+         WHERE r.vault_id = ? AND r.rev = 2 AND r.path_id = ?",
+    )
+    .bind(context.vault_id)
+    .bind(path(0x11).as_bytes().as_slice())
+    .fetch_one(&context.pool)
+    .await?;
+    assert_eq!(
+        prev.as_deref(),
+        Some(path(0x12).as_bytes().as_slice()),
+        "el move colapsado tiene que seguir diciendo de dónde vino"
+    );
+    assert_eq!(destino_blob, editado.as_bytes().to_vec());
+
+    let origen_deleted: i64 = sqlx::query_scalar(
+        "SELECT deleted FROM files WHERE vault_id = ? AND path_id = ?",
+    )
+    .bind(context.vault_id)
+    .bind(path(0x12).as_bytes().as_slice())
+    .fetch_one(&context.pool)
+    .await?;
+    assert_eq!(origen_deleted, 1, "el origen del rename tiene que quedar tombstoneado");
+
+    Ok(())
+}
+
 // No hay en este archivo ningún INSERT manual en `revisions`; las filas de
 // `revisions` se crean únicamente mediante `commit.rs`, que ya incluye
 // `operation_id` con el mismo formato que `batches.operation_id`.

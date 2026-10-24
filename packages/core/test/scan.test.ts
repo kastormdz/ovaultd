@@ -3,11 +3,13 @@
 //! pero la exclusión de la CARPETA raíz dejaba el contenido portable inalcanzable (el scan
 //! no recursa una carpeta excluida, así que ni siquiera llegaba a consultarle los hijos).
 
-import { deriveSubkeys, randomSalt, randomVaultKey } from '@ovaultd/crypto';
+import { deriveSubkeys, pathId as calcularPathId, randomSalt, randomVaultKey } from '@ovaultd/crypto';
+import { toHex } from '@ovaultd/protocol';
 import { describe, expect, it } from 'vitest';
 
 import type { FileSystemPort, VaultDirEntry } from '../src/file-port.js';
-import { escanearVault } from '../src/scan.js';
+import { diffLocal, escanearVault } from '../src/scan.js';
+import type { StateStore } from '../src/StateStore.js';
 
 const CLAVES = deriveSubkeys(randomVaultKey(), randomSalt());
 
@@ -206,5 +208,44 @@ describe('stat masivo (statMany)', () => {
     expect(statManyLlamadas).toBe(1); // UN solo round-trip para los 3
     expect(statsIndividuales).toBe(0); // ni un stat suelto
     expect(entradas).toHaveLength(3);
+  });
+});
+
+describe('un fallo de lectura no es un borrado', () => {
+  it('el archivo ilegible queda fuera del diff y NO se propone del', async () => {
+    const rutas = ['a.md', 'b.md', 'c.md'];
+    const port = portDeArbol(rutas) as unknown as FileSystemPort & {
+      readMany: (rels: string[]) => Promise<Array<Uint8Array | null>>;
+    };
+    // b.md existe (está en el listado) pero el read falla como un EACCES/EIO real.
+    port.readMany = async (rels) =>
+      rels.map((rel) => (rel === 'b.md' ? null : new TextEncoder().encode(`contenido de ${rel}`)));
+
+    const ilegibles = new Map<string, string>();
+    const entradas = await escanearVault(port, CLAVES, '', undefined, undefined, ilegibles);
+
+    expect(entradas.map((entrada) => entrada.path)).toEqual(['a.md', 'c.md']);
+    expect([...ilegibles.values()]).toEqual(['b.md']);
+
+    const base = rutas.map((ruta) => ({
+      pathId: toHex(calcularPathId(CLAVES, ruta)),
+      path: ruta,
+      contentHash: toHex(calcularPathId(CLAVES, `hash-${ruta}`)),
+      size: 1,
+      mtime: 1,
+    }));
+    const store = {
+      listBase: async () => base,
+      listIndex: async () => base.map((entrada) => ({ ...entrada, deleted: false })),
+      listOutbox: async () => [],
+    } as unknown as StateStore;
+
+    const conMapa = await diffLocal(store, entradas, ilegibles);
+    expect(conMapa.ilegibles).toEqual(['b.md']);
+    expect(conMapa.borrados).toEqual([]);
+
+    // Control: sin el mapa, el mismo escaneo SÍ borraría b.md (el bug que se arregló).
+    const sinMapa = await diffLocal(store, entradas);
+    expect(sinMapa.borrados.map((borrado) => borrado.path)).toEqual(['b.md']);
   });
 });

@@ -346,8 +346,9 @@ const handlers: Record<string, Handler> = {
   'sync.scan': async () => {
     const { store, keys } = exigirApply();
     const port = new HttpFileSystemPort(globalThis.location.origin);
-    const entradas = await escanearVault(port, keys);
-    const diff = await diffLocal(store, entradas);
+    const ilegibles = new Map<string, string>();
+    const entradas = await escanearVault(port, keys, '', undefined, undefined, ilegibles);
+    const diff = await diffLocal(store, entradas, ilegibles);
     return {
       diff,
       entradas: entradas.map((entrada) => ({

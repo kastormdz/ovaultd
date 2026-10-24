@@ -35,6 +35,37 @@ fn encode_id<T: Into<Vec<u8>>>(value: T) -> Vec<u8> {
     value.into()
 }
 
+/// Un batch puede traer varias operaciones sobre el mismo `path_id`: el caso normal es
+/// `move A->X` + `mod X`, que el protocolo manda junto para que el rename y la edición
+/// caigan en la misma revisión. `revisions` tiene PK `(vault_id, rev, path_id)`, así que
+/// insertar las dos violaba la PK: el commit devolvía 500 y el reintento idéntico volvía a
+/// fallar, dejando al device sin poder pushear nunca más. Se aplica sólo la última
+/// operación de cada path (el estado final es el que importa) y se conserva el
+/// `prev_path_id` de un move previo para no perder el rename.
+fn colapsar_ops(ops: &[BatchOp]) -> Vec<BatchOp> {
+    use std::collections::HashMap;
+
+    let mut resultado: Vec<BatchOp> = Vec::with_capacity(ops.len());
+    let mut posicion: HashMap<Vec<u8>, usize> = HashMap::new();
+    for op in ops {
+        let clave = op.path_id.as_bytes().to_vec();
+        match posicion.get(&clave) {
+            Some(&i) => {
+                let previo = resultado[i].prev_path_id;
+                resultado[i] = op.clone();
+                if resultado[i].prev_path_id.is_none() {
+                    resultado[i].prev_path_id = previo;
+                }
+            }
+            None => {
+                posicion.insert(clave, resultado.len());
+                resultado.push(op.clone());
+            }
+        }
+    }
+    resultado
+}
+
 fn op_name(op: Op) -> &'static str {
     match op {
         Op::Add => "add",
@@ -373,13 +404,17 @@ pub async fn commit_batch(
         });
     }
 
+    // Dedupe por path: ver `colapsar_ops`. La verificación de firmas de arriba corre
+    // sobre TODAS las ops del mensaje; acá sólo se aplica la última de cada path.
+    let ops = colapsar_ops(&batch.ops);
+
     let max_file_bytes = vault
         .max_file_bytes
         .map(|value| u64::try_from(value).unwrap_or(0))
         .unwrap_or(MAX_FILE_BYTES)
         .min(MAX_FILE_BYTES);
 
-    for op in &batch.ops {
+    for op in &ops {
         if let Some(size) = op.size {
             if size > max_file_bytes {
                 return Err(ServerError::Protocol(ErrorCode::MaxFileExceeded));
@@ -389,7 +424,7 @@ pub async fn commit_batch(
 
     let mut tx = pool.begin().await?;
 
-    for op in &batch.ops {
+    for op in &ops {
         if let Some(blob_id) = op.blob_id {
             if !crate::storage::blob_registrado(&mut *tx, vault_id, &blob_id).await? {
                 return Err(ServerError::NotFound);
@@ -402,7 +437,7 @@ pub async fn commit_batch(
 
     if expected_rev != current_head {
         return Err(ServerError::Conflict {
-            path_id: batch.ops[0].path_id,
+            path_id: ops[0].path_id,
             expected: u64::try_from(expected_rev).unwrap_or(0),
             head: u64::try_from(current_head).unwrap_or(0),
         });
@@ -412,7 +447,7 @@ pub async fn commit_batch(
         .checked_add(1)
         .ok_or_else(|| ServerError::Invalid("revisión fuera de rango".to_owned()))?;
 
-    for op in &batch.ops {
+    for op in &ops {
         let path_id = op.path_id.as_bytes().as_slice();
         let path_enc = op
             .path_enc
@@ -429,6 +464,33 @@ pub async fn commit_batch(
 
         match op.op {
             Op::Add | Op::Mod => {
+                // Un rename+edit llega como move + mod del mismo path_id y el colapso deja
+                // el mod heredando el `prev_path_id`: hay que tombstonear el origen igual
+                // que en un move, o el rename queda a medias (el origen sigue vivo).
+                let previous_path: Option<Vec<u8>> = match op.prev_path_id {
+                    Some(previous_path_id) => {
+                        let previous = previous_path_id.as_bytes().to_vec();
+                        if previous.as_slice() == path_id {
+                            return Err(protocol_bad_request());
+                        }
+                        let existe = sqlx::query_scalar::<_, i64>(
+                            "SELECT 1
+                             FROM files
+                             WHERE vault_id = ? AND path_id = ? AND deleted = 0
+                             LIMIT 1",
+                        )
+                        .bind(vault_id)
+                        .bind(previous.as_slice())
+                        .fetch_optional(&mut *tx)
+                        .await?;
+                        if existe.is_none() {
+                            return Err(ServerError::NotFound);
+                        }
+                        Some(previous)
+                    }
+                    None => None,
+                };
+
                 upsert_file(
                     &mut tx,
                     vault_id,
@@ -444,6 +506,10 @@ pub async fn commit_batch(
                 )
                 .await?;
 
+                if let Some(previous) = previous_path.as_deref() {
+                    tombstone_file(&mut tx, vault_id, previous, rev).await?;
+                }
+
                 insert_revision(
                     &mut tx,
                     vault_id,
@@ -454,7 +520,7 @@ pub async fn commit_batch(
                     expected_rev,
                     batch.operation_id.as_str(),
                     path_enc.as_deref(),
-                    None,
+                    previous_path.as_deref(),
                     blob_hash.as_deref(),
                     t_mac.as_deref(),
                     size,
@@ -497,10 +563,18 @@ pub async fn commit_batch(
                     .ok_or_else(protocol_bad_request)?;
                 let previous_path = previous_path_id.as_bytes().as_slice();
 
+                // Renombrar un path sobre sí mismo no es un move: con el upsert y el
+                // tombstone del mismo path_id en la misma revisión el archivo desaparece.
+                if previous_path == path_id {
+                    return Err(protocol_bad_request());
+                }
+
+                // `deleted = 0`: mover desde un tombstone resucitaba un blob que el GC ya
+                // podía haber recolectado (el índice afirmaba que existía).
                 let previous_exists = sqlx::query_scalar::<_, i64>(
                     "SELECT 1
                      FROM files
-                     WHERE vault_id = ? AND path_id = ?
+                     WHERE vault_id = ? AND path_id = ? AND deleted = 0
                      LIMIT 1",
                 )
                 .bind(vault_id)
@@ -564,7 +638,7 @@ pub async fn commit_batch(
     .bind(rev)
     .bind(&batch.batch_id)
     .bind(&batch.operation_id)
-    .bind(i64::try_from(batch.ops.len()).map_err(|_| protocol_bad_request())?)
+    .bind(i64::try_from(ops.len()).map_err(|_| protocol_bad_request())?)
     .bind(device_id)
     .execute(&mut *tx)
     .await;
@@ -614,7 +688,7 @@ pub async fn commit_batch(
         .ok_or(ServerError::NotFound)?;
 
         return Err(ServerError::Conflict {
-            path_id: batch.ops[0].path_id,
+            path_id: ops[0].path_id,
             expected: u64::try_from(expected_rev).unwrap_or(0),
             head: u64::try_from(head).unwrap_or(0),
         });

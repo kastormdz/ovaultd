@@ -37,6 +37,8 @@ export interface DiffLocal {
   nuevos: EntradaEscaneada[];
   modificados: EntradaEscaneada[];
   borrados: Array<{ pathId: string; path?: string }>;
+  /** Paths que existían en el listado pero no se pudieron stat/leer en este ciclo. */
+  ilegibles: string[];
   sinCambios: number;
   /** Cambios ya encolados (outbox pendiente): el diff NO los vuelve a encolar. */
   yaEncolados: number;
@@ -51,6 +53,9 @@ export async function escanearVault(
   /** Si se pasa, el escaneo deja acá los bytes leídos: el push los reusa para encolar el
    *  snapshot en vez de volver a pedir cada archivo al puente (una lectura por archivo). */
   contenidos?: Map<string, Uint8Array>,
+  /** Salida: `pathId` hex -> path de los archivos que no se pudieron stat/leer. Un fallo
+   *  de lectura (EACCES, EIO, ELOOP) NO es un borrado: el diff los excluye. */
+  ilegibles?: Map<string, string>,
 ): Promise<EntradaEscaneada[]> {
   const archivos: string[] = [];
 
@@ -82,8 +87,13 @@ export async function escanearVault(
   for (let i = 0; i < archivos.length; i += 1) {
     const rel = archivos[i]!;
     const stat = stats[i] ?? null;
-    // Se fue entre el list y el stat: no hay nada que sincronizar de este path.
-    if (stat === null) continue;
+    // El archivo estaba en el listado: si el stat falla, "no existe" no es la única
+    // explicación (puede ser EACCES, EIO, ELOOP). Se marca ilegible y NO se sincroniza:
+    // el diff no puede convertirlo en `del` o se borra en todos los devices.
+    if (stat === null) {
+      ilegibles?.set(toHex(calcularPathId(keys, rel)), rel);
+      continue;
+    }
 
     // Escaneo incremental: si el archivo no cambió (mismo mtime y tamaño) el hash del
     // índice sigue valiendo y NO se lee el contenido. Un vault de 100 MB pasa de ~8 s
@@ -136,8 +146,12 @@ export async function escanearVault(
 
   for (const { rel, stat } of porLeer) {
     const bytes = leidos.get(rel);
-    // Se fue entre el stat y el read: no se puede hashear lo que ya no está.
-    if (!bytes) continue;
+    // Mismo criterio que el stat: el archivo estaba listado y con stat bueno, así que un
+    // read fallido es un problema de acceso, no un borrado. Queda fuera de este ciclo.
+    if (!bytes) {
+      ilegibles?.set(toHex(calcularPathId(keys, rel)), rel);
+      continue;
+    }
     salida.push({
       path: rel,
       pathId: toHex(calcularPathId(keys, rel)),
@@ -152,7 +166,11 @@ export async function escanearVault(
 }
 
 /** Diff contra la base: qué falta empujar, con la outbox pendiente como filtro. */
-export async function diffLocal(store: StateStore, entradas: EntradaEscaneada[]): Promise<DiffLocal> {
+export async function diffLocal(
+  store: StateStore,
+  entradas: EntradaEscaneada[],
+  ilegibles?: Map<string, string>,
+): Promise<DiffLocal> {
   const base = new Map((await store.listBase()).map((entrada) => [entrada.pathId, entrada]));
   const index = new Map((await store.listIndex()).map((entrada) => [entrada.pathId, entrada]));
   const pendientes = new Set(
@@ -162,7 +180,14 @@ export async function diffLocal(store: StateStore, entradas: EntradaEscaneada[])
   );
 
   const enDisco = new Set<string>();
-  const diff: DiffLocal = { nuevos: [], modificados: [], borrados: [], sinCambios: 0, yaEncolados: 0 };
+  const diff: DiffLocal = {
+    nuevos: [],
+    modificados: [],
+    borrados: [],
+    ilegibles: ilegibles ? [...ilegibles.values()] : [],
+    sinCambios: 0,
+    yaEncolados: 0,
+  };
 
   for (const archivo of entradas) {
     enDisco.add(archivo.pathId);
@@ -191,6 +216,8 @@ export async function diffLocal(store: StateStore, entradas: EntradaEscaneada[])
   // Borrados: base sin archivo en disco (y que el índice no tenga ya como tombstone).
   for (const [pathIdHex, baseEntry] of base) {
     if (enDisco.has(pathIdHex) || baseEntry.contentHash == null) continue;
+    // Un path que este ciclo no se pudo leer sigue existiendo: no es un borrado.
+    if (ilegibles?.has(pathIdHex)) continue;
     const indexEntry = index.get(pathIdHex);
     if (indexEntry?.deleted === true) continue;
     // Excluir NO significa borrar el remoto: un path hoy excluido jamás se propone `del`.
@@ -208,4 +235,5 @@ export async function diffLocal(store: StateStore, entradas: EntradaEscaneada[])
 /** Resumen humano del diff (lo usan `list-local` y los reportes de sync). */
 export const resumirDiff = (diff: DiffLocal): string =>
   `nuevos=${diff.nuevos.length} modificados=${diff.modificados.length} ` +
-  `borrados=${diff.borrados.length} sinCambios=${diff.sinCambios} yaEncolados=${diff.yaEncolados}`;
+  `borrados=${diff.borrados.length} sinCambios=${diff.sinCambios} ` +
+  `yaEncolados=${diff.yaEncolados} ilegibles=${diff.ilegibles.length}`;

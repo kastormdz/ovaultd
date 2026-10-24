@@ -194,8 +194,18 @@ export class StateStore {
     return (await this.db.get('checkpoint', 'checkpoint')) ?? null;
   }
 
-  async writeCheckpoint(entry: Omit<CheckpointEntry, 'id'>): Promise<CheckpointEntry> {
-    const value: CheckpointEntry = { id: 'checkpoint', ...entry };
+  async writeCheckpoint(
+    entry: Omit<CheckpointEntry, 'id' | 'updatedAt'> & { updatedAt?: number },
+  ): Promise<CheckpointEntry> {
+    // El cursor NUNCA retrocede: un ack idempotente con una rev vieja (o resolver un intent
+    // de una rev anterior) rebobinaba el pull y re-aplicaba revisiones ya aplicadas.
+    const actual = await this.db.get('checkpoint', 'checkpoint');
+    const value: CheckpointEntry = {
+      id: 'checkpoint',
+      since: actual ? Math.max(actual.since, entry.since) : entry.since,
+      minRev: entry.minRev ?? actual?.minRev ?? null,
+      updatedAt: entry.updatedAt ?? Date.now(),
+    };
     await this.db.put('checkpoint', value);
     return value;
   }

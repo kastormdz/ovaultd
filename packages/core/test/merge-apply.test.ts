@@ -192,8 +192,9 @@ describe('merge 3-vías integrado al apply', () => {
     expect(caso.index.get(PATH_ID)?.rev).toBe(6);
     expect(caso.base.get(PATH_ID)?.contentHash).toBe(sha256Hex(cod.encode(THEIRS_TEXTO)));
 
-    // El checkpoint avanza a la remota: el pull puede seguir.
-    expect(caso.checkpoint()).toEqual({ since: 6, minRev: null });
+    // El checkpoint NO se mueve acá: lo cierra `pullOnce` cuando la revisión entera quedó
+    // aplicada (una rev trae N ops y avanzar por registro dejaba el resto inalcanzable).
+    expect(caso.checkpoint()).toEqual({ since: 0, minRev: null });
 
     // La consecuencia que importa: el archivo NO coincide con el índice (el scan lo ve
     // sucio → el push sube la fusión como revisión NUEVA).
@@ -211,7 +212,7 @@ describe('merge 3-vías integrado al apply', () => {
 
     expect(resultado.status).not.toBe('blocked');
     expect(dec.decode(caso.files.get(PATH))).toBe(THEIRS_TEXTO);
-    expect(caso.checkpoint()).toEqual({ since: 6, minRev: null });
+    expect(caso.checkpoint()).toEqual({ since: 0, minRev: null });
   });
 
   it('la misma frase editada distinto: conflicto explícito y el local intacto', async () => {
@@ -411,8 +412,8 @@ describe('conflictos: política por defecto (conservar copia, estilo Obsidian Sy
     expect(dec.decode(caso.files.get(PATH))).toBe('El gato corre en el sofá.\n');
     // La copia: la edición LOCAL, intacta.
     expect(dec.decode(caso.files.get(resultado.copia!))).toBe('El gato ronca en el sofá.\n');
-    // El checkpoint avanza: el ciclo NO se bloquea.
-    expect(caso.checkpoint()).toEqual({ since: 6, minRev: null });
+    // Sin checkpoint en el apply: el ciclo no se bloquea y `pullOnce` lo cierra al final.
+    expect(caso.checkpoint()).toEqual({ since: 0, minRev: null });
     // El intent quedó cerrado (no hay nada bloqueado pendiente).
     expect([...caso.intents.values()].filter((i) => i.state === 'blocked')).toHaveLength(0);
   });
