@@ -631,3 +631,72 @@ describe('conflicto estructural: se conserva en vez de congelar (C-b)', () => {
     expect(dec.decode(caso.files.get(copia!))).toBe('soy un archivo\n');
   });
 });
+
+describe('recovery con la política del guard (B5.2)', () => {
+  const intentDeArchivo = (caso: ReturnType<typeof armarCaso>, tempName: string): IntentEntry => ({
+    intentId: 'crash-archivo-1',
+    pathId: PATH_ID,
+    rev: 6,
+    blobId: caso.revision.blobId!,
+    state: 'verified',
+    path: PATH,
+    contentHash: sha256Hex(cod.encode(THEIRS_TEXTO)),
+    tempName,
+    createdAt: Date.now(),
+  });
+
+  it('con el destino cambiado y política conservar: copia el local y completa', async () => {
+    // Crash después del writeTemp: el temporal tiene el REMOTO y el destino quedó editado
+    // a mano (ni el local original ni el remoto).
+    const caso = armarCaso({ local: OURS_TEXTO, remoto: THEIRS_TEXTO });
+    const { tempName } = await caso.deps.port.writeTemp('.', cod.encode(THEIRS_TEXTO));
+    caso.files.set(PATH, cod.encode('edición posterior al crash\n'));
+    await caso.store.putIntent(intentDeArchivo(caso, tempName));
+
+    const reporte = await recoverApplies({
+      ...caso.deps,
+      politicaDeConflictos: 'conservar',
+      deviceName: 'escritorio',
+    });
+
+    expect(reporte.completed).toBe(1);
+    expect(reporte.blocked).toBe(0);
+    // El remoto ocupa el path y la edición del usuario se conserva como copia.
+    expect(dec.decode(caso.files.get(PATH))).toBe(THEIRS_TEXTO);
+    const copia = [...caso.files.keys()].find((ruta) => ruta.includes('(conflicto'));
+    expect(copia).toBeDefined();
+    expect(dec.decode(caso.files.get(copia!))).toBe('edición posterior al crash\n');
+  });
+
+  it('con el destino cambiado y política bloquear: no pisa (queda bloqueado)', async () => {
+    const caso = armarCaso({ local: OURS_TEXTO, remoto: THEIRS_TEXTO });
+    const { tempName } = await caso.deps.port.writeTemp('.', cod.encode(THEIRS_TEXTO));
+    caso.files.set(PATH, cod.encode('edición posterior al crash\n'));
+    await caso.store.putIntent(intentDeArchivo(caso, tempName));
+
+    const reporte = await recoverApplies({ ...caso.deps, politicaDeConflictos: 'bloquear' });
+
+    expect(reporte.blocked).toBe(1);
+    expect(dec.decode(caso.files.get(PATH))).toBe('edición posterior al crash\n');
+  });
+
+  it('una carpeta verificada a medio aplicar se completa con mkdirp', async () => {
+    const caso = armarCaso({ local: 'x\n', remoto: 'y\n' });
+    await caso.store.putIntent({
+      intentId: 'crash-carpeta-1',
+      pathId: PATH_ID,
+      rev: 6,
+      blobId: '',
+      state: 'verified',
+      path: 'carpeta-nueva',
+      kind: 'folder',
+      contentHash: null,
+      createdAt: Date.now(),
+    });
+
+    const reporte = await recoverApplies(caso.deps);
+
+    expect(reporte.completed).toBe(1);
+    expect(caso.dirs.has('carpeta-nueva')).toBe(true);
+  });
+});

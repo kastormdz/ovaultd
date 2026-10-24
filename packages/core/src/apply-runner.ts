@@ -622,6 +622,34 @@ export async function recoverApplies(deps: ApplyDeps): Promise<RecoveryReport> {
       continue;
     }
 
+    // Una carpeta verificada no tiene temporal ni hash: se completa con `mkdirp`,
+    // conservando lo que ocupe el camino (la misma política que el guard normal).
+    if (intent.kind === 'folder') {
+      if (!intent.path) {
+        await store.putIntent({ ...intent, state: 'blocked', reason: 'carpeta sin path' });
+        reporte.blocked += 1;
+        continue;
+      }
+      const ocupante = await port.stat(intent.path).catch(() => null);
+      if (ocupante?.isFile) {
+        const copia = await conservarLocalComoCopia(deps, intent.path);
+        if (copia === null) {
+          await store.putIntent({
+            ...intent,
+            state: 'blocked',
+            reason: 'carpeta: no se pudo conservar el archivo que ocupa el camino',
+          });
+          reporte.blocked += 1;
+          continue;
+        }
+        await port.unlink(intent.path).catch(() => undefined);
+      }
+      await port.mkdirp(intent.path);
+      await commitDesdeIntento(deps, intent);
+      reporte.completed += 1;
+      continue;
+    }
+
     // state === 'verified'
     if (!intent.tempName || !intent.path || !intent.contentHash) {
       await store.putIntent({ ...intent, state: 'blocked', reason: 'intención verificada incompleta' });
@@ -658,6 +686,25 @@ export async function recoverApplies(deps: ApplyDeps): Promise<RecoveryReport> {
           ? base === null
           : base?.contentHash != null && hashDestino === base.contentHash;
       if (!destinoOk) {
+        // La política del recovery es la MISMA que la del guard. Antes bloqueaba siempre,
+        // aunque el default fuera `conservar`: el archivo temporal quedaba huérfano y el
+        // device no cerraba la intención hasta que un humano la mirara.
+        if (destino === null) {
+          // Se borró después del crash: no hay nada que pisar.
+          await port.rename(intent.tempName, intent.path);
+          await commitDesdeIntento(deps, intent);
+          reporte.completed += 1;
+          continue;
+        }
+        if ((deps.politicaDeConflictos ?? 'conservar') === 'conservar') {
+          const copia = await conservarLocalComoCopia(deps, intent.path);
+          if (copia !== null) {
+            await port.rename(intent.tempName, intent.path);
+            await commitDesdeIntento(deps, intent);
+            reporte.completed += 1;
+            continue;
+          }
+        }
         await store.putIntent({ ...intent, state: 'blocked', reason: 'destino con cambios locales: no se pisa' });
         reporte.blocked += 1;
         continue;

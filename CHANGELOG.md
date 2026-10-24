@@ -149,6 +149,21 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y e
   responden como `error` y la sesión sigue; sólo `unauthorized` (credenciales) e
   `internal` (estado en duda) cierran. El `hello` sí cierra en cualquier error.
 
+## [0.2.23] — 2026-10-24
+
+### Fixed
+
+- **La recuperación usa la misma política que el guard (cierra la Fase B).** Una intención
+  que quedó `verified` tras un crash ahora, si el destino cambió, se resuelve como el flujo
+  normal: con `conservar` el local va a una copia y la intención se completa; con `bloquear`
+  no se pisa. Antes bloqueaba siempre, dejaba el temporal huérfano y el device no cerraba la
+  intención hasta que un humano la mirara.
+- **Una carpeta a medio aplicar se completa.** El recovery de un intent `folder` caía en
+  "intención verificada incompleta" (no tiene `contentHash`): ahora hace `mkdirp`, conservando
+  lo que ocupe el camino.
+- **Un destino borrado después del crash ya no bloquea**: se publica el temporal (no hay nada
+  que pisar), igual que el guard.
+
 ## [0.2.22] — 2026-10-24
 
 ### Fixed
