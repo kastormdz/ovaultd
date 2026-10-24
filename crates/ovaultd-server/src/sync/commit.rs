@@ -424,6 +424,16 @@ pub async fn commit_batch(
 
     let mut tx = pool.begin().await?;
 
+    // Tomar el write lock ANTES de leer nada. sqlx abre las transacciones de SQLite en modo
+    // deferred: dos commits concurrentes leían el mismo head, los dos pasaban el chequeo de
+    // `expected_rev` y el perdedor terminaba en 500 (PK de `batches` o BUSY_SNAPSHOT, que el
+    // busy_timeout no reintenta). Un UPDATE no-op serializa los commits acá; el segundo
+    // espera (busy_timeout) y cuando entra ve el head que dejó el primero.
+    sqlx::query("UPDATE vaults SET head_rev = head_rev WHERE id = ?")
+        .bind(vault_id)
+        .execute(&mut *tx)
+        .await?;
+
     for op in &ops {
         if let Some(blob_id) = op.blob_id {
             if !crate::storage::blob_registrado(&mut *tx, vault_id, &blob_id).await? {
@@ -433,7 +443,13 @@ pub async fn commit_batch(
     }
 
     let expected_rev = checked_i64(batch.expected_rev)?;
-    let current_head = vault.head_rev;
+
+    // El head se relee DENTRO de la transacción (ya con el lock): la foto de `vault` se
+    // tomó antes de esperar el lock y puede estar vieja.
+    let current_head: i64 = sqlx::query_scalar("SELECT head_rev FROM vaults WHERE id = ?")
+        .bind(vault_id)
+        .fetch_one(&mut *tx)
+        .await?;
 
     if expected_rev != current_head {
         return Err(ServerError::Conflict {

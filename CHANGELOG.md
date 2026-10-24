@@ -131,6 +131,24 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y e
   `-180`, `0`, `330`, `-1440` y los fuera de rango. Los literales de `Config` de los
   tests no probaban el parseo: por eso el bug pasó los gates.
 
+## [0.2.18] — 2026-10-24
+
+### Fixed
+
+- **El CAS perdido llega como `conflict`, no como 500.** El server nunca emitía
+  `{"t":"conflict"}`: un `expected_rev` viejo salía como `error/internal` y **cerraba el
+  socket**, así que el cliente abortaba el pull→push entero y una escritura concurrente de
+  otro device congelaba la sincronización. Ahora responde `conflict` con
+  `path_id`/`base_rev`/`server_rev`/`client_rev` (la spec) y la conexión sigue viva.
+- **`expected_rev` se valida dentro de la transacción.** La transacción toma el write lock
+  al abrir (un `UPDATE` no-op) y relee el head adentro: dos commits concurrentes ya no
+  leen la misma foto, y el perdedor recibe `conflict` en vez de chocar con la PK de
+  `batches` o con `BUSY_SNAPSHOT`. Test con `tokio::join!`: uno gana, el otro es
+  `Conflict`, y no quedan filas a medias.
+- **Errores no fatales no cortan el socket.** `bad_request`, `not_found` y cuota se
+  responden como `error` y la sesión sigue; sólo `unauthorized` (credenciales) e
+  `internal` (estado en duda) cierran. El `hello` sí cierra en cualquier error.
+
 ## [Unreleased]
 
 ### Security

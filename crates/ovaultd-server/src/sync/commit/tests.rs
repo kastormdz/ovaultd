@@ -1116,3 +1116,54 @@ async fn move_mas_edit_en_una_revision_conserva_el_origen_borrado(
 // No hay en este archivo ningún INSERT manual en `revisions`; las filas de
 // `revisions` se crean únicamente mediante `commit.rs`, que ya incluye
 // `operation_id` con el mismo formato que `batches.operation_id`.
+
+#[tokio::test]
+async fn dos_commits_concurrentes_uno_gana_y_el_otro_es_conflict(
+) -> std::result::Result<(), Box<dyn std::error::Error>> {
+    let context = TestContext::new().await?;
+    let primero = blob(0x03);
+    let segundo = blob(0x04);
+    context.insert_blob(primero, 10).await?;
+    context.insert_blob(segundo, 10).await?;
+
+    // Los dos construyen sobre el mismo head: es la carrera real de dos devices.
+    let a = batch(
+        "op-carrera-a",
+        0,
+        context.epoch,
+        vec![add_op(path(0x10), primero)],
+    );
+    let b = batch(
+        "op-carrera-b",
+        0,
+        context.epoch,
+        vec![add_op(path(0x11), segundo)],
+    );
+
+    let (ra, rb) = tokio::join!(
+        commit_batch(&context.pool, context.vault_id, context.device_id, &a),
+        commit_batch(&context.pool, context.vault_id, context.device_id, &b),
+    );
+
+    let ganadores = usize::from(ra.is_ok()) + usize::from(rb.is_ok());
+    assert_eq!(
+        ganadores, 1,
+        "exactamente uno tiene que ganar la carrera: {ra:?} / {rb:?}"
+    );
+
+    let perdedor = if ra.is_err() { &ra } else { &rb };
+    assert!(
+        matches!(perdedor, Err(ServerError::Conflict { .. })),
+        "el perdedor tiene que recibir Conflict, nunca un 500: {perdedor:?}"
+    );
+
+    let filas: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM revisions WHERE vault_id = ? AND rev = 1",
+    )
+    .bind(context.vault_id)
+    .fetch_one(&context.pool)
+    .await?;
+    assert_eq!(filas, 1, "el perdedor no puede dejar filas a medias");
+
+    Ok(())
+}
