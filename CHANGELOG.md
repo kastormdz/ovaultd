@@ -149,6 +149,20 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y e
   responden como `error` y la sesión sigue; sólo `unauthorized` (credenciales) e
   `internal` (estado en duda) cierran. El `hello` sí cierra en cualquier error.
 
+## [0.2.24] — 2026-10-24
+
+### Fixed
+
+- **El panel ya no puede quedarse sin admins.** El conteo de admins activos vivía en un
+  `SELECT` aparte y la decisión se tomaba después: dos peticiones simultáneas leían `COUNT = 2`,
+  las dos pasaban el chequeo y el servidor quedaba con cero admins (sólo recuperable por
+  consola). Ahora el conteo va DENTRO del `UPDATE` y se decide por `rows_affected`: la segunda
+  petición ve el estado ya commiteado y rebota con el mensaje del último admin.
+- **`ovaultd-admin create-account --role admin`**: la consola puede crear un admin, que es la
+  vía de recuperación si el panel quedó sin ninguno. Antes sólo creaba rol `user`.
+- Un admin **deshabilitado** se puede degradar (no cuenta como activo) y deshabilitar a un
+  usuario común nunca se bloquea por el conteo de admins.
+
 ## [0.2.23] — 2026-10-24
 
 ### Fixed

@@ -188,3 +188,21 @@ Cubre: crash después del temporal / fsync / publicación (el blob queda huérfa
 archivo visible), ACK perdido que no duplica revisión, y un **SIGABRT real del binario a
 mitad de un PUT** con verificación desde afuera (base íntegra + subida completada por un
 proceso nuevo).
+
+## Panel sin admins (recuperación)
+
+El servidor nunca deja el panel sin admins: degradar o deshabilitar al último rebota con 409
+(el conteo va dentro del `UPDATE`, no en un `SELECT` previo). Si por un restore viejo o una
+edición manual el panel no tiene a nadie con rol `admin`:
+
+```bash
+# 1) Mirar quién hay (nada de esto descifra contenido)
+docker exec ovaultd-ovaultd-1 ovaultd-admin --db /data/metadata.db inspect
+
+# 2) Crear un admin nuevo (password por stdin, nunca por argumento)
+printf '%s\n' '<password>' | docker compose exec -T ovaultd \
+  ovaultd-admin create-account --email vos@ejemplo.com --role admin
+```
+
+Si la cuenta ya existe y sólo perdió el rol, se promueve en el panel desde otra cuenta admin
+o, como último recurso, con SQL directo sobre `accounts.role`.

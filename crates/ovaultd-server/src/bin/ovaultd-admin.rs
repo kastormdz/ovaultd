@@ -29,6 +29,9 @@ enum Comando {
     CreateAccount {
         #[arg(long)]
         email: String,
+        /// Rol de la cuenta. `admin` es la forma de recuperar el panel si no queda ninguno.
+        #[arg(long, value_enum, default_value_t = Rol::User)]
+        role: Rol,
     },
     /// Comprueba que la base responde.
     Health,
@@ -57,7 +60,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let pool = db::connect(&cli.db).await?;
 
     match cli.comando {
-        Comando::CreateAccount { email } => create_account(&pool, &email, &cli.db).await?,
+        Comando::CreateAccount { email, role } => create_account(&pool, &email, &cli.db, role).await?,
         Comando::Health => health(&pool, &cli.db).await?,
         Comando::Inspect => inspect(&pool).await?,
         Comando::Gc {
@@ -71,10 +74,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+#[derive(Clone, Copy, Debug, clap::ValueEnum)]
+enum Rol {
+    User,
+    Admin,
+}
+
 async fn create_account(
     pool: &SqlitePool,
     email: &str,
     ruta_db: &str,
+    rol: Rol,
 ) -> Result<(), Box<dyn std::error::Error>> {
     eprintln!("Password de la cuenta {email} (se lee de stdin):");
     let mut linea = String::new();
@@ -87,7 +97,23 @@ async fn create_account(
     db::migrate(pool).await?;
     let cuenta = auth::crear_cuenta(pool, email, password).await?;
 
-    println!("cuenta creada: #{} {} (db {})", cuenta.id, cuenta.email, ruta_db);
+    if matches!(rol, Rol::Admin) {
+        sqlx::query("UPDATE accounts SET role = 'admin' WHERE id = ?")
+            .bind(cuenta.id)
+            .execute(pool)
+            .await?;
+    }
+
+    println!(
+        "cuenta creada: #{} {} (rol {}, db {})",
+        cuenta.id,
+        cuenta.email,
+        match rol {
+            Rol::Admin => "admin",
+            Rol::User => "user",
+        },
+        ruta_db
+    );
     Ok(())
 }
 

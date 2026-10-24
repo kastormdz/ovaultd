@@ -320,6 +320,48 @@ struct FormAccion {
     accion: String,
 }
 
+/// Degrada a `user` sólo si queda otro admin activo. `false` = era el último.
+///
+/// El conteo vive DENTRO del `UPDATE`: SQLite tiene un solo escritor por vez, así que la
+/// sentencia se evalúa contra el estado ya commiteado por la otra petición. Un `SELECT`
+/// previo (como había antes) dejaba una ventana donde dos peticiones leían `COUNT = 2` y
+/// las dos se aplicaban, dejando el panel sin admins.
+pub async fn degradar_si_no_es_ultimo(
+    pool: &sqlx::SqlitePool,
+    account_id: i64,
+) -> sqlx::Result<bool> {
+    let filas = sqlx::query(
+        "UPDATE accounts SET role = 'user'
+          WHERE id = ?
+            AND (role <> 'admin' OR disabled_at IS NOT NULL
+                 OR (SELECT COUNT(*) FROM accounts
+                      WHERE role = 'admin' AND disabled_at IS NULL) > 1)",
+    )
+    .bind(account_id)
+    .execute(pool)
+    .await?;
+    Ok(filas.rows_affected() > 0)
+}
+
+/// Misma invariante para deshabilitar. `false` = era el último admin activo.
+pub async fn deshabilitar_si_no_es_ultimo(
+    pool: &sqlx::SqlitePool,
+    account_id: i64,
+) -> sqlx::Result<bool> {
+    let filas = sqlx::query(
+        "UPDATE accounts SET disabled_at = datetime('now')
+          WHERE id = ?
+            AND (disabled_at IS NOT NULL
+                 OR role <> 'admin'
+                 OR (SELECT COUNT(*) FROM accounts
+                      WHERE role = 'admin' AND disabled_at IS NULL) > 1)",
+    )
+    .bind(account_id)
+    .execute(pool)
+    .await?;
+    Ok(filas.rows_affected() > 0)
+}
+
 async fn cuentas_accion(
     State(estado): State<EstadoServidor>,
     headers: HeaderMap,
@@ -350,33 +392,21 @@ async fn cuentas_accion(
         Err(error) => return panel::error_interno("cuentas_accion_target", error),
     };
 
-    let admins_activos: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM accounts WHERE role = 'admin' AND disabled_at IS NULL",
-    )
-    .fetch_one(&estado.pool)
-    .await
-    .unwrap_or(0);
-
-    let es_ultimo_admin = target.2 == "admin" && target.3.is_none() && admins_activos <= 1;
     let soy_yo = target.0 == sesion.account_id;
 
     let resultado: std::result::Result<&str, String> = match formulario.accion.as_str() {
         "deshabilitar" => {
             if soy_yo {
                 Err(t.msg_no_podes_deshabilitarte.to_owned())
-            } else if es_ultimo_admin {
-                Err(t.msg_ultimo_admin.to_owned())
             } else {
-                sqlx::query("UPDATE accounts SET disabled_at = datetime('now') WHERE id = ?")
-                    .bind(target.0)
-                    .execute(&estado.pool)
-                    .await
-                    .map(|_| t.msg_cuenta_deshabilitada)
-                    .map_err(|error| error.to_string())
-                    .map_err(|error| {
-                        let _ = error;
-                        t.msg_error_deshabilitar.to_owned()
-                    })
+                // El conteo vive DENTRO del UPDATE: dos peticiones concurrentes ya no pueden
+                // deshabilitar a los dos últimos admins (cada una decide con el estado que
+                // encuentra al escribir, no con el que leyó antes).
+                match deshabilitar_si_no_es_ultimo(&estado.pool, target.0).await {
+                    Ok(false) => Err(t.msg_ultimo_admin.to_owned()),
+                    Ok(true) => Ok(t.msg_cuenta_deshabilitada),
+                    Err(_) => Err(t.msg_error_deshabilitar.to_owned()),
+                }
             }
         }
         "habilitar" => sqlx::query("UPDATE accounts SET disabled_at = NULL WHERE id = ?")
@@ -392,15 +422,12 @@ async fn cuentas_accion(
             .map(|_| t.msg_rol_admin)
             .map_err(|_| t.msg_error_promover.to_owned()),
         "degradar" => {
-            if es_ultimo_admin {
-                Err(t.msg_ultimo_admin.to_owned())
-            } else {
-                sqlx::query("UPDATE accounts SET role = 'user' WHERE id = ?")
-                    .bind(target.0)
-                    .execute(&estado.pool)
-                    .await
-                    .map(|_| t.msg_rol_user)
-                    .map_err(|_| t.msg_error_degradar.to_owned())
+            // Misma carrera que al deshabilitar: degradar a los dos últimos admins a la vez
+            // dejaba el panel sin nadie que pueda entrar.
+            match degradar_si_no_es_ultimo(&estado.pool, target.0).await {
+                Ok(false) => Err(t.msg_ultimo_admin.to_owned()),
+                Ok(true) => Ok(t.msg_rol_user),
+                Err(_) => Err(t.msg_error_degradar.to_owned()),
             }
         }
         "reset" => {

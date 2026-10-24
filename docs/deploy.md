@@ -51,7 +51,15 @@ crean con `ovaultd-admin`, que viene dentro de la imagen:
 ```bash
 printf '%s\n' '<password>' | docker compose exec -T ovaultd \
   ovaultd-admin create-account --email vos@ejemplo.com
+# Ya como admin (vía de recuperación del panel):
+printf '%s\n' '<password>' | docker compose exec -T ovaultd \
+  ovaultd-admin create-account --email vos@ejemplo.com --role admin
 ```
+
+El **último admin no se puede degradar ni deshabilitar**, ni desde el panel ni desde
+`ovaultd-admin`: la comprobación vive dentro del `UPDATE` (una sola sentencia, el escritor
+único de SQLite), así que dos peticiones simultáneas tampoco pueden dejarlo en cero. Si alguna
+vez el panel quedara sin admins, `create-account --role admin` es la puerta de vuelta.
 
 La password se lee siempre de stdin (nunca por argumento). `ovaultd-admin` también
 responde `health` (SELECT 1 contra la base) e `inspect` (conteos y tamaños; nada de esto

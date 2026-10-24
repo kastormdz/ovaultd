@@ -1219,3 +1219,52 @@ async fn devices_muestra_la_version_del_cliente() -> Result<()> {
 
     Ok(())
 }
+
+/// La invariante del último admin no depende de quién lea primero: el conteo viaja DENTRO
+/// del `UPDATE`, así que la segunda operación ve el estado ya commiteado y rebota.
+///
+/// Nota: este test NO reproduce la intercalación de dos peticiones HTTP (las dos leen y
+/// escriben en el mismo `UPDATE`, no hay ventana entre un SELECT y un UPDATE). Fija el
+/// contrato de la operación, que es lo que el handler usa.
+#[tokio::test]
+async fn la_invariante_del_ultimo_admin_se_mantiene() -> Result<()> {
+    use ovaultd_server::admin::cuentas::{degradar_si_no_es_ultimo, deshabilitar_si_no_es_ultimo};
+
+    let contexto = TestContext::new().await?;
+    hacer_admin(&contexto).await?;
+
+    let admin_a: i64 = sqlx::query_scalar("SELECT id FROM accounts WHERE email = ?")
+        .bind(EMAIL)
+        .fetch_one(&contexto.pool)
+        .await?;
+    sqlx::query(
+        "INSERT INTO accounts (email, password_hash, role) VALUES ('segundo@example.com', 'x', 'admin')",
+    )
+    .execute(&contexto.pool)
+    .await?;
+    let admin_b: i64 =
+        sqlx::query_scalar("SELECT id FROM accounts WHERE email = 'segundo@example.com'")
+            .fetch_one(&contexto.pool)
+            .await?;
+
+    // Dos peticiones, una atrás de otra: la primera degrada, la segunda rebota.
+    assert!(degradar_si_no_es_ultimo(&contexto.pool, admin_a).await?);
+    assert!(!degradar_si_no_es_ultimo(&contexto.pool, admin_b).await?);
+
+    let activos: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM accounts WHERE role = 'admin' AND disabled_at IS NULL")
+            .fetch_one(&contexto.pool)
+            .await?;
+    assert_eq!(activos, 1, "nunca puede quedar en cero");
+
+    // Y el que queda tampoco se puede deshabilitar.
+    assert!(!deshabilitar_si_no_es_ultimo(&contexto.pool, admin_b).await?);
+    let deshabilitado: Option<String> =
+        sqlx::query_scalar("SELECT disabled_at FROM accounts WHERE id = ?")
+            .bind(admin_b)
+            .fetch_one(&contexto.pool)
+            .await?;
+    assert!(deshabilitado.is_none());
+
+    Ok(())
+}
