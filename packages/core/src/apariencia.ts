@@ -54,6 +54,17 @@ export function proyeccionDeApariencia(texto: string): string {
 
 
 /**
+ * Bytes canónicos para hashear. Un cambio de MODO claro/oscuro cambia el archivo pero no lo
+ * que se comparte: si el hash sale del contenido crudo, cada device que cambia de modo al
+ * anochecer publica una revisión que el merge después descarta. El hash de apariencia sale
+ * de la proyección, así el diff no ve un cambio que no existe.
+ */
+export function bytesParaHash(path: string, bytes: Uint8Array): Uint8Array {
+  if (!esApariencia(path)) return bytes;
+  return CODIFICADOR.encode(proyeccionDeApariencia(DECODIFICADOR.decode(bytes)));
+}
+
+/**
  * Merge por campo: `{...local, ...portablesDelRemoto}`. Un campo portable solo se toma
  * del remoto si el remoto lo CAMBIÓ respecto de la base — así un cambio local del tema no
  * se pisa con el remoto viejo. El resto del archivo (modo, fuentes, claves que no

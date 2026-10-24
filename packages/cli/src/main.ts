@@ -18,6 +18,8 @@ const VERSION_DEL_CLIENTE = `cli ${(createRequire(import.meta.url)('../package.j
 
 import { Command } from 'commander';
 
+import { confirmarAccion, registrarAccion } from './acciones.js';
+
 import { backoffMs, diffDeTextos, validarRutaDeVault, type RevisionResumen } from '@ovaultd/core';
 import {
   borrarDelVault,
@@ -482,10 +484,15 @@ programa
 
         const intervaloSeg = Math.max(1, Number.parseInt(opciones.interval, 10) || 5);
         let parar = false;
-        process.once('SIGINT', () => {
-          parar = true;
-          console.log('\nSIGINT: terminando la pasada y saliendo…');
-        });
+        // SIGTERM lo manda systemd al parar/reiniciar el servicio. Sin handler, el proceso lo
+        // ignora, se come el TimeoutStopSec completo y muere por SIGKILL dejando el unit en
+        // `failed`. SIGINT (Ctrl-C) y SIGTERM comparten el mismo camino de salida limpia.
+        for (const senal of ['SIGINT', 'SIGTERM'] as const) {
+          process.once(senal, () => {
+            parar = true;
+            console.log(`\n${senal}: terminando la pasada y saliendo…`);
+          });
+        }
         console.log(`modo continuo: cada ~${intervaloSeg} s (Ctrl-C para salir)`);
 
         let fallas = 0;
@@ -611,6 +618,9 @@ programa
           empujadas: number;
           headRev: number;
         };
+        registrarAccion(
+          `prune-remote del=${plan.huerfanos.length} publicados=${empujado.empujadas}`,
+        );
         if (opciones.json) {
           console.log(JSON.stringify({ ...aplicado, publicados: empujado.empujadas, rev: empujado.headRev }));
         } else {
@@ -1009,7 +1019,8 @@ programa
   .command('unlink <vault>')
   .description('desvincula la carpeta local (borra el estado local; el server no se toca)')
   .option('--purge', 'borra además el perfil del runtime (IndexedDB/outbox local)')
-  .action((vaultTexto: string, opciones: { purge?: boolean }) => {
+  .option('--yes', 'no preguntar (para scripts)')
+  .action(async (vaultTexto: string, opciones: { purge?: boolean; yes?: boolean }) => {
     const sesion = exigirSesion();
     const vault = Number.parseInt(vaultTexto, 10);
     if (!Number.isInteger(vault) || vault <= 0) throw new Error(`vault inválido: ${vaultTexto}`);
@@ -1017,7 +1028,18 @@ programa
     const estado = readVaultState(sesion.server, vault);
     if (!estado) throw new Error(`no hay estado local del vault #${vault} para ${sesion.server}`);
 
+    // `--purge` descarta la outbox pendiente: eso NO se deshace. El `unlink` solo también
+    // pierde el checkpoint (el próximo sync baja todo de nuevo), así que se confirma igual.
+    const aviso = opciones.purge
+      ? `Vas a desvincular el vault #${vault} «${estado.name}» y BORRAR su perfil local (outbox y checkpoint).`
+      : `Vas a desvincular el vault #${vault} «${estado.name}» (el próximo sync baja todo de nuevo).`;
+    if (!(await confirmarAccion(aviso, opciones))) {
+      console.log('cancelado: no se tocó nada');
+      return;
+    }
+
     removeVaultState(sesion.server, vault);
+    registrarAccion(`unlink vault=${vault} server=${sesion.server} purge=${opciones.purge === true}`);
     console.log(`vault #${vault} «${estado.name}» desvinculado${estado.dir ? ` de ${estado.dir}` : ''}`);
     if (opciones.purge) {
       purgarRuntimeDir(sesion.server, vault);

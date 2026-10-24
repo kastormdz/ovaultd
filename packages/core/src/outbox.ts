@@ -14,6 +14,7 @@
 import { bytesToUuid, cryptoProvider } from '@ovaultd/crypto';
 import { b64Decode, textEncoder, toHex } from '@ovaultd/protocol';
 
+import { bytesParaHash } from './apariencia.js';
 import type { OutboxEntry } from './StateStore.js';
 
 export interface EnqueueRequest {
@@ -95,7 +96,7 @@ export function prepareOutboxEntry(req: EnqueueRequest): OutboxEntry {
   let snapshot: Blob | null = null;
   if (req.contentB64 != null) {
     const bytes = b64Decode(req.contentB64);
-    const real = toHex(cryptoProvider().sha256(bytes));
+    const real = toHex(cryptoProvider().sha256(bytesParaHash(req.path, bytes)));
     if (real !== req.contentHash) {
       throw new Error(`el hash declarado no coincide con el contenido (declarado ${req.contentHash}, real ${real})`);
     }

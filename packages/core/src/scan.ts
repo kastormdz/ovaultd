@@ -20,6 +20,7 @@ import { cryptoProvider, pathId as calcularPathId, type SubKeys } from '@ovaultd
 import { toHex } from '@ovaultd/protocol';
 
 import type { FileSystemPort, VaultDirEntry, VaultStat } from './file-port.js';
+import { bytesParaHash } from './apariencia.js';
 import { estaExcluido } from './SyncFilter.js';
 import type { StateStore } from './StateStore.js';
 
@@ -157,7 +158,7 @@ export async function escanearVault(
     salida.push({
       path: rel,
       pathId: toHex(calcularPathId(keys, rel)),
-      contentHash: toHex(cryptoProvider().sha256(bytes)),
+      contentHash: toHex(cryptoProvider().sha256(bytesParaHash(rel, bytes))),
       size: bytes.length,
       mtimeMs: stat.mtimeMs,
     });

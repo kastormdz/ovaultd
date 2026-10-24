@@ -1374,3 +1374,86 @@ async fn higiene_de_panel() -> Result<()> {
 
     Ok(())
 }
+
+/// C1 (deuda): el reset es TODO O NADA. El intento anterior usaba un trigger sobre
+/// `device_tokens`, que en este arnés quedaba en 0 filas y nunca disparaba. Acá la cuenta
+/// tiene una sesión web real, así el `DELETE FROM sessions` (la tercera escritura de la tx)
+/// se ejecuta y el trigger lo aborta: si la password quedara cambiada, el UPDATE de accounts
+/// no se estaría revirtiendo.
+#[tokio::test]
+async fn c1_el_reset_es_todo_o_nada() -> Result<()> {
+    let contexto = TestContext::new().await?;
+    auth::crear_cuenta(&contexto.pool, "atomo@ejemplo.com", PASSWORD).await?;
+    hacer_admin(&contexto).await?;
+    let cookie = login(&contexto).await?;
+    let csrf = csrf_de_la_ultima_sesion(&contexto).await?;
+
+    let cuenta_id: i64 = sqlx::query_scalar("SELECT id FROM accounts WHERE email = ?")
+        .bind("atomo@ejemplo.com")
+        .fetch_one(&contexto.pool)
+        .await?;
+    let hash_antes: String = sqlx::query_scalar("SELECT password_hash FROM accounts WHERE id = ?")
+        .bind(cuenta_id)
+        .fetch_one(&contexto.pool)
+        .await?;
+
+    // Una sesión del PANEL de ESA cuenta: es la tabla que borra el reset. Sin filas afectadas
+    // el `DELETE` no dispara el trigger por fila y el test no probaría nada.
+    ovaultd_server::admin::sesiones::crear_sesion(&contexto.pool, cuenta_id, None, Some("test"))
+        .await?;
+    let sesiones: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sessions WHERE account_id = ?")
+        .bind(cuenta_id)
+        .fetch_one(&contexto.pool)
+        .await?;
+    assert!(sesiones > 0, "la cuenta tiene que tener una sesión para que el trigger dispare");
+
+    sqlx::query(
+        "CREATE TRIGGER falla_revocar BEFORE DELETE ON sessions
+         BEGIN SELECT RAISE(ABORT, 'falla inyectada'); END",
+    )
+    .execute(&contexto.pool)
+    .await?;
+
+    // Generar el link y consumirlo: el POST tiene que fallar (500) y no dejar rastro.
+    let resp = contexto
+        .request(post_form_con_cookie(
+            "/admin/cuentas/accion",
+            &format!("csrf={csrf}&id={cuenta_id}&accion=reset"),
+            &cookie,
+        )?)
+        .await?;
+    assert_eq!(resp.status(), StatusCode::OK);
+    let token = token_del_link(&cuerpo(resp).await?).ok_or("el link de reset viene en el HTML")?;
+
+    let resp = contexto
+        .request(post_form(
+            "/reset",
+            &format!("token={token}&nueva=password-nueva-99&repetir=password-nueva-99"),
+        )?)
+        .await?;
+    assert_eq!(
+        resp.status(),
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "la tx aborta y el panel lo reporta"
+    );
+
+    let hash_despues: String = sqlx::query_scalar("SELECT password_hash FROM accounts WHERE id = ?")
+        .bind(cuenta_id)
+        .fetch_one(&contexto.pool)
+        .await?;
+    assert_eq!(hash_despues, hash_antes, "la password NO se toca si la tx falla");
+
+    let usado: Option<String> =
+        sqlx::query_scalar("SELECT used_at FROM password_resets ORDER BY id DESC LIMIT 1")
+            .fetch_one(&contexto.pool)
+            .await?;
+    assert!(usado.is_none(), "el link sigue sin usar: no se quemó a medias");
+
+    let sesiones_despues: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sessions WHERE account_id = ?")
+        .bind(cuenta_id)
+        .fetch_one(&contexto.pool)
+        .await?;
+    assert_eq!(sesiones_despues, sesiones, "las sesiones tampoco se borraron");
+
+    Ok(())
+}

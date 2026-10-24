@@ -17,6 +17,7 @@ import { describe, expect, it } from 'vitest';
 import { blobId, cryptoProvider, deriveSubkeys, encryptBlob, randomSalt, randomVaultKey } from '@ovaultd/crypto';
 import { toHex } from '@ovaultd/protocol';
 
+import { bytesParaHash } from '../src/apariencia.js';
 import { applyRevision, pathDeCopiaDeConflicto, recoverApplies, type ApplyDeps, type ApplyRevision } from '../src/apply-runner.js';
 import type { FileSystemPort } from '../src/file-port.js';
 import type { BaseEntry, IndexEntry, IntentEntry, StateStore } from '../src/StateStore.js';
@@ -200,7 +201,8 @@ function armarCaso(opciones: {
     pathId,
     rev: 3,
     blobId: blobIdBase,
-    contentHash: sha256Hex(cod.encode(baseTexto)),
+    // El hash de la base sale de la MISMA normalización que el scan (apariencia → proyección).
+    contentHash: sha256Hex(bytesParaHash(ruta, cod.encode(baseTexto))),
   });
 
   const archivos = opciones.sinLocal
@@ -580,10 +582,10 @@ describe('appearance.json: el modo es del dispositivo', () => {
     // vuelve a subir el tema en cada ciclo).
     const publicado = dec.decode(caso.files.get(RUTA));
     expect(caso.base.get(caso.revision.pathId)?.contentHash).toBe(
-      sha256Hex(cod.encode(publicado)),
+      sha256Hex(bytesParaHash(RUTA, cod.encode(publicado))),
     );
     expect(caso.index.get(caso.revision.pathId)?.contentHash).toBe(
-      sha256Hex(cod.encode(publicado)),
+      sha256Hex(bytesParaHash(RUTA, cod.encode(publicado))),
     );
   });
 });

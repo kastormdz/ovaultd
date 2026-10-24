@@ -149,6 +149,37 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y e
   responden como `error` y la sesión sigue; sólo `unauthorized` (credenciales) e
   `internal` (estado en duda) cierran. El `hello` sí cierra en cualquier error.
 
+## [0.3.2] — 2026-10-24
+
+A2 del plan: los restos que quedaban después de las fases A–D.
+
+### Fixed
+
+- **El hash de `appearance.json` sale de la proyección, no del contenido crudo.** Cualquier
+  cambio de modo claro/oscuro (que Obsidian hace solo al anochecer) generaba una revisión que
+  el merge después descartaba. Ahora `bytesParaHash()` normaliza en el scan y en todos los
+  guards del apply, así el diff no ve un cambio que no existe. Un cambio de tema o de
+  snippets sigue publicando.
+- **`unlink` pide confirmación** (y exige `--yes` si no hay terminal) y **deja bitácora** en
+  `~/.config/ovaultd/actividad.log` (0600). Con `--purge` además avisa que se descarta la
+  outbox. `prune-remote --yes` también queda registrado.
+
+### Tests
+
+- Corpus de merge por campo para `appearance.json` (10 casos: tema, modo, snippets, claves
+  desconocidas, JSON inválido, formato de salida).
+- **C1: el reset es todo o nada.** El intento anterior usaba un trigger sobre `device_tokens`
+  y en el arnés esa tabla tenía 0 filas: el trigger nunca disparaba (un test que no probaba
+  lo que decía). Ahora la cuenta tiene una sesión del panel real, el trigger aborta el
+  `DELETE FROM sessions` y se verifica que la password no cambió, que el link sigue sin usar
+  y que las sesiones quedan intactas.
+
+### Nota
+
+- El **puerto del runtime queda fijo** a propósito: `origin.txt` ata el IndexedDB al origin y
+  un puerto efímero arrancaría con un índice vacío. El riesgo de acceso local ya lo cubre el
+  token por sesión (`HEADER_BRIDGE`).
+
 ## [0.3.1] — 2026-10-24
 
 Fase D completa: higiene (sin cambios de wire ni de API).

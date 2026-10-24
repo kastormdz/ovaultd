@@ -39,6 +39,7 @@ import {
 } from '@ovaultd/protocol';
 
 import type { ApplyDeps } from './apply-runner.js';
+import { bytesParaHash } from './apariencia.js';
 import { prepareOutboxEntry } from './outbox.js';
 import { diffLocal, escanearVault } from './scan.js';
 import { SyncConflictError, type SyncConnection } from './SyncConnection.js';
@@ -271,7 +272,7 @@ export async function construirOp(
       throw new Error(`outbox ${entry.operationId}: sin snapshot recuperable`);
     }
     const plano = new Uint8Array(await entry.snapshot.arrayBuffer());
-    const real = toHex(cryptoProvider().sha256(plano));
+    const real = toHex(cryptoProvider().sha256(bytesParaHash(entry.path ?? '', plano)));
     if (real !== entry.snapshotHash) {
       throw new Error(
         `snapshot corrupto en ${entry.operationId} (declarado ${entry.snapshotHash}, real ${real})`,
