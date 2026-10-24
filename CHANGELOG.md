@@ -120,6 +120,17 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y e
   columna rotula la zona. Sin la variable se muestra UTC, explícito. La base sigue en UTC.
   La conversión es aritmética civil sin dependencias (la imagen no garantiza `tzdata`).
 
+## [0.2.17] — 2026-10-24
+
+### Fixed
+
+- **`OVAULTD_TZ_OFFSET_MINUTES=-180` tumbaba el arranque.** El lector de enteros de la
+  configuración exige `> 0`, y el huso es negativo a propósito: el server entraba en
+  restart loop con el valor correcto para Argentina (UTC-03:00). Ahora el huso usa un
+  lector con rango explícito (`-1440..1440`) y hay tests de `Config::construir` con
+  `-180`, `0`, `330`, `-1440` y los fuera de rango. Los literales de `Config` de los
+  tests no probaban el parseo: por eso el bug pasó los gates.
+
 ## [Unreleased]
 
 ### Security

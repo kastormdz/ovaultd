@@ -98,18 +98,8 @@ impl Config {
             24,
         )?;
 
-        let tz_offset_minutos = {
-            let minutos = leer_entero(&get, "OVAULTD_TZ_OFFSET_MINUTES", 0)?;
-            let minutos = i32::try_from(minutos).map_err(|_| {
-                ServerError::Invalid("OVAULTD_TZ_OFFSET_MINUTES fuera de rango".to_owned())
-            })?;
-            if !(-1440..=1440).contains(&minutos) {
-                return Err(ServerError::Invalid(
-                    "OVAULTD_TZ_OFFSET_MINUTES fuera de rango (-1440..1440)".to_owned(),
-                ));
-            }
-            minutos
-        };
+        let tz_offset_minutos =
+            leer_entero_en_rango(&get, "OVAULTD_TZ_OFFSET_MINUTES", 0, -1440, 1440)? as i32;
 
         let setup_token = valor(&get, "OVAULTD_SETUP_TOKEN");
 
@@ -203,6 +193,32 @@ where
     get(name).filter(|value| !value.trim().is_empty())
 }
 
+/// Entero con rango explícito. `leer_entero` exige > 0 y no sirve para valores que
+/// legítimamente son negativos (el huso del panel: -180 = UTC-03:00).
+fn leer_entero_en_rango<F>(
+    get: &F,
+    name: &str,
+    default: i64,
+    minimo: i64,
+    maximo: i64,
+) -> Result<i64>
+where
+    F: Fn(&str) -> Option<String>,
+{
+    let Some(value) = valor(get, name) else {
+        return Ok(default);
+    };
+    let parsed = value.parse::<i64>().map_err(|_| {
+        ServerError::Invalid(format!("{name} tiene un valor inválido: {value:?}"))
+    })?;
+    if parsed < minimo || parsed > maximo {
+        return Err(ServerError::Invalid(format!(
+            "{name} debe estar entre {minimo} y {maximo}; se recibió {parsed}"
+        )));
+    }
+    Ok(parsed)
+}
+
 fn leer_entero<F>(get: &F, name: &str, default: i64) -> Result<i64>
 where
     F: Fn(&str) -> Option<String>,
@@ -244,6 +260,30 @@ mod tests {
         assert_eq!(config.secure_cookies, ModoSecureCookies::Auto);
         // Seguro por defecto: sin borde declarado, los headers de un proxy NO se obedecen.
         assert!(!config.trust_proxy);
+    }
+
+    #[test]
+    fn el_huso_acepta_negativos_y_cero() {
+        // El bug que tumbó prod en 0.2.16: `leer_entero` exige > 0 y rechazaba -180.
+        for (valor, esperado) in [("-180", -180), ("0", 0), ("330", 330), ("-1440", -1440)] {
+            let config = Config::construir(|name| match name {
+                "OVAULTD_TZ_OFFSET_MINUTES" => Some(valor.to_owned()),
+                _ => None,
+            })
+            .unwrap_or_else(|error| panic!("{valor} tenía que ser válido: {error}"));
+            assert_eq!(config.tz_offset_minutos, esperado, "valor {valor}");
+        }
+    }
+
+    #[test]
+    fn el_huso_fuera_de_rango_falla() {
+        for valor in ["-1441", "1441", "abc"] {
+            let resultado = Config::construir(|name| match name {
+                "OVAULTD_TZ_OFFSET_MINUTES" => Some(valor.to_owned()),
+                _ => None,
+            });
+            assert!(resultado.is_err(), "{valor} tenía que fallar");
+        }
     }
 
     #[test]
