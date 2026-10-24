@@ -53,6 +53,10 @@ struct HelloMessage {
     vault: i64,
     device: i64,
     since: u64,
+    /// Versión del cliente (`0.2.34`, `cli 0.1.0`, …). Opcional: un cliente viejo no la
+    /// manda y el panel muestra "—". Se guarda recortada a 64 caracteres.
+    #[serde(default)]
+    app_version: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -229,6 +233,17 @@ impl Connection {
                 ErrorCode::Unauthorized,
                 "el device del hello no es el dispositivo autenticado",
             ));
+        }
+
+        if let Some(version) = hello.app_version.as_deref() {
+            let version: String = version.trim().chars().take(64).collect();
+            if !version.is_empty() {
+                let _ = sqlx::query("UPDATE devices SET app_version = ? WHERE id = ?")
+                    .bind(&version)
+                    .bind(device_id)
+                    .execute(&self.pool)
+                    .await;
+            }
         }
 
         resolve_vault(&self.pool, account_id, hello.vault)

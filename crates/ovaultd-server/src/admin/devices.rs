@@ -53,6 +53,7 @@ struct VistaDevice {
     cuenta: String,
     nombre: String,
     plataforma: String,
+    app_version: String,
     creado: String,
     ultima_actividad: Option<String>,
     revocado: bool,
@@ -78,6 +79,7 @@ struct FilaDevice {
     cuenta: String,
     nombre: String,
     plataforma: Option<String>,
+    app_version: Option<String>,
     creado: String,
     ultima_actividad: Option<String>,
     revocado: Option<String>,
@@ -115,6 +117,7 @@ async fn pintar(
     // y nunca usado) queda fuera de la lista por defecto; `?todos=1` lo muestra para
     // poder auditarlo o revocarlo. Dos literales: sqlx 0.9 exige SqlSafeStr.
     let por_defecto = "SELECT d.id, a.email AS cuenta, d.name AS nombre, d.platform AS plataforma,
+                d.app_version AS app_version,
                 d.created_at AS creado,
                 NULLIF(max(COALESCE((SELECT MAX(b.ts) FROM batches b WHERE b.device_id = d.id), ''), COALESCE(d.last_seen, '')), '') AS ultima_actividad,
                 d.revoked_at AS revocado,
@@ -129,6 +132,7 @@ async fn pintar(
          ORDER BY d.id DESC
          LIMIT ? OFFSET ?";
     let con_todos = "SELECT d.id, a.email AS cuenta, d.name AS nombre, d.platform AS plataforma,
+                d.app_version AS app_version,
                 d.created_at AS creado,
                 NULLIF(max(COALESCE((SELECT MAX(b.ts) FROM batches b WHERE b.device_id = d.id), ''), COALESCE(d.last_seen, '')), '') AS ultima_actividad,
                 d.revoked_at AS revocado,
@@ -175,6 +179,7 @@ async fn pintar(
             cuenta: fila.cuenta,
             nombre: fila.nombre,
             plataforma: fila.plataforma.unwrap_or_else(|| "—".to_owned()),
+            app_version: fila.app_version.unwrap_or_else(|| "—".to_owned()),
             creado: hora::hora_local(&fila.creado, desplazamiento),
             ultima_actividad: fila
                 .ultima_actividad

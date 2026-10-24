@@ -73,6 +73,8 @@ const exigirApply = (): { store: StateStore; keys: SubKeys } => {
 
 /** Conexión de sync abierta (sync.open), reutilizada por sync.pullOnce. */
 let syncConn: SyncConnection | null = null;
+/** Config dir del vault abierto (`.obsidian` o el custom): lo elige el cliente al abrir. */
+let syncConfigDir = '.obsidian';
 
 /** Material de firma del vault para el push (`sync.open` lo recibe del estado local). */
 let syncVaultMeta: { vaultUuid: Uint8Array; epoch: number } | null = null;
@@ -279,6 +281,10 @@ const handlers: Record<string, Handler> = {
       syncConn.close();
       syncConn = null;
     }
+    syncConfigDir =
+      typeof params.configDir === 'string' && params.configDir.trim() !== ''
+        ? params.configDir.trim()
+        : '.obsidian';
     const vaultUuid = typeof params.vaultUuid === 'string' ? b64Decode(params.vaultUuid) : null;
     if (!vaultUuid || vaultUuid.length !== 16) {
       throw new Error('sync.open: falta vaultUuid (16 B en base64, el del material del vault)');
@@ -289,6 +295,7 @@ const handlers: Record<string, Handler> = {
       vault: Number(params.vault),
       device: Number(params.device),
       keys,
+      appVersion: typeof params.appVersion === 'string' ? params.appVersion : undefined,
       // El HTTP del cliente pasa por el PUENTE (mismo origen que la página): el cache del
       // preflight CORS del navegador es por URL y cada blob tiene la suya, así que un PUT
       // directo pagaba un OPTIONS de ~40 ms por blob. El puente lo reenvía con node.
@@ -347,8 +354,16 @@ const handlers: Record<string, Handler> = {
     const { store, keys } = exigirApply();
     const port = new HttpFileSystemPort(globalThis.location.origin);
     const ilegibles = new Map<string, string>();
-    const entradas = await escanearVault(port, keys, '', undefined, undefined, ilegibles);
-    const diff = await diffLocal(store, entradas, ilegibles);
+    const entradas = await escanearVault(
+      port,
+      keys,
+      '',
+      undefined,
+      undefined,
+      ilegibles,
+      syncConfigDir,
+    );
+    const diff = await diffLocal(store, entradas, ilegibles, syncConfigDir);
     return {
       diff,
       entradas: entradas.map((entrada) => ({
@@ -374,7 +389,7 @@ const handlers: Record<string, Handler> = {
         vaultUuid: syncVaultMeta.vaultUuid,
         epoch: syncVaultMeta.epoch,
       },
-      { rescan: params.rescan === true },
+      { rescan: params.rescan === true, configDir: syncConfigDir },
     );
   },
 

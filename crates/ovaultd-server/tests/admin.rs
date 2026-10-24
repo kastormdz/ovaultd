@@ -1029,7 +1029,7 @@ async fn devices_revocar_mata_el_token_y_queda_auditado() -> Result<()> {
 
     // La lista de devices lo muestra activo.
     let resp = contexto
-        .request(get_con_cookie("/admin/devices", &cookie)?)
+        .request(get_con_cookie("/admin/devices?todos=1", &cookie)?)
         .await?;
     assert_eq!(resp.status(), StatusCode::OK);
     let html = cuerpo(resp).await?;
@@ -1180,7 +1180,7 @@ async fn devices_muestra_la_ultima_actividad_en_el_huso_configurado() -> Result<
         .await?;
 
     let resp = contexto
-        .request(get_con_cookie("/admin/devices", &cookie)?)
+        .request(get_con_cookie("/admin/devices?todos=1", &cookie)?)
         .await?;
     assert_eq!(resp.status(), StatusCode::OK);
     let html = cuerpo(resp).await?;
@@ -1194,6 +1194,28 @@ async fn devices_muestra_la_ultima_actividad_en_el_huso_configurado() -> Result<
         "no puede mostrar el UTC crudo como si fuera local"
     );
     assert!(html.contains("UTC-03:00"), "el encabezado tiene que rotular la zona");
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn devices_muestra_la_version_del_cliente() -> Result<()> {
+    let contexto = TestContext::new().await?;
+    hacer_admin(&contexto).await?;
+    let cookie = login(&contexto).await?;
+
+    sqlx::query("UPDATE devices SET app_version = 'plugin 0.2.34' WHERE id = ?")
+        .bind(contexto.device_id)
+        .execute(&contexto.pool)
+        .await?;
+
+    let resp = contexto
+        .request(get_con_cookie("/admin/devices?todos=1", &cookie)?)
+        .await?;
+    assert_eq!(resp.status(), StatusCode::OK);
+    let html = cuerpo(resp).await?;
+    assert!(html.contains("plugin 0.2.34"), "la tabla tiene que mostrar la versión");
+    assert!(html.contains("Versión"), "y el encabezado de la columna");
 
     Ok(())
 }

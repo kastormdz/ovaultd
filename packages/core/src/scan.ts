@@ -56,6 +56,8 @@ export async function escanearVault(
   /** Salida: `pathId` hex -> path de los archivos que no se pudieron stat/leer. Un fallo
    *  de lectura (EACCES, EIO, ELOOP) NO es un borrado: el diff los excluye. */
   ilegibles?: Map<string, string>,
+  /** Config dir del vault (`.obsidian` o el custom): de ahí sale lo que se excluye. */
+  configDir = '.obsidian',
 ): Promise<EntradaEscaneada[]> {
   const archivos: string[] = [];
 
@@ -65,7 +67,7 @@ export async function escanearVault(
     for (const entrada of listado) {
       const rel = relDir === '' ? entrada.name : `${relDir}/${entrada.name}`;
       // Exclusiones PRIMERO: una carpeta excluida no se escanea NI se recursa.
-      if (estaExcluido(rel)) continue;
+      if (estaExcluido(rel, configDir)) continue;
       if (entrada.isDirectory) {
         await recorrer(rel);
         continue;
@@ -170,12 +172,16 @@ export async function diffLocal(
   store: StateStore,
   entradas: EntradaEscaneada[],
   ilegibles?: Map<string, string>,
+  /** Config dir del vault: las entradas del índice que viven ahí no cuentan como borrado. */
+  configDir = '.obsidian',
 ): Promise<DiffLocal> {
   const base = new Map((await store.listBase()).map((entrada) => [entrada.pathId, entrada]));
   const index = new Map((await store.listIndex()).map((entrada) => [entrada.pathId, entrada]));
   const pendientes = new Set(
     (await store.listOutbox())
-      .filter((entrada) => entrada.state !== 'confirmed')
+      // `rejected` no cuenta: si el usuario corrige el archivo, el diff tiene que volver a
+      // encolarlo (el operationId cambia porque incluye el hash del contenido).
+      .filter((entrada) => entrada.state === 'pending' || entrada.state === 'sent')
       .map((entrada) => entrada.pathId),
   );
 
@@ -221,7 +227,7 @@ export async function diffLocal(
     const indexEntry = index.get(pathIdHex);
     if (indexEntry?.deleted === true) continue;
     // Excluir NO significa borrar el remoto: un path hoy excluido jamás se propone `del`.
-    if (indexEntry?.path && estaExcluido(indexEntry.path)) continue;
+    if (indexEntry?.path && estaExcluido(indexEntry.path, configDir)) continue;
     if (pendientes.has(pathIdHex)) {
       diff.yaEncolados += 1;
       continue;

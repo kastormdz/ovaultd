@@ -1376,3 +1376,35 @@ async fn un_expected_rev_viejo_da_conflict_y_el_socket_sigue_vivo(
     ws.server.abort();
     Ok(())
 }
+
+#[tokio::test]
+async fn el_hello_guarda_la_version_del_cliente_en_el_device(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let context = TestContext::new().await?;
+    let mut ws = connect(&context, Some(&context.token)).await?;
+
+    send_json(
+        &mut ws.socket,
+        json!({
+            "t": "hello",
+            "proto": 1,
+            "vault": context.vault_id,
+            "device": context.device_id,
+            "since": 0,
+            "app_version": "plugin 0.2.34"
+        }),
+    )
+    .await?;
+    let response = recv_json(&mut ws.socket).await?;
+    assert_eq!(response["t"], "hello_ok");
+
+    let version: Option<String> =
+        sqlx::query_scalar("SELECT app_version FROM devices WHERE id = ?")
+            .bind(context.device_id)
+            .fetch_one(&context.pool)
+            .await?;
+    assert_eq!(version.as_deref(), Some("plugin 0.2.34"));
+
+    ws.server.abort();
+    Ok(())
+}

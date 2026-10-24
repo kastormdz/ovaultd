@@ -46,6 +46,8 @@ export interface SyncCycleDeps {
    * pull deja el estado local al día y lo que no vino del server se queda acá.
    */
   modo?: ModoDeSync;
+  /** Config dir del vault (default `.obsidian`): el escaneo excluye ESE, no un nombre fijo. */
+  configDir?: string;
   /** Nombre del dispositivo, para el sello de las copias de conflicto del pull. */
   deviceName?: string;
 }
@@ -117,7 +119,10 @@ export async function correrCiclo(deps: SyncCycleDeps): Promise<SyncCycleReport>
     return { estado: 'convergido', pull, push: null, conflictos: [] };
   }
 
-  const push = await pushOnce({ store, port, keys, conn, vaultUuid, epoch });
+  const push = await pushOnce(
+    { store, port, keys, conn, vaultUuid, epoch },
+    { configDir: deps.configDir },
+  );
 
   const conflictos: ConflictoDeSync[] = [];
   if (push.conflicto !== undefined) {

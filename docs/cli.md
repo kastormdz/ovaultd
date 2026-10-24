@@ -62,6 +62,8 @@ Wants=network-online.target
 Type=simple
 ExecStart=%h/.local/bin/ovaultd sync --continuous --interval 5 --rescan-every 60
 Environment=OVAULTD_CONFIG_DIR=%h/.config/ovaultd
+# Config dir DEL VAULT (`.obsidian` o el custom); default .obsidian
+Environment=OVAULTD_VAULT_CONFIG_DIR=.obsidian
 Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
 Restart=on-failure
 RestartSec=10

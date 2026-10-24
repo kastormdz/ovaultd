@@ -10,6 +10,11 @@
 import { homedir, hostname } from 'node:os';
 import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
+import { createRequire } from 'node:module';
+
+/** Versión real del paquete (dist/main.js → ../package.json): el panel la muestra por device. */
+const CONFIG_DIR = process.env.OVAULTD_VAULT_CONFIG_DIR?.trim() || '.obsidian';
+const VERSION_DEL_CLIENTE = `cli ${(createRequire(import.meta.url)('../package.json') as { version: string }).version}`;
 
 import { Command } from 'commander';
 
@@ -373,6 +378,8 @@ programa
             since: number;
           } | null;
           await abierto.runtime.call('sync.open', {
+            appVersion: VERSION_DEL_CLIENTE,
+            configDir: CONFIG_DIR,
             baseUrl: abierto.sesion.server,
             token: abierto.token,
             vault: abierto.vault.vault,
@@ -498,6 +505,8 @@ programa
           since: number;
         } | null;
         await abierto.runtime.call('sync.open', {
+            appVersion: VERSION_DEL_CLIENTE,
+            configDir: CONFIG_DIR,
           baseUrl: abierto.sesion.server,
           token: abierto.token,
           vault: abierto.vault.vault,
@@ -694,6 +703,8 @@ async function conVaultEnLectura<T>(
       since: number;
     } | null;
     await abierto.runtime.call('sync.open', {
+            appVersion: VERSION_DEL_CLIENTE,
+            configDir: CONFIG_DIR,
       baseUrl: abierto.sesion.server,
       token: abierto.token,
       vault: abierto.vault.vault,

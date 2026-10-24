@@ -393,6 +393,8 @@ export interface HelloWire {
   vault: number;
   device: number;
   since: number;
+  /** Versión del cliente (`plugin 0.2.34`, `cli 0.1.0`). El server la guarda por device. */
+  app_version?: string;
   modes?: { sync: string; conflict: string };
 }
 

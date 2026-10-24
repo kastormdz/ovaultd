@@ -21,9 +21,26 @@ export interface Clasificable {
 }
 
 /** Clasifica un error para decidir si se reintenta, se corta o pide resync. */
+const RECHAZOS_FATALES = new Set([
+  'bad_request',
+  'max_file_exceeded',
+  'quota_exceeded',
+  'not_found',
+  'unauthorized',
+]);
+
 export function clasificarError(error: unknown): RetryKind {
   const e = (error ?? {}) as Clasificable;
   if (e.code === 'resync_required') return 'resync';
+  // `SyncRejectedError` trae `code` pero NO `status`: un rechazo del wire era "transitorio"
+  // y se reintentaba para siempre. `internal` queda afuera a propósito: puede ser pasajero.
+  if (
+    e.status === undefined &&
+    typeof e.code === 'string' &&
+    RECHAZOS_FATALES.has(e.code)
+  ) {
+    return 'fatal';
+  }
   if (!e.status) return 'transient'; // falla de red/WS: se reintenta
   if (e.status === 429 || e.status >= 500) return 'transient';
   return 'fatal'; // 4xx restantes (401, 403, 404, bad_request…)

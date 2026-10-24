@@ -149,6 +149,27 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y e
   responden como `error` y la sesión sigue; sólo `unauthorized` (credenciales) e
   `internal` (estado en duda) cierran. El `hello` sí cierra en cualquier error.
 
+## [0.2.20] — 2026-10-24
+
+### Added
+
+- **La versión del cliente en el panel.** El `hello` acepta `app_version` (opcional) y el
+  server la guarda por device: la tabla de dispositivos muestra qué plugin/CLI corre cada
+  uno. Un cliente viejo no la manda y la columna queda en "—".
+- **`configDir` real en el escaneo.** Con un config dir custom (`.obsidian-work`) se
+  excluye ESE y no un `.obsidian` fijo: antes se subía la config entera del vault, tokens
+  de plugins incluidos.
+
+### Fixed
+
+- **`appearance.json` ya no se aplica tal cual.** El pull mezcla por campo: los portables
+  (tema CSS, snippets, tamaño de fuente) vienen del remoto y el modo claro/oscuro, las
+  fuentes y las claves desconocidas quedan del dispositivo. Antes un pull te cambiaba el
+  tema del día. El índice y la base guardan el hash de lo publicado, así que el tema local
+  no vuelve a subir en cada ciclo.
+- **La outbox tiene cuarentena** (ver plugin 0.2.34): una operación impublicable no congela
+  la cola.
+
 ## [0.2.19] — 2026-10-24
 
 ### Fixed

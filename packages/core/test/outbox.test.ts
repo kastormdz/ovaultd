@@ -3,7 +3,8 @@ import { describe, expect, it } from 'vitest';
 import { cryptoProvider } from '@ovaultd/crypto';
 import { textEncoder, toHex } from '@ovaultd/protocol';
 
-import { prepareOutboxEntry } from '../src/outbox.js';
+import { obsoletasDePath, prepareOutboxEntry } from '../src/outbox.js';
+import type { OutboxEntry } from '../src/StateStore.js';
 
 /** sha256 de cero bytes: el hash legítimo de un archivo vacío. */
 const hashDeVacio = (): string => toHex(cryptoProvider().sha256(new Uint8Array(0)));
@@ -78,5 +79,35 @@ describe('prepareOutboxEntry', () => {
         contentHash: hashDeVacio(),
       }),
     ).toThrow(/no coincide con el contenido/);
+  });
+});
+
+describe('obsoletasDePath', () => {
+  it('marca sólo las pendientes del path: ni confirmadas, ni en cuarentena, ni de otro path', () => {
+    const base = prepareOutboxEntry({
+      kind: 'add',
+      path: 'nota.md',
+      pathId: 'path-a',
+      expectedRev: 0,
+      contentB64: b64De('hola'),
+      contentHash: toHex(cryptoProvider().sha256(textEncoder.encode('hola'))),
+    });
+    const conEstado = (pathId: string, state: OutboxEntry['state']): OutboxEntry => ({
+      ...base,
+      pathId,
+      state,
+    });
+
+    const entries = [
+      conEstado('path-a', 'pending'),
+      conEstado('path-a', 'sent'),
+      conEstado('path-a', 'confirmed'),
+      conEstado('path-a', 'rejected'),
+      conEstado('path-b', 'pending'),
+    ];
+
+    const obsoletas = obsoletasDePath(entries, 'path-a');
+    expect(obsoletas.map((entrada) => entrada.state)).toEqual(['pending', 'sent']);
+    expect(obsoletasDePath(entries, 'path-c')).toEqual([]);
   });
 });

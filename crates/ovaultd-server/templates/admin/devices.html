@@ -22,6 +22,7 @@
         <th>{{ t.th_cuenta }}</th>
         <th>{{ t.th_dispositivo }}</th>
         <th>{{ t.th_plataforma }}</th>
+        <th>{{ t.th_version }}</th>
         <th>{{ t.th_estado }}</th>
         <th class="num">{{ t.th_tokens }}</th>
         <th>{{ t.th_creado }} <span class="sub">({{ zona }})</span></th>
@@ -36,6 +37,7 @@
         <td>{{ d.cuenta }}</td>
         <td>{{ d.nombre }}</td>
         <td class="sub">{{ d.plataforma }}</td>
+        <td class="sub">{{ d.app_version }}</td>
         <td>{% if d.revocado %}<span class="est mal">{{ t.est_revocado }}</span>{% else %}<span class="est ok">{{ t.est_activo }}</span>{% endif %}</td>
         <td class="num">{{ d.tokens_vivos }}</td>
         <td>{{ d.creado }}</td>

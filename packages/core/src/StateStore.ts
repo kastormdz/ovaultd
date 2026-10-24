@@ -17,6 +17,8 @@
 
 import { openDB, type DBSchema, type IDBPDatabase } from 'idb';
 
+import { obsoletasDePath } from './outbox.js';
+
 export const SCHEMA_VERSION = 1;
 export const DB_NAME_DEFAULT = 'ovaultd';
 
@@ -61,8 +63,12 @@ export interface OutboxEntry {
   /** Snapshot recuperable del contenido local (save-first). */
   snapshot?: Blob | null;
   snapshotHash?: string | null;
-  /** Estado de publicación: pending → sent (ack) → confirmed. */
-  state: 'pending' | 'sent' | 'confirmed';
+  /** Estado de publicación: pending → sent (ack) → confirmed; `rejected` = el server la
+   *  rechazó por un problema de ESTA operación (archivo demasiado grande, sin snapshot,
+   *  bad_request) y no se reintenta sola: queda visible para el usuario. */
+  state: 'pending' | 'sent' | 'confirmed' | 'rejected';
+  /** Motivo del rechazo (sólo en `rejected`). */
+  lastError?: string | null;
   /** mtime del archivo al encolar: alimenta el cache del escaneo incremental. */
   mtimeMs?: number | null;
 }
@@ -275,10 +281,31 @@ export class StateStore {
   }
 
   /** Transición de estado de una operación (pending → sent → confirmed). */
-  async setOutboxState(operationId: string, state: OutboxEntry['state']): Promise<OutboxEntry> {
+  /**
+   * Marca como `rejected` las entradas pendientes de un path: el pull aplicó la versión
+   * del server y publicar el snapshot local viejo pisaría esa revisión (el caso que hacía
+   * que un conflicto "resuelto" volviera atrás en el ciclo siguiente).
+   */
+  async descartarOutboxDePath(pathId: string, motivo: string): Promise<number> {
+    const entries = await this.db.getAll('outbox');
+    const obsoletas = obsoletasDePath(entries, pathId);
+    if (obsoletas.length === 0) return 0;
+    const tx = this.db.transaction('outbox', 'readwrite');
+    for (const entry of obsoletas) {
+      await tx.store.put({ ...entry, state: 'rejected', lastError: motivo });
+    }
+    await tx.done;
+    return obsoletas.length;
+  }
+
+  async setOutboxState(
+    operationId: string,
+    state: OutboxEntry['state'],
+    lastError?: string | null,
+  ): Promise<OutboxEntry> {
     const entry = await this.db.get('outbox', operationId);
     if (!entry) throw new Error(`outbox: no existe la operación ${operationId}`);
-    const updated: OutboxEntry = { ...entry, state };
+    const updated: OutboxEntry = { ...entry, state, lastError: lastError ?? null };
     await this.db.put('outbox', updated);
     return updated;
   }

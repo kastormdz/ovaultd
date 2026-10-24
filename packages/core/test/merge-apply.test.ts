@@ -37,6 +37,7 @@ function storeFake() {
   const intents = new Map<string, IntentEntry>();
   const base = new Map<string, BaseEntry>();
   const index = new Map<string, IndexEntry>();
+  const descartados: string[] = [];
   let checkpoint = { since: 0, minRev: null as number | null };
 
   const store = {
@@ -58,6 +59,10 @@ function storeFake() {
     async getIndex(pathId: string) {
       return index.get(pathId) ?? null;
     },
+    async descartarOutboxDePath(pathId: string) {
+      descartados.push(pathId);
+      return 0;
+    },
     async completeApply(input: {
       intentId: string;
       base?: BaseEntry;
@@ -71,7 +76,7 @@ function storeFake() {
     },
   };
 
-  return { store, intents, base, index, checkpoint: () => checkpoint };
+  return { store, intents, base, index, descartados, checkpoint: () => checkpoint };
 }
 
 function portFake(archivos: Record<string, string>) {
@@ -137,20 +142,29 @@ const THEIRS_TEXTO = 'El gato grande duerme en el sofá.\n';
 const FUSION_TEXTO = 'El gato grande duerme en el sofá rojo.\n';
 
 /** Arma el escenario de tres versiones: base en el store, local en el port, remoto en el CAS. */
-function armarCaso(opciones: { local: string; remoto: string }) {
-  const storedBase = encryptBlob(CLAVES, cod.encode(BASE_TEXTO));
+function armarCaso(opciones: {
+  local: string;
+  remoto: string;
+  base?: string;
+  ruta?: string;
+  pathId?: string;
+}) {
+  const ruta = opciones.ruta ?? PATH;
+  const pathId = opciones.pathId ?? PATH_ID;
+  const baseTexto = opciones.base ?? BASE_TEXTO;
+  const storedBase = encryptBlob(CLAVES, cod.encode(baseTexto));
   const blobIdBase = toHex(blobId(storedBase));
   const storedRemoto = encryptBlob(CLAVES, cod.encode(opciones.remoto));
 
-  const { store, intents, base, index, checkpoint } = storeFake();
-  base.set(PATH_ID, {
-    pathId: PATH_ID,
+  const { store, intents, base, index, descartados, checkpoint } = storeFake();
+  base.set(pathId, {
+    pathId,
     rev: 3,
     blobId: blobIdBase,
-    contentHash: sha256Hex(cod.encode(BASE_TEXTO)),
+    contentHash: sha256Hex(cod.encode(baseTexto)),
   });
 
-  const { port, files, temps } = portFake({ [PATH]: opciones.local });
+  const { port, files, temps } = portFake({ [ruta]: opciones.local });
   const conn = connFake(new Map([[blobIdBase, storedBase]]));
 
   const deps: ApplyDeps = {
@@ -163,8 +177,8 @@ function armarCaso(opciones: { local: string; remoto: string }) {
     politicaDeConflictos: 'bloquear',
   };
   const revision: ApplyRevision = {
-    pathId: PATH_ID,
-    path: PATH,
+    pathId,
+    path: ruta,
     kind: 'file',
     deleted: false,
     rev: 6,
@@ -172,7 +186,7 @@ function armarCaso(opciones: { local: string; remoto: string }) {
     contentHash: null,
   };
 
-  return { deps, revision, storedRemoto, files, temps, intents, base, index, checkpoint, store };
+  return { deps, revision, storedRemoto, files, temps, intents, base, index, descartados, checkpoint, store };
 }
 
 // ------------------------------------------------------------------ tests
@@ -463,5 +477,57 @@ describe('conflictos: política por defecto (conservar copia, estilo Obsidian Sy
     expect(resultado.status).toBe('blocked');
     expect(resultado.reason).toContain('edición local posterior a la base');
     expect(dec.decode(caso.files.get(PATH))).toBe('El gato ronca en el sofá.\n');
+  });
+});
+
+describe('apply desaloja la intención pendiente del path', () => {
+  it('al aplicar la versión remota descarta la outbox de ese path', async () => {
+    // Local idéntico a la base: el guard da `safe` y el apply escribe la versión remota.
+    const caso = armarCaso({ local: BASE_TEXTO, remoto: 'texto nuevo\n' });
+
+    await applyRevision(caso.deps, caso.revision, caso.storedRemoto);
+
+    expect(caso.descartados).toContain(PATH_ID);
+  });
+});
+
+describe('appearance.json: el modo es del dispositivo', () => {
+  const BASE_APARIENCIA = `${JSON.stringify(
+    { theme: 'moonstone', cssTheme: '', enabledCssSnippets: [], baseFontSize: 16 },
+    null,
+    2,
+  )}\n`;
+  const REMOTA_APARIENCIA = `${JSON.stringify(
+    { theme: 'obsidian', cssTheme: 'Minimal', enabledCssSnippets: ['grande'], baseFontSize: 16 },
+    null,
+    2,
+  )}\n`;
+  const RUTA = '.obsidian/appearance.json';
+
+  it('aplica los campos portables y conserva el tema del dispositivo', async () => {
+    const caso = armarCaso({
+      local: BASE_APARIENCIA,
+      base: BASE_APARIENCIA,
+      remoto: REMOTA_APARIENCIA,
+      ruta: RUTA,
+    });
+
+    const resultado = await applyRevision(caso.deps, caso.revision, caso.storedRemoto);
+    expect(resultado.status).toBe('applied');
+
+    const escrito = JSON.parse(dec.decode(caso.files.get(RUTA))) as Record<string, unknown>;
+    expect(escrito.theme).toBe('moonstone'); // del local, no se pisa
+    expect(escrito.cssTheme).toBe('Minimal'); // portable, viene del remoto
+    expect(escrito.enabledCssSnippets).toEqual(['grande']);
+
+    // Base e índice quedan con el hash de lo PUBLICADO (si no, el scan lo ve sucio y
+    // vuelve a subir el tema en cada ciclo).
+    const publicado = dec.decode(caso.files.get(RUTA));
+    expect(caso.base.get(caso.revision.pathId)?.contentHash).toBe(
+      sha256Hex(cod.encode(publicado)),
+    );
+    expect(caso.index.get(caso.revision.pathId)?.contentHash).toBe(
+      sha256Hex(cod.encode(publicado)),
+    );
   });
 });

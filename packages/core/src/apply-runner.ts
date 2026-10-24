@@ -429,6 +429,11 @@ export async function applyRevision(
   }
 
   // 4) Publicar.
+  // Lo que finalmente se escribe: para `appearance.json` es el remoto mezclado con el
+  // local, así que el hash y el tamaño del índice son los del contenido publicado.
+  let contenido: Uint8Array | null = plaintext;
+  let hashContenido = hashVerificado;
+
   if (revision.kind === 'file') {
     if (revision.deleted) {
       if (verdict !== 'already-gone') await port.unlink(revision.path);
@@ -439,8 +444,26 @@ export async function applyRevision(
       }
       const dir = dirVault(revision.path);
       if (dir !== '.') await port.mkdirp(dir);
-      const { tempName } = await port.writeTemp(dir, plaintext!);
-      intent = { ...intent, tempName, contentHash: hashVerificado, state: 'verified' };
+
+      // `appearance.json` NUNCA se escribe tal cual viene: el modo claro/oscuro, las fuentes
+      // y las claves desconocidas son del dispositivo. Se aplican sólo los campos portables
+      // y se conserva el resto del local (si no, el pull te cambia el tema del día).
+      if (esApariencia(revision.path)) {
+        const local = await port.read(revision.path).catch(() => null);
+        if (local !== null) {
+          const textoLocal = new TextDecoder().decode(local);
+          const textoRemoto = new TextDecoder().decode(plaintext!);
+          // base = local: todo portable que difiera se toma del remoto.
+          const fusion = mergeDeApariencia(textoLocal, textoLocal, textoRemoto);
+          if (fusion !== textoRemoto) {
+            contenido = new TextEncoder().encode(fusion);
+            hashContenido = sha256Hex(contenido);
+          }
+        }
+      }
+
+      const { tempName } = await port.writeTemp(dir, contenido!);
+      intent = { ...intent, tempName, contentHash: hashContenido, state: 'verified' };
       await store.putIntent(intent);
       await port.rename(tempName, revision.path);
     }
@@ -455,7 +478,7 @@ export async function applyRevision(
       pathId: revision.pathId,
       rev: revision.rev,
       blobId: revision.blobId,
-      contentHash: revision.deleted ? null : (revision.contentHash ?? hashVerificado),
+      contentHash: revision.deleted ? null : hashContenido,
     },
     index: {
       pathId: revision.pathId,
@@ -464,13 +487,24 @@ export async function applyRevision(
       deleted: revision.deleted,
       rev: revision.rev,
       blobId: revision.blobId,
-      contentHash: revision.deleted ? null : (revision.contentHash ?? hashVerificado),
-      size: plaintext ? plaintext.length : null,
+      contentHash: revision.deleted ? null : hashContenido,
+      size: revision.deleted ? null : (plaintext ? contenido!.length : null),
       mtime: null,
     },
     // Sin `checkpoint`: una revisión del server trae N operaciones y el cursor sólo puede
     // pasar la rev cuando TODAS quedaron aplicadas. Lo escribe `pullOnce` al cerrarla.
   });
+
+  // La versión del server ya es la base de este path: si había una intención local
+  // pendiente del MISMO path quedó obsoleta (cuando había edición local, el guard/fusión
+  // ya la preservó en el archivo o en la copia de conflicto). Sin esto, el push publicaba
+  // el snapshot viejo y pisaba la revisión remota que se acababa de aplicar.
+  if (typeof store.descartarOutboxDePath === 'function') {
+    await store.descartarOutboxDePath(
+      revision.pathId,
+      'pisada por una revisión remota aplicada en el pull',
+    );
+  }
 
   return copiaDeConflicto !== null
     ? { status: 'conflicted-copy', intentId: intent.intentId, copia: copiaDeConflicto }

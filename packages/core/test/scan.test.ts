@@ -248,4 +248,26 @@ describe('un fallo de lectura no es un borrado', () => {
     const sinMapa = await diffLocal(store, entradas);
     expect(sinMapa.borrados.map((borrado) => borrado.path)).toEqual(['b.md']);
   });
+
+  it('con un configDir custom excluye ESE, no `.obsidian` fijo', async () => {
+    const port = portDeArbol([
+      '.obsidian-work/appearance.json',
+      '.obsidian-work/plugins/x/data.json',
+      '.obsidian/nota.md',
+    ]);
+
+    const entradas = await escanearVault(
+      port,
+      CLAVES,
+      '',
+      undefined,
+      undefined,
+      undefined,
+      '.obsidian-work',
+    );
+
+    const paths = entradas.map((entrada) => entrada.path).sort();
+    // El data.json del plugin vive en el configDir REAL: no viaja aunque el nombre sea otro.
+    expect(paths).toEqual(['.obsidian-work/appearance.json', '.obsidian/nota.md']);
+  });
 });
