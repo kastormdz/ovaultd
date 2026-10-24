@@ -52,7 +52,7 @@ import {
 import { ApiError, OvaultdClient, normalizeServer } from './api.js';
 import { preguntarVisible, resolvePassword } from './credentials.js';
 import { abrirVaultLocal, purgarRuntimeDir, runtimeDirDe, type VaultAbierto } from './local-runtime.js';
-import { guardaDePrune } from './prune-guard.js';
+import { guardaDePrune } from '@ovaultd/core';
 import {
   clearSession,
   configDir,
@@ -348,6 +348,10 @@ programa
     '0',
   )
   .option('--password-stdin', 'lee la password de stdin (para scripts)')
+  .option(
+    '--forzar-push',
+    'publica aunque haya revisiones sin aplicar (puede dejar al server y al disco desalineados)',
+  )
   .action(
     async (
       vaultTexto: string | undefined,
@@ -357,6 +361,7 @@ programa
         rescan?: boolean;
         rescanEvery?: string;
         passwordStdin?: boolean;
+        forzarPush?: boolean;
       },
     ) => {
       const abierto = await abrirVaultLocal(vaultTexto, opciones);
@@ -409,9 +414,23 @@ programa
           const bajado = (await abierto.runtime.call('sync.pullOnce')) as {
             status: string;
             applied: number;
-            blocked?: { rev: number; reason?: string };
+            blocked?: { rev: number; pathId: string; reason?: string };
+            bloqueados?: Array<{ rev: number; pathId: string; reason?: string }>;
             resync?: { since: number; minRev: number };
           };
+          const bloqueos = bajado.bloqueados ?? (bajado.blocked ? [bajado.blocked] : []);
+          if (bloqueos.length > 0 && opciones.forzarPush !== true) {
+            // Publicar con una revisión sin aplicar deja al server y al disco contando
+            // historias distintas. El pull sigue (C-a) pero el push de esta pasada espera.
+            console.warn(
+              `  ⚠ ${bloqueos.length} revisión(es) sin aplicar: no se publica nada esta pasada`,
+            );
+            for (const bloqueo of bloqueos.slice(0, 5)) {
+              console.warn(`    · rev ${bloqueo.rev} (${bloqueo.pathId.slice(0, 12)}…): ${bloqueo.reason ?? 'conflicto'}`);
+            }
+            console.warn('    resolvé el conflicto (o --forzar-push si sabés lo que hacés)');
+            return;
+          }
           const empujado = (await abierto.runtime.call('sync.pushOnce', {
             rescan,
           })) as {
@@ -432,7 +451,7 @@ programa
           }
           if (bajado.status === 'blocked') {
             console.warn(
-              `  ⚠ revisión ${bajado.blocked?.rev} bloqueada (${bajado.blocked?.reason ?? 'tercera versión local'}); el checkpoint NO avanza`,
+              `  ⚠ revisión ${bajado.blocked?.rev} bloqueada (${bajado.blocked?.reason ?? 'tercera versión local'}): el checkpoint no avanzó`,
             );
           }
           if (bajado.status === 'resync-required') {
@@ -442,8 +461,8 @@ programa
           }
         };
 
-        await conectar();
         if (!opciones.continuous) {
+          await conectar();
           await pasada();
           return;
         }
@@ -457,8 +476,15 @@ programa
         console.log(`modo continuo: cada ~${intervaloSeg} s (Ctrl-C para salir)`);
 
         let fallas = 0;
+        let conectado = false;
         while (!parar) {
           try {
+            // Si la primera conexión falla, el backoff de abajo reintenta: antes `conectar()`
+            // estaba afuera del try y un server caído al arrancar mataba el modo continuo.
+            if (!conectado) {
+              await conectar();
+              conectado = true;
+            }
             await pasada();
             fallas = 0;
           } catch (error) {
@@ -473,7 +499,7 @@ programa
               /* ya estaba cerrada */
             }
             await dormir(espera);
-            await conectar();
+            conectado = false;
             continue;
           }
           await dormir(intervaloSeg * 1000 + Math.floor(Math.random() * 1000));
@@ -556,9 +582,18 @@ programa
           return;
         }
 
-        const aplicado = (await abierto.runtime.call('sync.pruneRemote', { aplicar: true })) as Plan & {
-          encolados: number;
-        };
+        const aplicado = (await abierto.runtime.call('sync.pruneRemote', {
+          aplicar: true,
+          permitirVacio: Boolean(opciones.permitirVacio),
+        })) as Plan & { encolados?: number; abortado?: string };
+        if (aplicado.abortado) {
+          // El plan cambió entre el dry-run y el apply (o el disco) y la guarda del runtime
+          // frenó el borrado: no se borró nada.
+          console.error(`✗ ${aplicado.abortado}`);
+          await abierto.runtime.call('sync.close');
+          process.exitCode = 1;
+          return;
+        }
         const empujado = (await abierto.runtime.call('sync.pushOnce')) as {
           empujadas: number;
           headRev: number;

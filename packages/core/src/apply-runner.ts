@@ -394,7 +394,13 @@ export async function applyRevision(
   let verdict = guard.verdict;
   let copiaDeConflicto: string | null = null;
   if (guard.verdict === 'blocked') {
-    if (opciones.forzar !== true) {
+    // `forzar` (modo espejo) pisa el CONTENIDO local a propósito, pero un conflicto
+    // estructural no se saltea: reemplazar un directorio o un archivo por otra cosa sin
+    // conservarlo es destructivo incluso para el usuario que pidió "forzá todo".
+    const estructural =
+      guard.reason === 'un archivo local ocupa el camino' ||
+      guard.reason === 'un directorio local ocupa el camino';
+    if (opciones.forzar !== true || estructural) {
       // Antes de declarar el conflicto: si es texto y las ediciones NO se pisan, se
       // fusionan acá mismo — la resolución es el archivo con las dos, y el push
       // siguiente sube esa fusión como revisión NUEVA.

@@ -26,6 +26,7 @@ import { contenidoDeRevision, diffDeTextos, historiaDeArchivo } from './history.
 import { prepareOutboxEntry, type EnqueueRequest } from './outbox.js';
 import { pushOnce } from './push.js';
 import { aplicarPrune, planificarPrune } from './prune.js';
+import { guardaDePrune } from './prune-guard.js';
 import { pullOnce } from './reconcile.js';
 import { diffLocal, escanearVault } from './scan.js';
 import { correrCiclo } from './SyncClient.js';
@@ -399,7 +400,9 @@ const handlers: Record<string, Handler> = {
    * huérfano (el push normal los publica: lote firmado con el expected_rev de
    * siempre). El server no puede hacer esto: es ciego a los paths (E2EE).
    */
-  'sync.pruneRemote': async (params: { aplicar?: boolean } = {}) => {
+  'sync.pruneRemote': async (
+    params: { aplicar?: boolean; permitirVacio?: boolean } = {},
+  ) => {
     if (!syncConn) {
       throw new Error('prune: no hay conexión abierta (sync.open primero)');
     }
@@ -410,7 +413,14 @@ const handlers: Record<string, Handler> = {
       conn: syncConn,
       port: new HttpFileSystemPort(globalThis.location.origin),
     };
-    return params.aplicar ? aplicarPrune(deps) : planificarPrune(deps);
+    if (!params.aplicar) return planificarPrune(deps);
+
+    // La guarda se evalúa sobre el plan que se va a APLICAR (no el del dry-run: entre los
+    // dos el disco puede haber cambiado y el apply recalcula el plan).
+    const plan = await planificarPrune(deps);
+    const aborto = guardaDePrune(plan, params.permitirVacio === true);
+    if (aborto !== null) return { abortado: aborto, ...plan };
+    return aplicarPrune(deps);
   },
 
   // -------------------------------------------------------------- history (corte 5b)

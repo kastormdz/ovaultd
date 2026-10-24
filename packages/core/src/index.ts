@@ -24,3 +24,5 @@ export * from './SyncFilter.js';
 export * from './merge.js';
 export * from './export.js';
 export * from './history.js';
+
+export * from './prune-guard.js';

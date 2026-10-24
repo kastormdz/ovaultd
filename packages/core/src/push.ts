@@ -428,7 +428,10 @@ export async function pushOnce(
     // `rejected` queda afuera a propósito: no se reintenta sola. Si el usuario corrige el
     // archivo, el diff la vuelve a encolar (el id incluye el hash del contenido).
     .filter((entry) => entry.state === 'pending' || entry.state === 'sent')
-    .sort((a, b) => a.queuedAt - b.queuedAt);
+    // Por `expectedRev` ascendente: el CAS del server avanza de a uno, así que publicar en
+    // orden de encolado hacía que una entrada vieja rebotara contra un head más nuevo y
+    // gastara un round-trip (y un conflicto) por cada una.
+    .sort((a, b) => a.expectedRev - b.expectedRev || a.queuedAt - b.queuedAt);
   marcarFase('listOutbox', performance.now() - tLista);
   /**
    * Sube un grupo de operaciones en UN batch (el server valida `expected_rev` una sola vez

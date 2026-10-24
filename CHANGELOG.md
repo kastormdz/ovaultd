@@ -149,6 +149,23 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y e
   responden como `error` y la sesión sigue; sólo `unauthorized` (credenciales) e
   `internal` (estado en duda) cierran. El `hello` sí cierra en cualquier error.
 
+## [0.2.22] — 2026-10-24
+
+### Fixed
+
+- **`sync` no publica con revisiones sin aplicar.** Si el pull dejó algo `blocked`, la pasada
+  no pushea (y dice qué path y por qué). Escape deliberado: `--forzar-push`.
+- **`prune-remote` valida el plan que REALMENTE borra.** La guarda se evalúa en el runtime,
+  justo antes de aplicar (antes sólo miraba el dry-run: entre los dos el plan se recalculaba
+  sin guarda). Se suma el umbral: borrar más de la mitad de los paths del server exige
+  `--permitir-vacio`.
+- **El modo continuo sobrevive a un arranque sin server**: `conectar()` quedó dentro del
+  `try` del loop y el backoff reintenta (antes moría al primer fallo).
+- **`forzar` (espejo) ya no pisa un conflicto estructural.** El contenido se pisa a
+  propósito; un directorio o un archivo en el camino se conserva igual.
+- **El push drena la outbox por `expectedRev` ascendente**, no por orden de encolado: una
+  entrada vieja rebotaba contra un head más nuevo y gastaba un conflicto por cada una.
+
 ## [0.2.21] — 2026-10-24
 
 ### Fixed
