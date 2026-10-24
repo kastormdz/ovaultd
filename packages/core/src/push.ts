@@ -217,7 +217,7 @@ async function encolarDiff(
 }
 
 /** Construye la operación del wire (cifra + firma) para una entrada de outbox. */
-async function construirOp(
+export async function construirOp(
   deps: PushDeps,
   entry: OutboxEntry,
   expectedRev: number,
@@ -288,7 +288,12 @@ async function construirOp(
     size: esDel ? null : tamano,
     mtime: esDel ? null : entry.queuedAt,
     ctime: null,
-    prev_path_id: null,
+    // Un `move` sin `prev_path_id` es `BadRequest` FATAL en el server: el entry nunca
+    // sale de la outbox y la sincronización queda congelada. El id va crudo (32 bytes).
+    prev_path_id:
+      entry.kind === 'move' && entry.prevPathId
+        ? b64Encode(fromHex(entry.prevPathId))
+        : null,
   };
 
   return { op, blobIdHex };
