@@ -115,7 +115,7 @@ async fn pintar(
     // poder auditarlo o revocarlo. Dos literales: sqlx 0.9 exige SqlSafeStr.
     let por_defecto = "SELECT d.id, a.email AS cuenta, d.name AS nombre, d.platform AS plataforma,
                 d.created_at AS creado,
-                COALESCE(d.last_seen,
+                max(d.last_seen,
                          (SELECT MAX(b.ts) FROM batches b WHERE b.device_id = d.id)) AS ultima_actividad,
                 d.revoked_at AS revocado,
                 (SELECT COUNT(*) FROM device_tokens t
@@ -130,7 +130,7 @@ async fn pintar(
          LIMIT ? OFFSET ?";
     let con_todos = "SELECT d.id, a.email AS cuenta, d.name AS nombre, d.platform AS plataforma,
                 d.created_at AS creado,
-                COALESCE(d.last_seen,
+                max(d.last_seen,
                          (SELECT MAX(b.ts) FROM batches b WHERE b.device_id = d.id)) AS ultima_actividad,
                 d.revoked_at AS revocado,
                 (SELECT COUNT(*) FROM device_tokens t

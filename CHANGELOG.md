@@ -49,6 +49,27 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y e
   default incluye esos dos orígenes además de loopback; la web pública sigue
   cerrada. Test: `origenes_del_plugin_entran` en `tests/cors.rs`.
 
+## [0.2.14] — 2026-10-24
+
+### Security
+
+- **`ctutils` 0.4.2 → 0.4.4** (RUSTSEC-2026-0385): la generación de máscaras y las
+  comparaciones `u128` no eran constant-time, y `ctutils` es la base de
+  `argon2`/`digest`, o sea el KDF del vault. **`tokio` 1.53.1 → 1.53.3**
+  (RUSTSEC-2026-0386): `AsyncFd::new` no exigía ownership del fd. Las dos con fix
+  de patch; `osv-scanner` vuelve a 0 issues (el lock del spike incluido).
+
+### Fixed
+
+- **Panel: "última actividad" refleja el sync real, no el último login.** `last_seen`
+  solo se actualizaba en `autenticar_token` (requests HTTP) con un throttle de una
+  hora, y el sync de verdad va por WebSocket con firma Ed25519, que no pasa por ahí:
+  un device sincronizando cada 5 s aparecía con la fecha del último login ("hace 2
+  días"). Ahora el commit del batch también late (throttle 60 s), el HTTP late cada
+  minuto, y el panel toma el **más reciente** entre `last_seen` y el último batch
+  (`max(...)` en vez de `COALESCE`, que priorizaba un `last_seen` viejo). Test:
+  `batch_valido_da_batch_ack_con_la_rev_y_una_sola_revision` verifica el latido.
+
 ## [Unreleased]
 
 ### Security

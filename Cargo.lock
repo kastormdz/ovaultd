@@ -468,9 +468,9 @@ dependencies = [
 
 [[package]]
 name = "ctutils"
-version = "0.4.2"
+version = "0.4.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7d5515a3834141de9eafb9717ad39eea8247b5674e6066c404e8c4b365d2a29e"
+checksum = "12218662ccac37d9714f2191252553d67585b97df8c839cbe49e0bde278dc865"
 dependencies = [
  "cmov",
 ]
@@ -1212,7 +1212,7 @@ checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
 
 [[package]]
 name = "ovaultd-crypto"
-version = "0.2.13"
+version = "0.2.14"
 dependencies = [
  "argon2",
  "chacha20poly1305",
@@ -1228,7 +1228,7 @@ dependencies = [
 
 [[package]]
 name = "ovaultd-protocol"
-version = "0.2.13"
+version = "0.2.14"
 dependencies = [
  "base64 0.23.1",
  "serde",
@@ -1237,7 +1237,7 @@ dependencies = [
 
 [[package]]
 name = "ovaultd-server"
-version = "0.2.13"
+version = "0.2.14"
 dependencies = [
  "argon2",
  "askama",
@@ -1988,9 +1988,9 @@ checksum = "fd3ca314f692efd6c868f8408f53fe444634a845f96c028b97d35f6a1f79f0ee"
 
 [[package]]
 name = "tokio"
-version = "1.53.1"
+version = "1.53.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "202caea871b69668250d242070849eb495be178ed697a3e98aebce5bc81a0bed"
+checksum = "ce3335fa71841cda333a58d7615b03901380ecf09d59b3296d21f8bbac0dde4e"
 dependencies = [
  "bytes",
  "libc",

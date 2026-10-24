@@ -357,6 +357,18 @@ impl Connection {
             WsFailure::close(ErrorCode::Unauthorized, "device no autenticado")
         })?;
 
+        // El latido del device también va por acá: el sync real (pull por HTTP + push por
+        // WS) NO pasa por `autenticar_token` en cada ciclo, así que sin esto `last_seen`
+        // quedaba con la fecha del último login y el panel mentía ("hace 2 días" con un
+        // device sincronizando cada 5 s). Throttle de 60 s: una escritura por minuto.
+        let _ = sqlx::query(
+            "UPDATE devices SET last_seen = datetime('now')
+             WHERE id = ? AND (last_seen IS NULL OR last_seen < datetime('now', '-60 seconds'))",
+        )
+        .bind(device_id)
+        .execute(&self.pool)
+        .await;
+
         let outcome = commit_batch(&self.pool, vault_id, device_id, &message.batch)
             .await
             .map_err(WsFailure::from_server_error)?;

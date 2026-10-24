@@ -714,6 +714,13 @@ async fn batch_valido_da_batch_ack_con_la_rev_y_una_sola_revision(
     let batch = batch_value(&context, &operation_id, true);
     let batch_id = batch["batch_id"].clone();
 
+    // El batch es un latido: con `last_seen` viejo, el commit tiene que ponerlo al día.
+    // Sin esto el panel mostraba la fecha del último login mientras el device commiteaba.
+    sqlx::query("UPDATE devices SET last_seen = '2000-01-01 00:00:00' WHERE id = ?")
+        .bind(context.device_id)
+        .execute(&context.pool)
+        .await?;
+
     send_json(&mut ws.socket, batch).await?;
 
     let response = recv_json(&mut ws.socket).await?;
@@ -732,6 +739,17 @@ async fn batch_valido_da_batch_ack_con_la_rev_y_una_sola_revision(
 
     assert_eq!(revisions, 1);
     assert_eq!(batches, 1);
+
+    let last_seen: Option<String> =
+        sqlx::query_scalar("SELECT last_seen FROM devices WHERE id = ?")
+            .bind(context.device_id)
+            .fetch_one(&context.pool)
+            .await?;
+    assert_ne!(
+        last_seen.as_deref(),
+        Some("2000-01-01 00:00:00"),
+        "el batch tiene que dejar el latido del device"
+    );
 
     ws.server.abort();
     Ok(())

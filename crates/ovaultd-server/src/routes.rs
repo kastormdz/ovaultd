@@ -527,11 +527,12 @@ pub(crate) async fn autenticar_token(
     .ok_or(ServerError::Unauthorized)?;
 
     // El panel de devices distingue "activos" por su latido: dejar `last_seen` al día.
-    // Best-effort (no frena el request) y throttled a una hora por device: alcanza para
-    // que un vínculo abandonado no quede marcado como activo por un solo login.
+    // Best-effort (no frena el request) y throttled a un minuto por device: el pull del
+    // sync es HTTP y pasa por acá en cada ciclo, así que la hora anterior hacía que un
+    // device activo pareciera dormido.
     let _ = sqlx::query(
         "UPDATE devices SET last_seen = datetime('now')
-         WHERE id = ? AND (last_seen IS NULL OR last_seen < datetime('now', '-1 hour'))",
+         WHERE id = ? AND (last_seen IS NULL OR last_seen < datetime('now', '-60 seconds'))",
     )
     .bind(device_id)
     .execute(&state.pool)

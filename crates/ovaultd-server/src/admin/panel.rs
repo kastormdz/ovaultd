@@ -552,7 +552,7 @@ async fn dashboard(State(estado): State<EstadoServidor>, Sesion(sesion): Sesion)
 
     let dispositivos = sqlx::query_as::<_, (String, String, Option<String>)>(
         "SELECT d.name, a.email,
-                COALESCE(d.last_seen, (SELECT MAX(b.ts) FROM batches b WHERE b.device_id = d.id))
+                max(d.last_seen, (SELECT MAX(b.ts) FROM batches b WHERE b.device_id = d.id))
          FROM devices d
          JOIN accounts a ON a.id = d.account_id
          WHERE d.revoked_at IS NULL
