@@ -9,3 +9,17 @@ id = "RUSTSEC-2026-0374"
 reason = "unmaintained (no CVE): basic-toml viene de askama_derive como proc-macro de build; sin fix disponible y sin superficie en runtime."
 # F-05: la excepción vence. Si basic-toml/askama cambian, el gate vuelve a romper solo.
 ignoreUntil = 2027-01-31
+
+# GHSA-qwgh-2vcv-g2f7 — `block-buffer 0.10.4`: un panic CAPTURADO deja el cursor interno
+# corrupto y habilita lecturas/escrituras fuera de rango (CVSS 6.3).
+# Por qué se ignora, y no se "arregla":
+#   1. Exige un panic DENTRO del callback de compresión y que alguien lo capture con
+#      `catch_unwind` y siga usando el hasher. No hay `catch_unwind` en la ruta de hashing
+#      (blobs, tokens, HMAC): un panic ahí aborta la tarea, no se reutiliza el buffer.
+#   2. No hay versión parcheada en la rama 0.10 (`fixed: --`), y la 0.12 requiere
+#      `digest 0.11` → `sha2 0.11`, que ni sqlx 0.9 ni axum 0.8 aceptan.
+# Se revisa cuando sqlx/axum migren a sha2 0.11 (ahí desaparece sola).
+[[IgnoredVulns]]
+id = "GHSA-qwgh-2vcv-g2f7"
+reason = "block-buffer 0.10.4: requiere un panic capturado dentro del hasher; sin catch_unwind en la ruta de hashing y sin fix en la rama 0.10 (la 0.12 exige sha2 0.11, no soportado por sqlx/axum)."
+ignoreUntil = 2027-01-31

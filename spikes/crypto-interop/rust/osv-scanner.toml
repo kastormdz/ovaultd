@@ -1,0 +1,11 @@
+# El lock de este spike está CONGELADO a propósito: reproduce la interop de crypto de la
+# fase 0 con las versiones exactas de entonces. No es código de producción ni se compila
+# en el build del server.
+#
+# GHSA-qwgh-2vcv-g2f7 (`block-buffer 0.10.4`) llega por `digest 0.10` → `sha2 0.10`, igual
+# que en el árbol principal (donde está filtrado con su propio motivo). Acá se repite el
+# filtro porque osv-scanner resuelve la configuración por directorio del lockfile.
+[[IgnoredVulns]]
+id = "GHSA-qwgh-2vcv-g2f7"
+reason = "spike congelado (fase 0, no es build de producción); mismo block-buffer 0.10.4 que el árbol principal, ya justificado en la raíz."
+ignoreUntil = 2027-01-31
