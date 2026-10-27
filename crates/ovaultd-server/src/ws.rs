@@ -57,6 +57,8 @@ struct HelloMessage {
     /// manda y el panel muestra "—". Se guarda recortada a 64 caracteres.
     #[serde(default)]
     app_version: Option<String>,
+    /// Notas (`.md`) que el cliente ve en su vault. Opcional: un cliente viejo no lo manda.
+    notes: Option<u32>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -233,6 +235,15 @@ impl Connection {
                 ErrorCode::Unauthorized,
                 "el device del hello no es el dispositivo autenticado",
             ));
+        }
+
+        if let Some(notes) = hello.notes {
+            // El conteo lo hace el cliente sobre su copia local; el server sólo lo guarda.
+            let _ = sqlx::query("UPDATE devices SET notes = ? WHERE id = ?")
+                .bind(i64::from(notes.min(10_000_000)))
+                .bind(device_id)
+                .execute(&self.pool)
+                .await;
         }
 
         if let Some(version) = hello.app_version.as_deref() {

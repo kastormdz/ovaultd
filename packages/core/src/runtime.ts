@@ -297,6 +297,7 @@ const handlers: Record<string, Handler> = {
       device: Number(params.device),
       keys,
       appVersion: typeof params.appVersion === 'string' ? params.appVersion : undefined,
+      notes: typeof params.notes === 'number' ? params.notes : undefined,
       // El HTTP del cliente pasa por el PUENTE (mismo origen que la página): el cache del
       // preflight CORS del navegador es por URL y cada blob tiene la suya, así que un PUT
       // directo pagaba un OPTIONS de ~40 ms por blob. El puente lo reenvía con node.

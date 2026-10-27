@@ -1409,3 +1409,34 @@ async fn el_hello_guarda_la_version_del_cliente_en_el_device(
     ws.server.abort();
     Ok(())
 }
+
+#[tokio::test]
+async fn el_hello_guarda_la_cantidad_de_notas(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let context = TestContext::new().await?;
+    let mut ws = connect(&context, Some(&context.token)).await?;
+
+    send_json(
+        &mut ws.socket,
+        json!({
+            "t": "hello",
+            "proto": 1,
+            "vault": context.vault_id,
+            "device": context.device_id,
+            "since": 0,
+            "notes": 196
+        }),
+    )
+    .await?;
+    let response = recv_json(&mut ws.socket).await?;
+    assert_eq!(response["t"], "hello_ok");
+
+    let notes: Option<i64> = sqlx::query_scalar("SELECT notes FROM devices WHERE id = ?")
+        .bind(context.device_id)
+        .fetch_one(&context.pool)
+        .await?;
+    assert_eq!(notes, Some(196), "el conteo de notas del cliente queda en el device");
+
+    ws.server.abort();
+    Ok(())
+}

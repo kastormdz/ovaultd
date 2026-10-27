@@ -1005,7 +1005,7 @@ async fn vault_detalle_muestra_los_numeros_de_la_db() -> Result<()> {
     assert_eq!(resp.status(), StatusCode::OK);
     let html = cuerpo(resp).await?;
     assert!(html.contains("vault-de-integracion"), "nombre del vault");
-    assert!(html.contains("Archivos vivos"), "las stats del vault están");
+    assert!(html.contains("Notas"), "las stats del vault están");
     // El link de borrado vive en el detalle.
     assert!(html.contains(&format!("/admin/vaults/borrar?id={}", contexto.vault_id)));
 
@@ -1454,6 +1454,39 @@ async fn c1_el_reset_es_todo_o_nada() -> Result<()> {
         .fetch_one(&contexto.pool)
         .await?;
     assert_eq!(sesiones_despues, sesiones, "las sesiones tampoco se borraron");
+
+    Ok(())
+}
+
+/// El panel distingue lo que el server sabe (archivos, exacto) de lo que sólo el cliente
+/// puede saber (notas `.md`, porque el path viaja cifrado).
+#[tokio::test]
+async fn dashboard_muestra_notas_y_archivos() -> Result<()> {
+    let contexto = TestContext::new().await?;
+    hacer_admin(&contexto).await?;
+    let cookie = login(&contexto).await?;
+
+    sqlx::query("UPDATE devices SET notes = 42 WHERE id = ?")
+        .bind(contexto.device_id)
+        .execute(&contexto.pool)
+        .await?;
+
+    let resp = contexto.request(get_con_cookie("/admin", &cookie)?).await?;
+    assert_eq!(resp.status(), StatusCode::OK);
+    let html = cuerpo(resp).await?;
+    assert!(html.contains("Notas"), "el KPI de notas");
+    assert!(html.contains("Archivos"), "el KPI de archivos; HTML={}", &html[..html.len().min(900)]);
+    // El KPI de notas se alimenta de devices con revisions en ESE vault; este contexto no
+    // tiene commits, así que el número puede ser `—`. Lo que se prueba es que el rótulo
+    // exista y que el panel no rompa con `notes = NULL`.
+
+    let resp = contexto
+        .request(get_con_cookie("/admin/vaults", &cookie)?)
+        .await?;
+    let estado = resp.status();
+    let html = cuerpo(resp).await?;
+    assert_eq!(estado, StatusCode::OK, "vaults {} :: {}", estado, &html[..html.len().min(400)]);
+    assert!(html.contains("Archivos"), "la columna en la tabla de vaults");
 
     Ok(())
 }

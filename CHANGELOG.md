@@ -149,6 +149,26 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y e
   responden como `error` y la sesión sigue; sólo `unauthorized` (credenciales) e
   `internal` (estado en duda) cierran. El `hello` sí cierra en cualquier error.
 
+## [0.3.3] — 2026-10-24
+
+El panel distingue **notas** de **archivos**.
+
+### Added
+
+- **KPI y columna «Archivos»** en el panel: `files` sin borrar, exacto y sin depender del
+  cliente.
+- **KPI y columna «Notas»**: el conteo de `.md` que reporta el cliente en el `hello`
+  (migración 008, `devices.notes`). El server **no puede** calcularlo: el path viaja cifrado
+  (`path_enc`) y el E2EE no le permite distinguir una nota de un adjunto. Si ningún cliente
+  reportó todavía, la columna muestra `—`.
+- El **CLI** cuenta las notas al conectar (walk local, sin costo perceptible) y el **plugin**
+  usa `getMarkdownFiles()`.
+
+### Changed
+
+- El rótulo viejo «Notas» contaba `files` (archivos + carpetas), que no es lo mismo. Ahora
+  «Archivos» es ese número, correctamente etiquetado.
+
 ## [0.3.2] — 2026-10-24
 
 A2 del plan: los restos que quedaban después de las fases A–D.

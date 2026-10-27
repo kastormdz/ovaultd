@@ -49,7 +49,8 @@ struct PlantillaDetalle {
     epoch: i64,
     head_rev: i64,
     enc_version: i64,
-    notas: i64,
+    notas: String,
+    archivos: i64,
     revisiones: i64,
     batch_count: i64,
     blob_count: i64,
@@ -109,7 +110,8 @@ struct FilaDetalle {
     epoch: i64,
     head_rev: i64,
     enc_version: i64,
-    notas: i64,
+    notas: Option<i64>,
+    archivos: i64,
     revisiones: i64,
     batches: i64,
     blob_count: i64,
@@ -129,7 +131,12 @@ async fn detalle(
 
     let fila = sqlx::query_as::<_, FilaDetalle>(
         "SELECT v.id, v.name, a.email AS dueno, v.created_at, v.epoch, v.head_rev, v.enc_version,
-                (SELECT COUNT(*) FROM files f WHERE f.vault_id = v.id AND f.deleted = 0) AS notas,
+                (SELECT d.notes FROM revisions r
+                   JOIN devices d ON d.id = r.device_id
+                  WHERE r.vault_id = v.id AND d.notes IS NOT NULL
+                  ORDER BY r.rev DESC LIMIT 1) AS notas,
+                (SELECT COUNT(*) FROM files f
+                  WHERE f.vault_id = v.id AND f.deleted = 0 AND f.is_folder = 0) AS archivos,
                 (SELECT COUNT(*) FROM revisions r WHERE r.vault_id = v.id) AS revisiones,
                 (SELECT COUNT(*) FROM batches b WHERE b.vault_id = v.id) AS batches,
                 (SELECT COUNT(*) FROM blobs bl WHERE bl.vault_id = v.id) AS blob_count,
@@ -202,7 +209,8 @@ async fn detalle(
                 epoch: fila.epoch,
                 head_rev: fila.head_rev,
                 enc_version: fila.enc_version,
-                notas: fila.notas,
+                notas: fila.notas.map_or_else(|| "—".to_owned(), |n| n.to_string()),
+                archivos: fila.archivos,
                 revisiones: fila.revisiones,
                 batch_count: fila.batches,
                 blob_count: fila.blob_count,

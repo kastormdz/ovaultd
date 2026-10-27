@@ -8,12 +8,37 @@
  */
 
 import { homedir, hostname } from 'node:os';
-import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { createRequire } from 'node:module';
 
 /** Versión real del paquete (dist/main.js → ../package.json): el panel la muestra por device. */
 const CONFIG_DIR = process.env.OVAULTD_VAULT_CONFIG_DIR?.trim() || '.obsidian';
+/**
+ * Notas (`.md`) del vault local. El server no puede contarlas: el path viaja cifrado, así
+ * que sólo el cliente sabe cuáles son notas y cuáles adjuntos.
+ */
+const contarNotas = (dir: string | undefined, configDir: string): number => {
+  if (!dir) return 0;
+  let total = 0;
+  const recorrer = (actual: string): void => {
+    let entradas;
+    try {
+      entradas = readdirSync(actual, { withFileTypes: true });
+    } catch {
+      return; // un directorio ilegible no puede tumbar el sync
+    }
+    for (const entrada of entradas) {
+      if (entrada.name.startsWith('.') || entrada.name === configDir) continue;
+      const ruta = join(actual, entrada.name);
+      if (entrada.isDirectory()) recorrer(ruta);
+      else if (entrada.name.toLowerCase().endsWith('.md')) total += 1;
+    }
+  };
+  recorrer(dir);
+  return total;
+};
+
 const VERSION_DEL_CLIENTE = `cli ${(createRequire(import.meta.url)('../package.json') as { version: string }).version}`;
 
 import { Command } from 'commander';
@@ -399,6 +424,7 @@ programa
           } | null;
           await abierto.runtime.call('sync.open', {
             appVersion: VERSION_DEL_CLIENTE,
+            notes: contarNotas(abierto.vault.dir, CONFIG_DIR),
             configDir: CONFIG_DIR,
             baseUrl: abierto.sesion.server,
             token: abierto.token,
@@ -552,6 +578,7 @@ programa
         } | null;
         await abierto.runtime.call('sync.open', {
             appVersion: VERSION_DEL_CLIENTE,
+            notes: contarNotas(abierto.vault.dir, CONFIG_DIR),
             configDir: CONFIG_DIR,
           baseUrl: abierto.sesion.server,
           token: abierto.token,
@@ -766,6 +793,7 @@ async function conVaultEnLectura<T>(
     } | null;
     await abierto.runtime.call('sync.open', {
             appVersion: VERSION_DEL_CLIENTE,
+            notes: contarNotas(abierto.vault.dir, CONFIG_DIR),
             configDir: CONFIG_DIR,
       baseUrl: abierto.sesion.server,
       token: abierto.token,

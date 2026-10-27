@@ -47,6 +47,8 @@ export interface VaultLocalState {
   wrapped_key_pw: string;
   wrapped_key_rc: string;
   vault_pubkey: string;
+  /** Último conteo de notas (`.md`) visto por este cliente. */
+  notes?: number;
   /** Carpeta local vinculada por `setup`, si existe. */
   dir?: string;
   /**

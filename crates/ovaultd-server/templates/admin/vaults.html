@@ -18,6 +18,7 @@
         <th>{{ t.th_id }}</th>
         <th>{{ t.th_vault }}</th>
         <th class="num">{{ t.th_notas }}</th>
+        <th class="num">{{ t.th_archivos }}</th>
         <th class="num">{{ t.th_rev }}</th>
         <th class="num">{{ t.th_tamano }}</th>
         <th>{{ t.th_ultima_act }} <span class="sub">({{ zona }})</span></th>
@@ -30,6 +31,7 @@
         <td>{{ v.id }}</td>
         <td><a href="/admin/vaults/detalle?id={{ v.id }}">{{ v.name }}</a></td>
         <td class="num">{{ v.notas }}</td>
+        <td class="num">{{ v.archivos }}</td>
         <td class="num">{{ v.revisiones }}</td>
         <td class="num">{{ v.espacio }}</td>
         <td>{% if let Some(ts) = v.ultima_revision %}{{ ts }}{% else %}{{ t.est_sin_actividad }}{% endif %}</td>

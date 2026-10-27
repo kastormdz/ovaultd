@@ -260,7 +260,10 @@ struct PlantillaDashboard {
     // KPIs
     cuentas: i64,
     vaults: i64,
-    notas: i64,
+    /// Notas reportadas por el cliente (`MAX(devices.notes)`); `—` si ninguno reportó.
+    notas: String,
+    /// Archivos vivos según el server (`files`), exacto y sin depender del cliente.
+    archivos: i64,
     revisiones: i64,
     devices: i64,
     lotes: i64,
@@ -276,7 +279,8 @@ struct PlantillaDashboard {
 struct VistaVault {
     id: i64,
     name: String,
-    notas: i64,
+    notas: String,
+    archivos: i64,
     revisiones: i64,
     espacio: String,
     ultima_revision: Option<String>,
@@ -491,11 +495,31 @@ async fn dashboard(State(estado): State<EstadoServidor>, Sesion(sesion): Sesion)
 
     let cuentas = contar(&estado.pool, "SELECT COUNT(*) FROM accounts").await;
     let vaults = contar(&estado.pool, "SELECT COUNT(*) FROM vaults").await;
-    let notas = contar(
+    // Archivos: el server los tiene exactos. Notas: sólo el cliente sabe cuántas son `.md`
+    // (el path viaja cifrado), así que se muestra lo que reportó y `—` si nadie lo hizo.
+    let archivos = contar(
         &estado.pool,
-        "SELECT COUNT(*) FROM files WHERE deleted = 0",
+        "SELECT COUNT(*) FROM files WHERE deleted = 0 AND is_folder = 0",
     )
     .await;
+    // AISLAMIENTO: `MAX(notes)` global mezclaría vaults (un device del vault A podría fijar el
+    // número que ve el operador para el vault B). Se toma el máximo POR VAULT y se suma.
+    let notas_crudas: Option<i64> = sqlx::query_scalar(
+        "SELECT SUM(m) FROM (
+             SELECT MAX(d.notes) AS m
+               FROM vaults v
+               JOIN devices d ON d.notes IS NOT NULL
+              WHERE EXISTS (SELECT 1 FROM revisions r
+                             WHERE r.device_id = d.id AND r.vault_id = v.id)
+              GROUP BY v.id)",
+    )
+    .fetch_one(&estado.pool)
+    .await
+    .unwrap_or(None);
+    let notas = match notas_crudas {
+        Some(n) => n.to_string(),
+        None => t.sin_datos.to_owned(),
+    };
     let revisiones = contar(&estado.pool, "SELECT COUNT(*) FROM revisions").await;
     let devices = contar(
         &estado.pool,
@@ -554,7 +578,12 @@ async fn dashboard(State(estado): State<EstadoServidor>, Sesion(sesion): Sesion)
 
     let vaults_lista = sqlx::query_as::<_, FilaVault>(
         "SELECT v.id, v.name,
-                (SELECT COUNT(*) FROM files f WHERE f.vault_id = v.id AND f.deleted = 0) AS notas,
+                (SELECT d.notes FROM revisions r
+                   JOIN devices d ON d.id = r.device_id
+                  WHERE r.vault_id = v.id AND d.notes IS NOT NULL
+                  ORDER BY r.rev DESC LIMIT 1) AS notas,
+                (SELECT COUNT(*) FROM files f
+                  WHERE f.vault_id = v.id AND f.deleted = 0 AND f.is_folder = 0) AS archivos,
                 (SELECT COUNT(*) FROM revisions r WHERE r.vault_id = v.id) AS revisiones,
                 (SELECT COALESCE(SUM(b.size), 0) FROM blobs b WHERE b.vault_id = v.id) AS bytes,
                 (SELECT MAX(r.ts) FROM revisions r WHERE r.vault_id = v.id) AS ultima_revision
@@ -634,6 +663,7 @@ async fn dashboard(State(estado): State<EstadoServidor>, Sesion(sesion): Sesion)
                 cuentas,
                 vaults,
                 notas,
+                archivos,
                 revisiones,
                 devices,
                 lotes,
@@ -664,7 +694,8 @@ fn uptime_texto(segundos: u64) -> String {
 struct FilaVault {
     id: i64,
     name: String,
-    notas: i64,
+    notas: Option<i64>,
+    archivos: i64,
     revisiones: i64,
     bytes: i64,
     ultima_revision: Option<String>,
@@ -674,7 +705,8 @@ fn vista_de_fila(fila: FilaVault, offset_minutos: i32) -> VistaVault {
     VistaVault {
         id: fila.id,
         name: fila.name,
-        notas: fila.notas,
+        notas: fila.notas.map_or_else(|| "—".to_owned(), |n| n.to_string()),
+        archivos: fila.archivos,
         revisiones: fila.revisiones,
         espacio: formato_bytes(fila.bytes),
         ultima_revision: fila
@@ -691,7 +723,12 @@ async fn vaults(State(estado): State<EstadoServidor>, Sesion(sesion): Sesion) ->
 
     let filas = sqlx::query_as::<_, FilaVault>(
         "SELECT v.id, v.name,
-                (SELECT COUNT(*) FROM files f WHERE f.vault_id = v.id AND f.deleted = 0) AS notas,
+                (SELECT d.notes FROM revisions r
+                   JOIN devices d ON d.id = r.device_id
+                  WHERE r.vault_id = v.id AND d.notes IS NOT NULL
+                  ORDER BY r.rev DESC LIMIT 1) AS notas,
+                (SELECT COUNT(*) FROM files f
+                  WHERE f.vault_id = v.id AND f.deleted = 0 AND f.is_folder = 0) AS archivos,
                 (SELECT COUNT(*) FROM revisions r WHERE r.vault_id = v.id) AS revisiones,
                 (SELECT COALESCE(SUM(b.size), 0) FROM blobs b WHERE b.vault_id = v.id) AS bytes,
                 (SELECT MAX(r.ts) FROM revisions r WHERE r.vault_id = v.id) AS ultima_revision

@@ -81,6 +81,8 @@ export interface SyncConnectionOptions {
   fetchImpl?: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
   /** Versión del cliente que reporta el `hello` (el panel la muestra por device). */
   appVersion?: string;
+  /** Notas (`.md`) que el cliente ve en su vault. El server no puede derivarlo (path cifrado). */
+  notes?: number;
 }
 
 interface Espera {
@@ -145,6 +147,7 @@ export class SyncConnection {
       device: this.opciones.device,
       since,
       ...(this.opciones.appVersion ? { app_version: this.opciones.appVersion } : {}),
+      ...(typeof this.opciones.notes === 'number' ? { notes: this.opciones.notes } : {}),
     });
     const helloOk = (await this.esperar(['hello_ok'])) as HelloOkWire;
 
