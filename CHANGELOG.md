@@ -149,6 +149,33 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y e
   responden como `error` y la sesión sigue; sólo `unauthorized` (credenciales) e
   `internal` (estado en duda) cierran. El `hello` sí cierra en cualquier error.
 
+## [0.3.4] — 2026-10-27
+
+El conteo de notas deja de mentir cuando hay más de un vault.
+
+### Fixed
+
+- **El KPI «Notas» contaba de más y mezclaba cuentas.** `devices.notes` (migración 008) es un
+  solo número por dispositivo: no tiene vault. Si el mismo cliente sincroniza dos vaults, el
+  número se acreditaba a los dos, y las vistas por vault tomaban el `notes` del dispositivo
+  de la última revisión —que podía ser el conteo de otro vault—. Con dos vaults de la misma
+  cuenta y uno de otra, un escenario de 216 notas reales mostraba 597, con el vault ajeno
+  mostrando el número de la primera cuenta.
+- **Migración 009**: tabla `device_vault_notes (device_id, vault_id, notes, updated_at)` con
+  PK compuesta; el `hello` escribe ahí usando el vault del handshake, y las cuatro consultas
+  del panel (KPI, dashboard, lista y detalle) leen el reporte **más reciente de ese vault**.
+  `devices.notes` se sigue escribiendo como último reporte del device para que un rollback a
+  0.3.3 siga mostrando un número.
+- **El backfill de la migración es conservador**: sólo migra los devices que tocaron un único
+  vault (donde el número no es ambiguo). Los que tocaron varios se llenan con el próximo
+  `hello`.
+
+### Security
+
+- **El `hello` persiste metadata recién después de autorizar el vault.** `notes` y
+  `app_version` se escribían antes de `resolve_vault`, así que un `hello` con un vault ajeno
+  dejaba el conteo guardado aunque la conexión se cerrara en el acto. Ahora no se escribe nada.
+
 ## [0.3.3] — 2026-10-24
 
 El panel distingue **notas** de **archivos**.

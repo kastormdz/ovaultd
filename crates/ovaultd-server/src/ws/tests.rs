@@ -1435,7 +1435,87 @@ async fn el_hello_guarda_la_cantidad_de_notas(
         .bind(context.device_id)
         .fetch_one(&context.pool)
         .await?;
-    assert_eq!(notes, Some(196), "el conteo de notas del cliente queda en el device");
+    assert_eq!(notes, Some(196), "último reporte del device (compat de rollback)");
+
+    // Lo que lee el panel: el conteo con identidad (device, vault).
+    let por_vault: Option<i64> = sqlx::query_scalar(
+        "SELECT notes FROM device_vault_notes WHERE device_id = ? AND vault_id = ?",
+    )
+    .bind(context.device_id)
+    .bind(context.vault_id)
+    .fetch_optional(&context.pool)
+    .await?;
+    assert_eq!(
+        por_vault,
+        Some(196),
+        "el conteo queda asociado al vault del handshake"
+    );
+
+    ws.server.abort();
+    Ok(())
+}
+
+/// H-02: el `hello` no persiste nada si el vault no es de la cuenta. Antes se escribían
+/// `notes`/`app_version` ANTES de `resolve_vault`, así que un hello con un vault ajeno
+/// dejaba el conteo guardado aunque la conexión se cerrara enseguida.
+#[tokio::test]
+async fn el_hello_con_vault_ajeno_no_guarda_nada(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let context = TestContext::new().await?;
+    let cuenta_ajena =
+        auth::crear_cuenta(&context.pool, "otra@ejemplo.com", auth::PASSWORD_DE_PRUEBA).await?;
+    let ajeno = sqlx::query_scalar::<_, i64>(
+        "INSERT INTO vaults
+             (account_id, name, salt, kdf_params, wrapped_key_pw, wrapped_key_rc, vault_pubkey)
+         VALUES (?, 'ajeno', ?, '{}', ?, ?, ?)
+         RETURNING id",
+    )
+    .bind(cuenta_ajena.id)
+    .bind(vec![9u8; 16])
+    .bind(vec![0u8; 32])
+    .bind(vec![0u8; 32])
+    .bind(vec![0u8; 32])
+    .fetch_one(&context.pool)
+    .await?;
+    let mut ws = connect(&context, Some(&context.token)).await?;
+
+    send_json(
+        &mut ws.socket,
+        json!({
+            "t": "hello",
+            "proto": 1,
+            "vault": ajeno,
+            "device": context.device_id,
+            "since": 0,
+            "notes": 999,
+            "app_version": "cli 9.9.9"
+        }),
+    )
+    .await?;
+    // El handshake cierra: el resultado exacto del recv no importa, lo que importa es la DB.
+    let _ = recv_json(&mut ws.socket).await;
+
+    let por_vault: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM device_vault_notes WHERE device_id = ? AND vault_id = ?",
+    )
+    .bind(context.device_id)
+    .bind(ajeno)
+    .fetch_one(&context.pool)
+    .await?;
+    assert_eq!(por_vault, 0, "no se escribe el conteo de un vault ajeno");
+
+    let notes: Option<i64> = sqlx::query_scalar("SELECT notes FROM devices WHERE id = ?")
+        .bind(context.device_id)
+        .fetch_one(&context.pool)
+        .await?;
+    assert_eq!(notes, None, "ni el último reporte del device");
+
+    let version: Option<String> =
+        sqlx::query_scalar("SELECT app_version FROM devices WHERE id = ?")
+            .bind(context.device_id)
+            .fetch_one(&context.pool)
+            .await?;
+    assert_eq!(version, None, "ni la versión del cliente");
 
     ws.server.abort();
     Ok(())

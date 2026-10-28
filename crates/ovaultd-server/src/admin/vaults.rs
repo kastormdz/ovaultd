@@ -131,10 +131,9 @@ async fn detalle(
 
     let fila = sqlx::query_as::<_, FilaDetalle>(
         "SELECT v.id, v.name, a.email AS dueno, v.created_at, v.epoch, v.head_rev, v.enc_version,
-                (SELECT d.notes FROM revisions r
-                   JOIN devices d ON d.id = r.device_id
-                  WHERE r.vault_id = v.id AND d.notes IS NOT NULL
-                  ORDER BY r.rev DESC LIMIT 1) AS notas,
+                (SELECT n.notes FROM device_vault_notes n
+                  WHERE n.vault_id = v.id
+                  ORDER BY n.updated_at DESC, n.device_id DESC LIMIT 1) AS notas,
                 (SELECT COUNT(*) FROM files f
                   WHERE f.vault_id = v.id AND f.deleted = 0 AND f.is_folder = 0) AS archivos,
                 (SELECT COUNT(*) FROM revisions r WHERE r.vault_id = v.id) AS revisiones,

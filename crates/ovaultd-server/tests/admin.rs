@@ -1466,19 +1466,21 @@ async fn dashboard_muestra_notas_y_archivos() -> Result<()> {
     hacer_admin(&contexto).await?;
     let cookie = login(&contexto).await?;
 
-    sqlx::query("UPDATE devices SET notes = 42 WHERE id = ?")
-        .bind(contexto.device_id)
-        .execute(&contexto.pool)
-        .await?;
+    sqlx::query(
+        "INSERT INTO device_vault_notes (device_id, vault_id, notes, updated_at)
+         VALUES (?, ?, 42, 1000)",
+    )
+    .bind(contexto.device_id)
+    .bind(contexto.vault_id)
+    .execute(&contexto.pool)
+    .await?;
 
     let resp = contexto.request(get_con_cookie("/admin", &cookie)?).await?;
     assert_eq!(resp.status(), StatusCode::OK);
     let html = cuerpo(resp).await?;
     assert!(html.contains("Notas"), "el KPI de notas");
+    assert!(html.contains(">42<"), "el número que reportó el cliente para ESE vault");
     assert!(html.contains("Archivos"), "el KPI de archivos; HTML={}", &html[..html.len().min(900)]);
-    // El KPI de notas se alimenta de devices con revisions en ESE vault; este contexto no
-    // tiene commits, así que el número puede ser `—`. Lo que se prueba es que el rótulo
-    // exista y que el panel no rompa con `notes = NULL`.
 
     let resp = contexto
         .request(get_con_cookie("/admin/vaults", &cookie)?)
@@ -1487,6 +1489,72 @@ async fn dashboard_muestra_notas_y_archivos() -> Result<()> {
     let html = cuerpo(resp).await?;
     assert_eq!(estado, StatusCode::OK, "vaults {} :: {}", estado, &html[..html.len().min(400)]);
     assert!(html.contains("Archivos"), "la columna en la tabla de vaults");
+
+    Ok(())
+}
+
+/// H-01: el conteo de notas tiene identidad (device, vault). Un device que sincroniza dos
+/// vaults no puede acreditar su número a los dos, y un vault de otra cuenta no puede ver
+/// el número de un device ajeno aunque ese device tenga una revisión histórica ahí.
+#[tokio::test]
+async fn el_kpi_de_notas_no_mezcla_vaults_ni_cuentas() -> Result<()> {
+    let contexto = TestContext::new().await?;
+    hacer_admin(&contexto).await?;
+    let cookie = login(&contexto).await?;
+
+    let segundo = contexto.agregar_vault_propio("segundo").await?;
+    let (ajeno, _token_ajeno) = contexto.agregar_vault_ajeno("otra@ejemplo.com").await?;
+
+    // El device del contexto reportó 199 para el vault 1 y 10 para el segundo.
+    for (vault, notas) in [(contexto.vault_id, 199_i64), (segundo, 10)] {
+        sqlx::query(
+            "INSERT INTO device_vault_notes (device_id, vault_id, notes, updated_at)
+             VALUES (?, ?, ?, 1000)",
+        )
+        .bind(contexto.device_id)
+        .bind(vault)
+        .bind(notas)
+        .execute(&contexto.pool)
+        .await?;
+    }
+    // Un device de la otra cuenta reporta 7 en su vault.
+    let device_ajeno: i64 = sqlx::query_scalar(
+        "SELECT id FROM devices WHERE account_id = (SELECT account_id FROM vaults WHERE id = ?)",
+    )
+    .bind(ajeno)
+    .fetch_one(&contexto.pool)
+    .await?;
+    sqlx::query(
+        "INSERT INTO device_vault_notes (device_id, vault_id, notes, updated_at)
+         VALUES (?, ?, 7, 1000)",
+    )
+    .bind(device_ajeno)
+    .bind(ajeno)
+    .execute(&contexto.pool)
+    .await?;
+
+    // Y una revisión del device del contexto en el vault ajeno: es el caso que en la versión
+    // anterior hacía que el vault de la otra cuenta mostrara el número de este device.
+    contexto.registrar_blob_en(ajeno, 200, 1).await?;
+
+    let resp = contexto.request(get_con_cookie("/admin", &cookie)?).await?;
+    assert_eq!(resp.status(), StatusCode::OK);
+    let html = cuerpo(resp).await?;
+
+    // 199 + 10 + 7 = 216. La versión anterior daba 597.
+    assert!(
+        html.contains(">216<"),
+        "el KPI suma el reporte de cada vault, no el de cada device: {html:.0}"
+    );
+
+    let resp = contexto
+        .request(get_con_cookie("/admin/vaults", &cookie)?)
+        .await?;
+    assert_eq!(resp.status(), StatusCode::OK);
+    let html = cuerpo(resp).await?;
+    assert!(html.contains("199"), "el vault propio conserva su número");
+    assert!(html.contains("10"), "el segundo vault tiene el suyo");
+    assert!(html.contains("7"), "el vault ajeno muestra lo que reportó su dueño");
 
     Ok(())
 }

@@ -237,10 +237,40 @@ impl Connection {
             ));
         }
 
+        resolve_vault(&self.pool, account_id, hello.vault)
+            .await
+            // En el handshake no hay nada que reintentar sobre el mismo socket: un vault
+            // ajeno, un device inválido o una firma mala CIERRAN la conexión. El `from_server_error`
+            // tolerante es para los mensajes de una sesión ya autenticada.
+            .map_err(|error: ServerError| {
+                WsFailure::close(
+                    error.error_code().unwrap_or(ErrorCode::Internal),
+                    error.to_string(),
+                )
+            })?;
+
+        // Recién con el vault autorizado se persiste lo que reportó el cliente: antes de
+        // esto, un `hello` con un vault ajeno dejaba el conteo escrito aunque la conexión
+        // se cerrara enseguida. El conteo lo calcula el cliente sobre su copia local; el
+        // server sólo lo guarda, y lo guarda POR VAULT (un device puede sincronizar varios).
         if let Some(notes) = hello.notes {
-            // El conteo lo hace el cliente sobre su copia local; el server sólo lo guarda.
+            let notas = i64::from(notes.min(10_000_000));
+            let _ = sqlx::query(
+                "INSERT INTO device_vault_notes (device_id, vault_id, notes, updated_at)
+                 VALUES (?, ?, ?, CAST(strftime('%s', 'now') AS INTEGER))
+                 ON CONFLICT(device_id, vault_id) DO UPDATE
+                    SET notes = excluded.notes,
+                        updated_at = excluded.updated_at",
+            )
+            .bind(device_id)
+            .bind(hello.vault)
+            .bind(notas)
+            .execute(&self.pool)
+            .await;
+            // Último reporte del device sin vault: sólo para que un rollback a la versión
+            // anterior siga mostrando un número.
             let _ = sqlx::query("UPDATE devices SET notes = ? WHERE id = ?")
-                .bind(i64::from(notes.min(10_000_000)))
+                .bind(notas)
                 .bind(device_id)
                 .execute(&self.pool)
                 .await;
@@ -256,18 +286,6 @@ impl Connection {
                     .await;
             }
         }
-
-        resolve_vault(&self.pool, account_id, hello.vault)
-            .await
-            // En el handshake no hay nada que reintentar sobre el mismo socket: un vault
-            // ajeno, un device inválido o una firma mala CIERRAN la conexión. El `from_server_error`
-            // tolerante es para los mensajes de una sesión ya autenticada.
-            .map_err(|error: ServerError| {
-                WsFailure::close(
-                    error.error_code().unwrap_or(ErrorCode::Internal),
-                    error.to_string(),
-                )
-            })?;
 
         // SIEMPRE un challenge NUEVO: reusar el pendiente rompía las conexiones PARALELAS
         // del mismo device (el motor + una lectura al vuelo al recargar el plugin: las dos
