@@ -476,3 +476,63 @@ async fn proceso_real_abortado_a_mitad_de_un_put_deja_la_base_usable() {
     let _ = servidor2.kill();
     let _ = servidor2.wait();
 }
+
+/// El `operation_id` es la clave de idempotencia: un reintento con LAS MISMAS ops devuelve la
+/// misma revisión sin escribir nada. Pero si el cliente reusa el id con otras ops —un estado
+/// local restaurado de un backup viejo, un bug de generación— la versión anterior devolvía
+/// `idempotente: true` y **descartaba los cambios nuevos en silencio**.
+#[tokio::test]
+async fn un_operation_id_reusado_con_otras_ops_no_descarta_los_cambios(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let contexto = TestContext::new().await?;
+    let contenido = b"uno";
+    contexto
+        .registrar_blob(9, contenido.len() as i64)
+        .await
+        .expect("blob");
+
+    let primero = contexto
+        .batch_firmado(vec![common::add_op(7, 9, contenido.len() as u64)], 0);
+    let r1 = ovaultd_server::sync::commit::commit_batch(
+        &contexto.pool,
+        contexto.vault_id,
+        contexto.device_id,
+        &primero,
+    )
+    .await
+    .expect("primer commit");
+    assert_eq!(r1.rev, 1);
+
+    // Mismo operation_id, OTRA operación (path 8 en vez de 7), bien firmada.
+    let mut segundo = contexto
+        .batch_firmado(vec![common::add_op(8, 9, contenido.len() as u64)], 1);
+    segundo.operation_id = primero.operation_id.clone();
+    let op_id = uuid::Uuid::parse_str(&segundo.operation_id).expect("uuid");
+    for op in &mut segundo.ops {
+        common::firmar_op(op, &contexto.identidad(), 1, op_id.as_bytes(), contexto.epoch);
+    }
+
+    let resultado = ovaultd_server::sync::commit::commit_batch(
+        &contexto.pool,
+        contexto.vault_id,
+        contexto.device_id,
+        &segundo,
+    )
+    .await;
+
+    assert!(
+        resultado.is_err(),
+        "un operation_id con contenido distinto no puede pasar como idempotente: {:?}",
+        resultado.map(|r| r.rev)
+    );
+    // Y el estado no cambió: sigue una sola revisión, la del primer batch.
+    assert_eq!(contar(&contexto.pool, "revisions").await, 1);
+    let paths: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM files WHERE vault_id = ?")
+        .bind(contexto.vault_id)
+        .fetch_one(&contexto.pool)
+        .await
+        .expect("files");
+    assert_eq!(paths, 1, "el path 8 no se aplicó");
+
+    Ok(())
+}

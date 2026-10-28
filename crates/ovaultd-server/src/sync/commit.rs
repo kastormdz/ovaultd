@@ -350,6 +350,48 @@ async fn existing_batch_revision(
     .await?)
 }
 
+/// ¿El batch repite EXACTAMENTE las operaciones que ya se guardaron para ese `operation_id`?
+///
+/// El id es la clave de idempotencia, pero un id reusado con otras ops no es un reintento:
+/// es un cliente con estado viejo (backup restaurado) o un bug que repite el id. Sin esta
+/// comparación, el server respondía `idempotente: true` y **descartaba los cambios nuevos**.
+async fn mismas_ops(
+    pool: &SqlitePool,
+    vault_id: i64,
+    operation_id: &str,
+    ops: &[BatchOp],
+) -> Result<bool> {
+    let guardadas: Vec<(Vec<u8>, String, Option<Vec<u8>>)> = sqlx::query_as(
+        "SELECT path_id, op, blob_hash
+           FROM revisions
+          WHERE vault_id = ? AND operation_id = ?",
+    )
+    .bind(vault_id)
+    .bind(operation_id)
+    .fetch_all(pool)
+    .await?;
+
+    // Se compara contra lo que REALMENTE se aplicó (un batch colapsa las ops por path).
+    let mut esperadas: Vec<(Vec<u8>, String, Option<Vec<u8>>)> = colapsar_ops(ops)
+        .into_iter()
+        .map(|op| {
+            (
+                op.path_id.as_bytes().to_vec(),
+                op_name(op.op).to_owned(),
+                op.blob_id.map(|blob| blob.as_bytes().to_vec()),
+            )
+        })
+        .collect();
+
+    if guardadas.len() != esperadas.len() {
+        return Ok(false);
+    }
+    let mut ordenadas: Vec<(Vec<u8>, String, Option<Vec<u8>>)> = guardadas;
+    ordenadas.sort();
+    esperadas.sort();
+    Ok(ordenadas == esperadas)
+}
+
 pub async fn commit_batch(
     pool: &SqlitePool,
     vault_id: i64,
@@ -397,6 +439,14 @@ pub async fn commit_batch(
     let existing_rev = existing_batch_revision(pool, vault_id, &batch.operation_id).await?;
 
     if let Some(rev) = existing_rev {
+        // Un reintento legítimo trae las mismas ops. Uno con el mismo id y otras ops es un
+        // cliente con estado viejo: devolverle la rev anterior le diría "aplicado" mientras
+        // sus cambios se pierden.
+        if !mismas_ops(pool, vault_id, &batch.operation_id, &batch.ops).await? {
+            return Err(ServerError::Invalid(
+                "el operation_id ya se usó con otras operaciones".to_owned(),
+            ));
+        }
         return Ok(CommitOutcome {
             rev,
             idempotente: true,
