@@ -536,3 +536,54 @@ async fn un_operation_id_reusado_con_otras_ops_no_descarta_los_cambios(
 
     Ok(())
 }
+
+/// La carrera del commit: dos batches con el MISMO `expected_rev` que entran a la vez.
+/// El `UPDATE vaults SET head_rev = head_rev` de `commit_batch` existe para serializarlos;
+/// sin él los dos leían el mismo head y el perdedor terminaba en 500 (PK de `batches` o
+/// BUSY_SNAPSHOT, que el busy_timeout no reintenta). Hasta ahora eso lo afirmaba un
+/// comentario: este test lo ejecuta con dos futures concurrentes.
+#[tokio::test]
+async fn dos_commits_concurrentes_serializan_y_el_perdedor_ve_conflicto(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let contexto = TestContext::new().await?;
+    contexto.registrar_blob(9, 3).await.expect("blob a");
+    contexto.registrar_blob(10, 3).await.expect("blob b");
+
+    let a = contexto.batch_firmado(vec![common::add_op(7, 9, 3)], 0);
+    let b = contexto.batch_firmado(vec![common::add_op(8, 10, 3)], 0);
+
+    let (ra, rb) = tokio::join!(
+        ovaultd_server::sync::commit::commit_batch(
+            &contexto.pool,
+            contexto.vault_id,
+            contexto.device_id,
+            &a
+        ),
+        ovaultd_server::sync::commit::commit_batch(
+            &contexto.pool,
+            contexto.vault_id,
+            contexto.device_id,
+            &b
+        ),
+    );
+
+    let ganadores = usize::from(ra.is_ok()) + usize::from(rb.is_ok());
+    assert_eq!(ganadores, 1, "exactamente uno gana: {ra:?} / {rb:?}");
+
+    let perdedor = if ra.is_err() { &ra } else { &rb };
+    match perdedor {
+        Err(ovaultd_server::ServerError::Conflict { .. }) => {}
+        otro => panic!("el perdedor tiene que ver Conflict, no {otro:?}"),
+    }
+
+    // El ganador dejó UNA revisión y el head en 1; el perdedor no escribió nada.
+    assert_eq!(contar(&contexto.pool, "revisions").await, 1);
+    assert_eq!(contar(&contexto.pool, "batches").await, 1);
+    let head: i64 = sqlx::query_scalar("SELECT head_rev FROM vaults WHERE id = ?")
+        .bind(contexto.vault_id)
+        .fetch_one(&contexto.pool)
+        .await?;
+    assert_eq!(head, 1);
+
+    Ok(())
+}
