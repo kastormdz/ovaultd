@@ -149,6 +149,43 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y e
   responden como `error` y la sesión sigue; sólo `unauthorized` (credenciales) e
   `internal` (estado en duda) cierran. El `hello` sí cierra en cualquier error.
 
+## [0.3.5] — 2026-10-28
+
+Fase 2 de la auditoría: concurrencia, idempotencia y durabilidad.
+
+### Fixed
+
+- **Un `operation_id` reusado con otras operaciones ya no descarta los cambios.** El id es la
+  clave de idempotencia, pero sólo se comparaba el id: un cliente con estado viejo (backup
+  restaurado, bug de generación) recibía `idempotente: true` y el server **no aplicaba nada**.
+  Pérdida silenciosa. Ahora se contrastan las ops guardadas para ese id (`path_id`, `op`,
+  `blob_hash`, contra el batch colapsado por path) y, si difieren, el commit falla con un error
+  explícito en vez de mentir.
+
+### Tests
+
+- **Dos commits concurrentes de verdad.** El write lock que serializa los commits estaba
+  justificado en un comentario y ningún test lo ejercitaba. El nuevo test corre dos
+  `commit_batch` con `tokio::join!` sobre el mismo `expected_rev` y verifica que gana uno, que
+  el perdedor ve `Conflict` (no 500 ni BUSY) y que queda una sola revisión.
+
+### Verified (sin cambios)
+
+Estos controles se auditaron y **no** necesitaron fix; quedan documentados para que no se
+"arreglen" por error:
+
+- La cuota de subida se evalúa dentro del `INSERT ... SELECT ... WHERE`: es atómica, no hay
+  ventana entre chequear y escribir.
+- El GC excluye los blobs con subida en curso y sólo borra `refs = 0` con la gracia vencida.
+- `prune-remote` **recalcula** el plan al aplicar y re-evalúa la guarda sobre ESE plan (no
+  sobre el del dry-run), así que un disco que cambió entre ambos pasos no borra de más.
+- `pathId = HMAC(k_path, NFKC(path))`: dos formas Unicode del mismo nombre colapsan al mismo
+  path.
+- Un archivo ilegible (EACCES/EIO/ELOOP) se marca y se **excluye** del diff: no se interpreta
+  como borrado.
+- El apply escribe el temporal, renombra y **después** avanza el checkpoint: un corte deja el
+  archivo entero o el estado viejo, nunca un checkpoint adelantado.
+
 ## [0.3.4] — 2026-10-27
 
 El conteo de notas deja de mentir cuando hay más de un vault.
