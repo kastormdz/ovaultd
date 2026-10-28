@@ -19,7 +19,11 @@ const j = (o: object): string => `${JSON.stringify(o, null, 2)}\n`;
 describe('apariencia', () => {
   it('detecta el archivo por nombre', () => {
     expect(esApariencia('.obsidian/appearance.json')).toBe(true);
-    expect(esApariencia('appearance.json')).toBe(true);
+    expect(esApariencia('.config-obsidian/appearance.json')).toBe(true);
+    // Un `appearance.json` suelto NO es la config de Obsidian: es un archivo del usuario.
+    // Proyectarlo lo hacía colisionar con el de verdad (mismo hash = mismo blob en el CAS).
+    expect(esApariencia('appearance.json')).toBe(false);
+    expect(esApariencia('notas/appearance.json')).toBe(false);
     expect(esApariencia('.obsidian/community-plugins.json')).toBe(false);
     expect(esApariencia('.obsidian/themes/Anu/theme.css')).toBe(false);
   });
@@ -99,6 +103,34 @@ describe('bytesParaHash (A2: el hash de apariencia sale de la proyección)', () 
     const uno = '{"cssTheme":"Minimal","enabledCssSnippets":["a","b"]}';
     const otro = '{"cssTheme":"Minimal","enabledCssSnippets":["b","a"]}';
     expect(hash(APARIENCIA, uno)).toBe(hash(APARIENCIA, otro));
+  });
+
+  it('un appearance.json FUERA del configDir no se proyecta (no colisiona con el real)', () => {
+    // Un `appearance.json` suelto (export, fixture, nota .json) no es la config de Obsidian.
+    // Proyectarlo lo hacía colisionar con el del configDir: mismo hash = mismo blob en el CAS,
+    // y uno de los dos contenidos no se guardaba nunca.
+    const texto = '{"theme":"obsidian","cssTheme":"Minimal","enabledCssSnippets":["a"]}';
+    expect(hash('B/appearance.json', texto)).toBe(
+      createHash('sha256').update(enc.encode(texto)).digest('hex'),
+    );
+    expect(hash('notas/appearance.json', '{roto')).toBe(
+      createHash('sha256').update(enc.encode('{roto')).digest('hex'),
+    );
+  });
+
+  it('un JSON inválido se hashea crudo, no como objeto vacío', () => {
+    // `{}`, JSON truncado y basura daban la MISMA proyección (`{}`): tres contenidos
+    // distintos, un solo hash. Corromper el archivo no generaba revisión y el CAS servía
+    // otro contenido con ese hash.
+    const vacio = hash(APARIENCIA, '{}');
+    expect(hash(APARIENCIA, '{')).not.toBe(vacio);
+    expect(hash(APARIENCIA, 'NO ES JSON')).not.toBe(vacio);
+    expect(hash(APARIENCIA, '{')).not.toBe(hash(APARIENCIA, 'NO ES JSON'));
+  });
+
+  it('un configDir custom también se proyecta', () => {
+    const texto = '{"theme":"obsidian","cssTheme":"Minimal"}';
+    expect(hash('.mi-config/appearance.json', texto)).toBe(hash(APARIENCIA, texto));
   });
 
   it('cualquier otro archivo se hashea crudo (no se toca)', () => {

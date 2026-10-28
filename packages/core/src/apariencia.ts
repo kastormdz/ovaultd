@@ -22,8 +22,15 @@ const CODIFICADOR = new TextEncoder();
 
 type Json = Record<string, unknown>;
 
-/** ¿El path es un `appearance.json` (del configDir que sea)? */
-export const esApariencia = (path: string): boolean => /(^|\/)appearance\.json$/.test(path);
+/**
+ * ¿El path es el `appearance.json` de un configDir (`.obsidian` o uno custom)?
+ *
+ * El configDir de Obsidian SIEMPRE es un directorio oculto. Exigir el punto evita que un
+ * `appearance.json` suelto —un export, un fixture, una nota `.json`— se proyecte y colisione
+ * con el de la config: mismo hash = mismo blob en el CAS, y uno de los dos se perdía.
+ */
+export const esApariencia = (path: string): boolean =>
+  /(^|\/)\.[^/]+\/appearance\.json$/.test(path);
 
 const parsear = (texto: string): Json | null => {
   try {
@@ -39,7 +46,11 @@ const parsear = (texto: string): Json | null => {
  * se hashea para decidir si el archivo cambió.
  */
 export function proyeccionDeApariencia(texto: string): string {
-  const o = parsear(texto) ?? {};
+  const o = parsear(texto);
+  // JSON inválido (o un valor que no es objeto): se devuelve el texto CRUDO. Proyectarlo a
+  // `{}` hacía que `{}`, un archivo truncado y basura compartieran hash — corromper el
+  // archivo no generaba revisión, y el CAS servía otro contenido para ese hash.
+  if (o === null) return texto;
   const p: Json = {};
   for (const campo of CAMPOS_PORTABLES) {
     const v = o[campo];
