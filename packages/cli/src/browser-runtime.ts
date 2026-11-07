@@ -295,6 +295,37 @@ function manejarFs(
   });
 }
 
+/** Directorio del navegador del runtime: NO es una caché de desarrollo. */
+export const dirNavegador = (): string =>
+  process.env.OVAULTD_BROWSER_DIR ?? join(homedir(), '.local', 'share', 'ovaultd', 'browser');
+
+/**
+ * Ruta del `chrome-headless-shell` instalado en `dirNavegador()`, o `undefined`.
+ *
+ * Playwright guarda su navegador en `~/.cache/ms-playwright`, que es un artefacto de
+ * DESARROLLO: un `rm -rf` de esa caché (o instalar otra versión de Playwright, que busca
+ * otro build) deja el servicio de sync muerto con el panel sin actividad y sin pista.
+ * El runtime usa primero esta copia estable y, si no está, la de Playwright (compat).
+ */
+export function rutaNavegador(): string | undefined {
+  const base = dirNavegador();
+  try {
+    const builds = readdirSync(base)
+      .filter((nombre) => nombre.startsWith('chromium_headless_shell-'))
+      .sort()
+      .reverse();
+    for (const build of builds) {
+      for (const carpeta of ['chrome-headless-shell-linux64', 'chrome-linux64']) {
+        const bin = join(base, build, carpeta, 'chrome-headless-shell');
+        if (existsSync(bin)) return bin;
+      }
+    }
+  } catch {
+    // Sin directorio: se usa el navegador de Playwright.
+  }
+  return undefined;
+}
+
 export class BrowserRuntime {
   private secuencia = 0;
 
@@ -390,8 +421,11 @@ export class BrowserRuntime {
     });
 
     // Perfil persistente: mismo userDataDir ⇒ mismo IndexedDB, siempre.
+    // `executablePath` apunta a la copia ESTABLE si existe (ver `rutaNavegador`); sin ella
+    // Playwright usa la suya y sigue funcionando como antes.
     const contexto = await chromium.launchPersistentContext(join(dataDir, 'chromium-profile'), {
       headless: opciones.headless ?? true,
+      executablePath: rutaNavegador(),
       args: ['--no-first-run', '--no-default-browser-check'],
     });
     // `route` es quirúrgico: un header global viaja al server y rompe el sync (preflight

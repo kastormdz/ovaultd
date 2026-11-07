@@ -122,6 +122,20 @@ journalctl --user -u ovaultd-sync -f
 
 The first `sync` caches the derived vault subkeys with mode 0600, so the service never needs the password; `ovaultd olvidar-clave` drops the cache. Full reference: [docs/cli.md](docs/cli.md). Agent playbook: `skills/ovaultd-cli/SKILL.md`.
 
+#### The CLI needs a browser (yes, really)
+
+The sync engine is the same one the plugin uses, and the plugin keeps its state in **IndexedDB**. To reuse that engine instead of writing a second one, the CLI launches a **headless Chromium** (Playwright) and talks to it over a local bridge. Two sync implementations drift apart, and that drift has already cost bugs.
+
+The price: **~273 MB** of binary plus **~110 MB** of RAM on top of the Node process. By default Playwright leaves it in `~/.cache/ms-playwright`, which is a **development cache**: clear it and sync stops starting. That is why the runtime keeps its own stable copy in `~/.local/share/ovaultd/browser` (override: `OVAULTD_BROWSER_DIR`).
+
+```bash
+ovaultd runtime --check      # is it installed? exit 1 if not
+ovaultd runtime --install    # downloads it to the stable path (~273 MB, once)
+ovaultd runtime --json       # for scripts
+```
+
+On a fresh install, run `--install` **before** starting the service. Without it the CLI still works (it falls back to Playwright's copy), but it stays exposed to that cache disappearing.
+
 ## Behind a reverse proxy
 
 The container listens on loopback and speaks plain HTTP. TLS belongs to the proxy, and the repo ships no proxy on purpose: the edge is yours (ADR-0019). Four things it has to get right, with examples for nginx, Nginx Proxy Manager and Caddy in [docs/deploy.md](docs/deploy.md):

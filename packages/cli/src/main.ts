@@ -8,6 +8,7 @@
  */
 
 import { homedir, hostname } from 'node:os';
+import { spawnSync } from 'node:child_process';
 import { chmodSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { createRequire } from 'node:module';
@@ -1076,6 +1077,80 @@ programa
       console.log(`el perfil del runtime quedó en ${runtimeDirDe(sesion.server, vault)} (--purge lo borra)`);
     }
     console.log('el vault remoto sigue intacto; nada se borró del server');
+  });
+
+// ------------------------------------------------------------------ runtime
+
+programa
+  .command('runtime')
+  .description('navegador que usa el motor de sync (Chromium; ~273 MB)')
+  .option('--check', 'verifica que el navegador esté instalado (exit 1 si falta)')
+  .option('--install', 'instala el navegador en la ruta estable del runtime')
+  .option('--json', 'salida JSON')
+  .action(async (opciones: { check?: boolean; install?: boolean; json?: boolean }) => {
+    const { dirNavegador, rutaNavegador } = await import('./browser-runtime.js');
+
+    const instalar = (): number => {
+      // Playwright respeta PLAYWRIGHT_BROWSERS_PATH al instalar: así el binario queda en
+      // la ruta estable y no en ~/.cache/ms-playwright (caché de desarrollo).
+      const entorno = { ...process.env, PLAYWRIGHT_BROWSERS_PATH: dirNavegador() };
+      let cli: string;
+      try {
+        // `playwright/cli` no está en los `exports` del paquete: se resuelve su raíz y de
+        // ahí el `cli.js` que trae.
+        const requerir = createRequire(import.meta.url);
+        cli = join(dirname(requerir.resolve('playwright/package.json')), 'cli.js');
+      } catch {
+        console.error('no se encontró Playwright: reinstalá el CLI (npm i -g @ovaultd/cli)');
+        return 1;
+      }
+      const resultado = spawnSync(process.execPath, [cli, 'install', 'chromium-headless-shell'], {
+        env: entorno,
+        stdio: 'inherit',
+      });
+      return resultado.status ?? 1;
+    };
+
+    if (opciones.install) {
+      const estado = instalar();
+      if (estado !== 0) {
+        console.error('la instalación del navegador falló');
+        process.exit(estado);
+      }
+    }
+
+    const estable = rutaNavegador();
+    // Sin copia estable, Playwright resuelve la suya: se informa para que se vea el riesgo.
+    const dePlaywright = (() => {
+      try {
+        return createRequire(import.meta.url)('playwright').chromium.executablePath();
+      } catch {
+        return null;
+      }
+    })();
+
+    const salida = {
+      estable: estable ?? null,
+      directorio: dirNavegador(),
+      playwright: dePlaywright,
+      ok: Boolean(estable ?? dePlaywright),
+      en_cache_de_desarrollo: !estable && Boolean(dePlaywright),
+    };
+
+    if (opciones.json) {
+      console.log(JSON.stringify(salida, null, 2));
+    } else if (estable) {
+      console.log(`✓ navegador del runtime: ${estable}`);
+    } else if (dePlaywright) {
+      console.log(`⚠ el runtime usa el navegador de la caché de Playwright:\n    ${dePlaywright}`);
+      console.log('  Esa caché es de desarrollo: si se limpia, el sync no arranca.');
+      console.log(`  Fijalo en la ruta estable con:  ovaultd runtime --install`);
+    } else {
+      console.log('✗ no hay navegador para el runtime');
+      console.log(`  Instalalo con:  ovaultd runtime --install`);
+    }
+
+    if (opciones.check && !salida.ok) process.exit(1);
   });
 
 // ----------------------------------------------------------------------- main
