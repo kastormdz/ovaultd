@@ -66,6 +66,17 @@ enum Comando {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
+
+    // Los TTL viven en la config global, que el server instala al arrancar. Sin esto,
+    // `reissue-token` emitía con el default (720 h) aunque el `.env` dijera otra cosa —
+    // y el token nacía con fecha en vez de a 100 años.
+    match ovaultd_server::config::Config::from_env() {
+        Ok(config) => {
+            ovaultd_server::config::instalar_global(std::sync::Arc::new(config));
+        }
+        Err(error) => eprintln!("aviso: sin config del entorno ({error}); uso los TTL por defecto"),
+    }
+
     let pool = db::connect(&cli.db).await?;
 
     match cli.comando {
