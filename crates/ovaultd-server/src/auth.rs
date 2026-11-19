@@ -409,6 +409,46 @@ pub async fn verificar_token(pool: &SqlitePool, token: &str) -> Result<i64> {
     Ok(fila.device_id)
 }
 
+/// Reemite el token de un device EXISTENTE.
+///
+/// No crea otro device ni toca su estado local: sirve para recuperar un cliente cuyo token
+/// venció sin obligarlo a desvincular (que en el plugin borra el índice y la outbox).
+/// Los tokens vigentes del device se reemplazan; los revocados quedan como histórico.
+pub async fn reemitir_token(pool: &SqlitePool, device_id: i64) -> Result<String> {
+    let account_id: Option<i64> = sqlx::query_scalar(
+        "SELECT account_id FROM devices WHERE id = ? AND revoked_at IS NULL",
+    )
+    .bind(device_id)
+    .fetch_optional(pool)
+    .await?;
+    let account_id = account_id.ok_or(ServerError::NotFound)?;
+
+    let token = token_string(&token_bytes());
+    let token_hash = hash_token(&token);
+    let ttl = crate::config::ttl_token_horas();
+    let horas = if ttl > 0 { ttl } else { 876_000 };
+    let expira = format!("+{horas} hours");
+
+    let mut tx = pool.begin().await?;
+    sqlx::query("DELETE FROM device_tokens WHERE device_id = ? AND revoked_at IS NULL")
+        .bind(device_id)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query(
+        "INSERT INTO device_tokens (token_hash, device_id, account_id, expires_at)
+         VALUES (?, ?, ?, datetime('now', ?))",
+    )
+    .bind(token_hash)
+    .bind(device_id)
+    .bind(account_id)
+    .bind(&expira)
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
+
+    Ok(token)
+}
+
 pub async fn revocar_device(pool: &SqlitePool, device_id: i64) -> Result<()> {
     let mut transaction = pool.begin().await?;
 
@@ -646,6 +686,46 @@ mod tests {
         let result = verificar_token(&context.pool, &context.token).await;
 
         assert!(matches!(result, Err(ServerError::Unauthorized)));
+        Ok(())
+    }
+
+    /// Reemitir el token recupera un cliente vencido SIN crear otro device ni tocar su
+    /// estado local (en el plugin, desvincular borra el índice y la outbox).
+    #[tokio::test]
+    async fn reemitir_token_invalida_el_viejo_y_no_crea_device(
+    ) -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let context = TestContext::new().await?;
+        let devices_antes: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM devices")
+            .fetch_one(&context.pool)
+            .await?;
+
+        let nuevo = reemitir_token(&context.pool, context.device_id).await?;
+
+        assert_ne!(nuevo, context.token, "tiene que ser un token distinto");
+        // El viejo ya no vale y el nuevo sí, contra el MISMO device.
+        assert!(matches!(
+            verificar_token(&context.pool, &context.token).await,
+            Err(ServerError::Unauthorized)
+        ));
+        assert_eq!(
+            verificar_token(&context.pool, &nuevo).await?,
+            context.device_id
+        );
+        let devices_despues: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM devices")
+            .fetch_one(&context.pool)
+            .await?;
+        assert_eq!(devices_antes, devices_despues, "no se crea otro device");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn reemitir_token_de_un_device_inexistente_falla(
+    ) -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let context = TestContext::new().await?;
+        assert!(matches!(
+            reemitir_token(&context.pool, 999_999).await,
+            Err(ServerError::NotFound)
+        ));
         Ok(())
     }
 

@@ -37,6 +37,15 @@ enum Comando {
     Health,
     /// Inspección operacional: conteos y tamaños. Nada de esto descifra contenido.
     Inspect,
+    /// Reemite el token de un device existente. El token se imprime UNA vez por stdout.
+    ///
+    /// No crea otro device ni toca su estado local: recupera un cliente vencido sin
+    /// obligarlo a desvincular (que borraría su índice y su outbox pendiente).
+    ReissueToken {
+        /// Id del device (ver el panel o `inspect`).
+        #[arg(long)]
+        device: i64,
+    },
     /// GC de blobs huérfanos (fase 5): sin flags es dry-run (solo reporta).
     Gc {
         /// Audita el invariante de referencias contra las fuentes (no escribe).
@@ -63,6 +72,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Comando::CreateAccount { email, role } => create_account(&pool, &email, &cli.db, role).await?,
         Comando::Health => health(&pool, &cli.db).await?,
         Comando::Inspect => inspect(&pool).await?,
+        Comando::ReissueToken { device } => {
+            let token = auth::reemitir_token(&pool, device).await?;
+            // stdout limpio: sólo el token, para poder capturarlo en una variable.
+            println!("{token}");
+            eprintln!("token reemitido para el device {device} (no se vuelve a mostrar)");
+        }
         Comando::Gc {
             verify,
             delete,
