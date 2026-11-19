@@ -149,6 +149,28 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y e
   responden como `error` y la sesión sigue; sólo `unauthorized` (credenciales) e
   `internal` (estado en duda) cierran. El `hello` sí cierra en cualquier error.
 
+## [0.3.6] — 2026-11-19
+
+Los tokens dejan de vencer solos.
+
+### Fixed
+
+- **Renovación deslizante del token de device.** El token duraba 720 h y NO se renovaba:
+  un cliente que sincroniza cada 5 segundos se caía solo a los 30 días, con un error
+  genérico (`WS: no se pudo abrir`) indistinguible de "el server está caído". Con esto, cada
+  uso corre el vencimiento hacia adelante (como mucho un UPDATE por hora). Medido en
+  producción: los cuatro dispositivos llevaban entre 1 y 7 días caídos en silencio.
+- **`OVAULTD_TOKEN_TTL_HOURS=0`** emite el token a 100 años: el device vive hasta que se lo
+  revoque desde el panel. Para quien no quiera expiración de ningún tipo.
+- **El CLI distingue los tres fallos de `sync.open`.** Antes todos decían "no se pudo abrir".
+  Ahora, con un GET autenticado, responde:
+  `→ la SESIÓN EXPIRÓ: … ovaultd login …`, `→ el HTTPS responde pero el WebSocket no: revisá
+  el proxy` o `→ el server no responde (¿red o DNS?)`.
+
+### Tests
+
+- `un_token_de_cien_anios_es_valido` y `usar_el_token_renueva_su_vencimiento` (auth).
+
 ## [0.3.5] — 2026-10-28
 
 Fase 2 de la auditoría: concurrencia, idempotencia y durabilidad.

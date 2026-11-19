@@ -377,6 +377,39 @@ programa
 const dormir = (ms: number): Promise<void> => new Promise((resolver) => setTimeout(resolver, ms));
 const hora = (): string => new Date().toTimeString().slice(0, 8);
 
+/**
+ * Un fallo de `sync.open` puede ser tres cosas muy distintas, y el mensaje del WebSocket
+ * las muestra igual ("no se pudo abrir"): red caída, proxy que no hace el Upgrade, o token
+ * del device vencido. El token vencido es el peor: el proceso reintenta para siempre y el
+ * usuario cree que el server está caído. Se desambigua con un GET autenticado, que sí
+ * devuelve el status.
+ */
+async function explicarFalloDeSync(
+  error: unknown,
+  servidor: string,
+  token: string,
+): Promise<string> {
+  const base = error instanceof Error ? error.message : String(error);
+  if (!/no se pudo abrir/i.test(base)) return base;
+  try {
+    const respuesta = await fetch(`${servidor}/api/v1/vaults`, {
+      headers: { authorization: `Bearer ${token}` },
+    });
+    if (respuesta.status === 401) {
+      return (
+        `${base}\n  → la SESIÓN EXPIRÓ: el token de este device venció. Renovala con:\n` +
+        `     ovaultd login ${servidor} --email <tu-email>`
+      );
+    }
+    if (respuesta.ok) {
+      return `${base}\n  → el HTTPS responde pero el WebSocket no: revisá el proxy (Upgrade + HTTP/1.1)`;
+    }
+  } catch {
+    return `${base}\n  → el server no responde (¿red o DNS?)`;
+  }
+  return base;
+}
+
 programa
   .command('sync [vault]')
   .description('una pasada (o --continuous): sube los cambios locales y baja los remotos')
@@ -538,7 +571,7 @@ programa
             fallas = Math.min(fallas + 1, 7);
             const espera = backoffMs(fallas - 1);
             console.warn(
-              `pasada falló: ${error instanceof Error ? error.message : String(error)}; reconecto en ${Math.round(espera / 1000)} s`,
+              `pasada falló: ${await explicarFalloDeSync(error, abierto.sesion.server, abierto.sesion.token)}; reconecto en ${Math.round(espera / 1000)} s`,
             );
             try {
               await abierto.runtime.call('sync.close');

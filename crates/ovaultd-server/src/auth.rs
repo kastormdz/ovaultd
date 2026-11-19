@@ -333,7 +333,10 @@ pub async fn emitir_device(
     let token = token_string(&token_bytes());
     let token_hash = hash_token(&token);
     let ttl_hours = crate::config::ttl_token_horas();
-    let expires_modifier = format!("+{ttl_hours} hours");
+    // TTL 0 = sin expiración práctica: la columna es NOT NULL, así que en vez de migrar el
+    // schema se emite a 100 años (el device vive hasta que se lo revoque desde el panel).
+    let horas = if ttl_hours > 0 { ttl_hours } else { 876_000 };
+    let expira_modifier = format!("+{horas} hours");
 
     let mut transaction = pool.begin().await?;
 
@@ -356,7 +359,7 @@ pub async fn emitir_device(
     .bind(token_hash)
     .bind(device_id)
     .bind(account_id)
-    .bind(expires_modifier)
+    .bind(&expira_modifier)
     .execute(&mut *transaction)
     .await?;
 
@@ -377,12 +380,33 @@ pub async fn verificar_token(pool: &SqlitePool, token: &str) -> Result<i64> {
            AND d.revoked_at IS NULL
            AND t.expires_at > datetime('now')",
     )
-    .bind(token_hash)
+    .bind(&token_hash)
     .fetch_optional(pool)
     .await?;
 
-    fila.map(|row| row.device_id)
-        .ok_or(ServerError::Unauthorized)
+    let fila = fila.ok_or(ServerError::Unauthorized)?;
+
+    // Renovación DESLIZANTE: mientras el device se use, el token no vence. Sin esto, un
+    // cliente que sincroniza cada 5 segundos se caía solo a los 30 días y el error que
+    // veía ("WS: no se pudo abrir") no decía por qué.
+    // Como mucho una vez por hora: si no, cada request sería un UPDATE.
+    let ttl = crate::config::ttl_token_horas();
+    if ttl > 0 {
+        let _ = sqlx::query(
+            "UPDATE device_tokens
+                SET expires_at = datetime('now', ?2)
+              WHERE token_hash = ?1
+                AND expires_at IS NOT NULL
+                AND expires_at < datetime('now', ?3)",
+        )
+        .bind(&token_hash)
+        .bind(format!("+{ttl} hours"))
+        .bind(format!("+{} hours", ttl.saturating_sub(1)))
+        .execute(pool)
+        .await;
+    }
+
+    Ok(fila.device_id)
 }
 
 pub async fn revocar_device(pool: &SqlitePool, device_id: i64) -> Result<()> {
@@ -622,6 +646,68 @@ mod tests {
         let result = verificar_token(&context.pool, &context.token).await;
 
         assert!(matches!(result, Err(ServerError::Unauthorized)));
+        Ok(())
+    }
+
+    /// TTL 0 emite el token a 100 años: el device vive hasta que se lo revoque.
+    #[tokio::test]
+    async fn un_token_de_cien_anios_es_valido(
+    ) -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let context = TestContext::new().await?;
+        let token_hash = hash_token(&context.token);
+
+        sqlx::query(
+            "UPDATE device_tokens
+             SET expires_at = datetime('now', '+876000 hours')
+             WHERE token_hash = ?",
+        )
+        .bind(token_hash)
+        .execute(&context.pool)
+        .await?;
+
+        assert_eq!(
+            verificar_token(&context.pool, &context.token).await?,
+            context.device_id
+        );
+        Ok(())
+    }
+
+    /// Renovación deslizante: usar el token corre su vencimiento hacia adelante. Sin esto,
+    /// un cliente que sincroniza cada 5 s se caía solo a los 30 días.
+    #[tokio::test]
+    async fn usar_el_token_renueva_su_vencimiento(
+    ) -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let context = TestContext::new().await?;
+        let token_hash = hash_token(&context.token);
+
+        // Token a 1 hora de vencer: entra en la ventana de renovación.
+        sqlx::query(
+            "UPDATE device_tokens
+             SET expires_at = datetime('now', '+1 hour')
+             WHERE token_hash = ?",
+        )
+        .bind(&token_hash)
+        .execute(&context.pool)
+        .await?;
+        let antes: String = sqlx::query_scalar(
+            "SELECT expires_at FROM device_tokens WHERE token_hash = ?",
+        )
+        .bind(&token_hash)
+        .fetch_one(&context.pool)
+        .await?;
+
+        verificar_token(&context.pool, &context.token).await?;
+
+        let despues: String = sqlx::query_scalar(
+            "SELECT expires_at FROM device_tokens WHERE token_hash = ?",
+        )
+        .bind(&token_hash)
+        .fetch_one(&context.pool)
+        .await?;
+        assert!(
+            despues > antes,
+            "el uso tiene que empujar el vencimiento: {antes} -> {despues}"
+        );
         Ok(())
     }
 

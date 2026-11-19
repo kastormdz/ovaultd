@@ -82,10 +82,14 @@ impl Config {
                 .unwrap_or_else(|| "./.tmp/server/cas".to_owned()),
         );
 
-        let token_ttl_hours = leer_entero(
+        // 0 = el token no expira (vive hasta que se revoque el device a mano). El default
+        // sigue siendo 720 h, pero con renovación deslizante un cliente activo ya no vence.
+        let token_ttl_hours = leer_entero_en_rango(
             &get,
             "OVAULTD_TOKEN_TTL_HOURS",
             720,
+            0,
+            87_600,
         )?;
 
         let challenge_ttl_seconds = leer_entero(

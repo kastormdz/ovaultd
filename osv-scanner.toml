@@ -23,3 +23,18 @@ ignoreUntil = 2027-01-31
 id = "GHSA-qwgh-2vcv-g2f7"
 reason = "block-buffer 0.10.4: requiere un panic capturado dentro del hasher; sin catch_unwind en la ruta de hashing y sin fix en la rama 0.10 (la 0.12 exige sha2 0.11, no soportado por sqlx/axum)."
 ignoreUntil = 2027-01-31
+
+# RUSTSEC-2026-0459 — CVE-2026-119375 en el SQLite embebido de `libsqlite3-sys 0.37.0`
+# (vía sqlx 0.9.1 con la feature `bundled`). SQLite < 3.54.0 puede devolver memoria no
+# inicializada del page-cache cuando abre una DB junto a un `-wal` de OTRO page size.
+# Por qué se exceptúa:
+#   1. El vector es LOCAL y exige que un tercero pueda ESCRIBIR el par DB/-wal. En el
+#      despliegue el directorio es un volumen privado del contenedor: quien puede escribir
+#      ahí ya controla el vault y el host.
+#   2. No hay fix en la rama: sqlx 0.9.1 sigue pinneando libsqlite3-sys 0.37; el parche
+#      (0.39 / SQLite 3.54) llega con rusqlite 0.41, que sqlx todavía no adopta.
+# Se revisa cuando sqlx suba de libsqlite3-sys; ahí la entrada sobra.
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0459"
+reason = "SQLite embebido (libsqlite3-sys 0.37 via sqlx 0.9.1): vector local que exige escribir el par DB/-wal en un directorio privado del contenedor; sin fix en la rama (rusqlite 0.41/libsqlite3-sys 0.39 no soportado por sqlx)."
+ignoreUntil = 2027-03-31
