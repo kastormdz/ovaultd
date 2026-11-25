@@ -23,7 +23,7 @@ cat > "$DESTINO/ovaultd-cli" <<EOF
 #!/usr/bin/env bash
 # Generado por scripts/instalar-cli.sh — apunta al checkout $RAIZ
 set -euo pipefail
-exec node "$MAIN" "\$@"
+exec node --disable-warning=ExperimentalWarning "$MAIN" "\$@"
 EOF
 chmod +x "$DESTINO/ovaultd-cli"
 
