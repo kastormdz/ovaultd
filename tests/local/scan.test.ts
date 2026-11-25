@@ -12,11 +12,11 @@ import { mkdirSync, mkdtempSync, rmSync, unlinkSync, writeFileSync } from 'node:
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { expect, test } from '@playwright/test';
+import { describe, expect, test } from 'vitest';
 
 import { deriveSubkeys, encryptBlob, randomSalt, randomVaultKey, blobId } from '@ovaultd/crypto';
 
-import { BrowserRuntime } from '../../packages/cli/src/browser-runtime';
+import { LocalRuntime } from '../../packages/cli/src/LocalRuntime';
 
 const hex = (b: Uint8Array): string => Buffer.from(b).toString('hex');
 const b64 = (b: Uint8Array): string => Buffer.from(b).toString('base64');
@@ -43,7 +43,7 @@ interface ScanResult {
   entradas: Array<{ path: string; pathId: string; size: number; contentHash: string }>;
 }
 
-test.describe('escaneo y hash-diff', () => {
+describe('escaneo y hash-diff', () => {
   test('clasifica nuevos/modificados/borrados contra la base y saltea temporales', async () => {
     const vault = mkdtempSync(join(tmpdir(), 'ovaultd-scan-'));
     const dataDir = mkdtempSync(join(tmpdir(), 'ovaultd-rt-'));
@@ -56,7 +56,7 @@ test.describe('escaneo y hash-diff', () => {
     // Temporal del apply: existe en el vault y NO puede aparecer en el escaneo.
     writeFileSync(join(vault, 'Notas/.ovaultd-tmp-abc'), 'basura');
 
-    const runtime = await BrowserRuntime.open({ dataDir, port: 18_951, vaultRoot: vault });
+    const runtime = await LocalRuntime.open({ root: vault, rutaDb: join(dataDir, 'state.db') });
     try {
       await runtime.call('store.open', { name: 'scan' });
       await runtime.call('apply.configure', { keys: CLAVES_HEX });

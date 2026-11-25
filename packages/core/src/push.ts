@@ -40,6 +40,7 @@ import {
 
 import type { ApplyDeps } from './apply-runner.js';
 import { bytesParaHash } from './apariencia.js';
+import { bytesDeSnapshot, tamanoDeSnapshot } from './snapshot.js';
 import { prepareOutboxEntry } from './outbox.js';
 import { diffLocal, escanearVault } from './scan.js';
 import { SyncConflictError, type SyncConnection } from './SyncConnection.js';
@@ -271,7 +272,7 @@ export async function construirOp(
     if (!entry.snapshot || !entry.snapshotHash) {
       throw new Error(`outbox ${entry.operationId}: sin snapshot recuperable`);
     }
-    const plano = new Uint8Array(await entry.snapshot.arrayBuffer());
+    const plano = (await bytesDeSnapshot(entry.snapshot)) as Uint8Array;
     const real = toHex(cryptoProvider().sha256(bytesParaHash(entry.path ?? '', plano)));
     if (real !== entry.snapshotHash) {
       throw new Error(
@@ -355,7 +356,7 @@ function datosDeConfirmacion(
       deleted: esDel,
       rev,
       blobId: esDel ? null : blobIdHex,
-      size: entry.snapshot ? entry.snapshot.size : null,
+      size: tamanoDeSnapshot(entry.snapshot),
       mtime: entry.mtimeMs ?? entry.queuedAt,
       contentHash: esDel ? null : (entry.snapshotHash ?? null),
     },

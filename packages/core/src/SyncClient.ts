@@ -20,7 +20,7 @@ import type { FileSystemPort } from './file-port.js';
 import { pushOnce, type PushReport } from './push.js';
 import { pullOnce, type PullReport } from './reconcile.js';
 import type { SyncConnection } from './SyncConnection.js';
-import type { StateStore } from './StateStore.js';
+import type { Store } from './Store.js';
 import type { SubKeys } from '@ovaultd/crypto';
 
 /**
@@ -34,7 +34,7 @@ import type { SubKeys } from '@ovaultd/crypto';
 export type ModoDeSync = 'normal' | 'pull-only' | 'mirror-remote';
 
 export interface SyncCycleDeps {
-  store: StateStore;
+  store: Store;
   port: FileSystemPort;
   keys: SubKeys;
   conn: SyncConnection;

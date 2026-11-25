@@ -5,6 +5,44 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y e
 [semver](https://semver.org/lang/es/): server y plugin viajan en un **release train** (mismo
 `MAJOR.MINOR` = pareja probada junta; ver ADR-0018 y la sección «Compatibilidad» del README).
 
+## [CLI 0.3.0] — 2026-11-25
+
+### Changed
+
+- **El CLI ya no usa navegador.** El motor de sync corre en el propio proceso de
+  `ovaultd-cli`: estado durable en SQLite (`node:sqlite`) y filesystem directo, en vez de un
+  Chromium headless hablándole al motor por un bridge HTTP en `127.0.0.1:18931`.
+  - El binario pasa a llamarse **`ovaultd-cli`** (antes `ovaultd`).
+  - Se elimina el comando `ovaultd runtime` y la dependencia de Playwright (~273 MB de
+    navegador que había que instalar aparte).
+  - Memoria del servicio en régimen: **~246 MB → ~101 MB**.
+  - **Cierra F-01 y F-02 de la auditoría**: el proxy sin allowlist que reenviaba
+    `Authorization` y el `/fs/*` sin autenticación vivían en el bridge. Sin bridge no
+    existen. Ya no queda ningún puerto local escuchando.
+  - El motor es el MISMO (`dispatch`): `BrowserRuntime` y `LocalRuntime` comparten
+    superficie (`call` + `close`), y el estado durable se inyecta por el contrato `Store`
+    que el plugin ya implementaba con IndexedDB.
+
+### Fixed
+
+- **El snapshot del outbox se perdía al pasar por SQLite.** `JSON.stringify(Blob)` produce
+  `{}`, así que las operaciones encoladas quedaban sin contenido recuperable y el push
+  fallaba con `snapshot.arrayBuffer is not a function`. Ahora `SqliteStore` lo empaqueta en
+  base64 explícito y los consumidores del núcleo aceptan `Blob | Uint8Array` por un único
+  punto (`bytesDeSnapshot`).
+- **`dist/runtime.js` se pisaba solo.** `tsc` generaba el ESM y `esbuild` lo sobreescribía
+  con el bundle IIFE para la página: importar `@ovaultd/core` desde Node explotaba. El
+  bundle ahora va a `dist/runtime.browser.js`.
+
+### Notas de migración
+
+- El estado local del CLI cambia de un perfil de Chromium (IndexedDB) a
+  `~/.local/share/ovaultd/runtime/<server>_<vault>/state.db`. El primer sync re-escanea el
+  vault y reconoce por hash lo ya sincronizado; las operaciones pendientes que quedaron sin
+  snapshot se re-encolan desde el disco.
+- El plugin de Obsidian **no cambia**: sigue con IndexedDB detrás del mismo contrato.
+- El servicio systemd debe apuntar a `ovaultd-cli` (`ExecStart=... ovaultd-cli sync ...`).
+
 ## [0.2.11] — 2026-10-20
 
 ### Security

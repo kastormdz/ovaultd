@@ -27,3 +27,5 @@ export * from './history.js';
 
 export * from './prune-guard.js';
 export * from './Store.js';
+export { configurarFetchDirecto, configurarFilePort, configurarStore, dispatch } from './runtime.js';
+export * from './snapshot.js';

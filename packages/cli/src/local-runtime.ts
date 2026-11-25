@@ -3,8 +3,8 @@
  *
  * Acá SÍ se toca cripto: se desenvuelve la `vault_key` con la password del usuario
  * (KEK → unwrap; nunca se persiste) y se derivan las subclaves que el runtime usa para
- * cifrar/descifrar/firmar. El runtime corre con SU perfil Chromium por vault (origen
- * estable, datos IndexedDB propios) y su raíz de archivos es la carpeta vinculada.
+ * cifrar/descifrar/firmar. El motor corre en ESTE proceso: estado durable en SQLite
+ * (un archivo por vault) y raíz de archivos la carpeta vinculada. Sin navegador.
  *
  * El token sale de `OVAULTD_TOKEN` si está (para CI/scripts; no se persiste aparte) o
  * del `session.json` (0600) del login.
@@ -17,7 +17,7 @@ import { join } from 'node:path';
 import { deriveKek, deriveSubkeys, unwrapKeyPw, type SubKeys } from '@ovaultd/crypto';
 import { b64Decode, toHex } from '@ovaultd/protocol';
 
-import { BrowserRuntime } from './browser-runtime.js';
+import { LocalRuntime } from './LocalRuntime.js';
 import { resolvePassword } from './credentials.js';
 import {
   listVaultStates,
@@ -31,7 +31,7 @@ import {
 } from './state.js';
 
 export interface VaultAbierto {
-  runtime: BrowserRuntime;
+  runtime: LocalRuntime;
   sesion: SessionState;
   vault: VaultLocalState;
   subkeys: SubKeys;
@@ -113,11 +113,12 @@ export async function abrirVaultLocal(
     );
   }
 
-  const runtime = await BrowserRuntime.open({
-    dataDir: runtimeDirDe(sesion.server, vault.vault),
-    vaultRoot: vault.dir,
-    // Único destino al que el puente reenvía: el server de ESTA sesión (F-01).
-    serverUrl: sesion.server,
+  if (!vault.dir) throw new Error(`el vault #${vault.vault} no tiene carpeta vinculada`);
+
+  // Sin navegador: el motor corre en este proceso y el estado durable es SQLite.
+  const runtime = await LocalRuntime.open({
+    root: vault.dir,
+    rutaDb: join(runtimeDirDe(sesion.server, vault.vault), 'state.db'),
   });
 
   try {

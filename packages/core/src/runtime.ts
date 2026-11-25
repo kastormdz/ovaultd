@@ -21,12 +21,14 @@ import { b64Decode, b64Encode, fromHex } from '@ovaultd/protocol';
 
 import { applyRevision, recoverApplies, type ApplyRevision } from './apply-runner.js';
 import { createIntent, type ApplyCandidate } from './apply.js';
-import { HttpFileSystemPort } from './file-port.js';
+import { HttpFileSystemPort, type FileSystemPort } from './file-port.js';
 import { contenidoDeRevision, diffDeTextos, historiaDeArchivo } from './history.js';
 import { prepareOutboxEntry, type EnqueueRequest } from './outbox.js';
 import { pushOnce } from './push.js';
 import { aplicarPrune, planificarPrune } from './prune.js';
 import { guardaDePrune } from './prune-guard.js';
+import { bytesDeSnapshot, tamanoDeSnapshot } from './snapshot.js';
+import type { Store } from './Store.js';
 import { pullOnce } from './reconcile.js';
 import { diffLocal, escanearVault } from './scan.js';
 import { correrCiclo } from './SyncClient.js';
@@ -54,9 +56,45 @@ interface RuntimeResponse {
   error?: { message: string; name?: string };
 }
 
-let store: StateStore | null = null;
+/**
+ * Cómo se abre el estado durable. Por defecto IndexedDB, que es donde vive el estado del
+ * plugin dentro del renderer de Obsidian. El CLI llama a `configurarStore` antes de abrir
+ * el vault y lo apunta a SQLite: así el mismo motor corre en Node sin navegador.
+ */
+let abrirBackend: (name?: string) => Promise<Store> = (name) => StateStore.open(name);
 
-const exigirStore = (): StateStore => {
+/**
+ * Puerto de archivos. Por defecto, el bridge HTTP del runtime (el CLI levanta un servidor
+ * local y el motor corre en Chromium). El CLI nativo lo apunta directo al `NodeFileAdapter`
+ * y se ahorra el bridge entero.
+ */
+let abrirFilePort: () => FileSystemPort = () => abrirFilePort();
+
+/**
+ * Cómo se habla con el server. Con navegador, TODO pasa por `/fs/proxyFetch` del bridge:
+ * la página no puede pegarle al server sin pagar CORS, y el binario crudo viaja en el
+ * body. En Node no hay origen ni CORS: `fetch` directo, sin intermediario.
+ */
+let fetchDirecto = false;
+
+/** El CLI nativo llama con `true` antes de abrir el vault. */
+export function configurarFetchDirecto(activo: boolean): void {
+  fetchDirecto = activo;
+}
+
+/** Cambia el puerto de archivos (el CLI nativo usa el filesystem real). */
+export function configurarFilePort(abrir: () => FileSystemPort): void {
+  abrirFilePort = abrir;
+}
+
+/** Cambia el backend del estado durable (el CLI usa SQLite; el plugin, nada). */
+export function configurarStore(abrir: (name?: string) => Promise<Store>): void {
+  abrirBackend = abrir;
+}
+
+let store: Store | null = null;
+
+const exigirStore = (): Store => {
   if (!store) throw new Error('el StateStore no está abierto (llamá a store.open primero)');
   return store;
 };
@@ -67,7 +105,7 @@ let applyKeys: SubKeys | null = null;
 /** Nombre del dispositivo para el sello de las copias de conflicto (apply.configure). */
 let applyDeviceName: string | null = null;
 
-const exigirApply = (): { store: StateStore; keys: SubKeys } => {
+const exigirApply = (): { store: Store; keys: SubKeys } => {
   if (!applyKeys) throw new Error('apply: falta apply.configure (subclaves del vault)');
   return { store: exigirStore(), keys: applyKeys };
 };
@@ -91,7 +129,7 @@ const serializarOutbox = (entry: OutboxEntry) => ({
   queuedAt: entry.queuedAt,
   state: entry.state,
   snapshotHash: entry.snapshotHash ?? null,
-  snapshotSize: entry.snapshot ? entry.snapshot.size : null,
+  snapshotSize: tamanoDeSnapshot(entry.snapshot),
 });
 
 type Handler = (params: Record<string, unknown>) => Promise<unknown> | unknown;
@@ -111,7 +149,7 @@ const handlers: Record<string, Handler> = {
   'store.open': async (params) => {
     const name = typeof params.name === 'string' ? params.name : undefined;
     if (store) store.close();
-    store = await StateStore.open(name);
+    store = await abrirBackend(name);
     return { schemaVersion: SCHEMA_VERSION, stores: [...STORE_NAMES] };
   },
 
@@ -158,7 +196,7 @@ const handlers: Record<string, Handler> = {
   'outbox.snapshot': async (params) => {
     const entry = await exigirStore().getOutbox(String(params.operationId));
     if (!entry || !entry.snapshot) return null;
-    const bytes = new Uint8Array(await entry.snapshot.arrayBuffer());
+    const bytes = (await bytesDeSnapshot(entry.snapshot)) ?? new Uint8Array();
     return { b64: b64Encode(bytes), hash: entry.snapshotHash ?? null, size: bytes.length };
   },
 
@@ -177,7 +215,7 @@ const handlers: Record<string, Handler> = {
 
   // Compatibilidad de bajo nivel (el spec del corte 1 la usa): entrada cruda, sin Blob.
   'store.outbox.put': async (params) => {
-    const entry = params.entry as Parameters<StateStore['putOutbox']>[0];
+    const entry = params.entry as Parameters<Store['putOutbox']>[0];
     if (!entry || typeof entry.operationId !== 'string') throw new Error('outbox.put: falta operationId');
     await exigirStore().putOutbox(entry);
     return { ok: true };
@@ -255,7 +293,7 @@ const handlers: Record<string, Handler> = {
     return applyRevision(
       {
         store,
-        port: new HttpFileSystemPort(globalThis.location.origin),
+        port: abrirFilePort(),
         keys,
         deviceName: applyDeviceName ?? undefined,
       },
@@ -268,7 +306,7 @@ const handlers: Record<string, Handler> = {
     const { store, keys } = exigirApply();
     return recoverApplies({
       store,
-      port: new HttpFileSystemPort(globalThis.location.origin),
+      port: abrirFilePort(),
       keys,
       deviceName: applyDeviceName ?? undefined,
     });
@@ -310,6 +348,11 @@ const handlers: Record<string, Handler> = {
         // Binario CRUDO (sin base64 ni JSON grande): el sobre de un blob de 100 KB son
         // ~133 KB y codificarlo en la página costaba 40-100 ms por PUT. Los metadatos van
         // en headers y el body viaja tal cual; el puente lo reenvía con node.
+        if (fetchDirecto) {
+          const directa = await fetch(url, { method: metodo, headers, body: cuerpo ?? null });
+          const bytes = await directa.arrayBuffer();
+          return new Response(bytes.byteLength ? bytes : null, { status: directa.status });
+        }
         const res = await fetch('/fs/proxyFetch', {
           method: 'POST',
           headers: {
@@ -345,7 +388,7 @@ const handlers: Record<string, Handler> = {
     const { store, keys } = exigirApply();
     return pullOnce(syncConn, {
       store,
-      port: new HttpFileSystemPort(globalThis.location.origin),
+      port: abrirFilePort(),
       keys,
       deviceName: applyDeviceName ?? undefined,
     });
@@ -354,7 +397,7 @@ const handlers: Record<string, Handler> = {
   /** Escaneo + hash-diff sin tocar la red (lo que muestra `list-local`). */
   'sync.scan': async () => {
     const { store, keys } = exigirApply();
-    const port = new HttpFileSystemPort(globalThis.location.origin);
+    const port = abrirFilePort();
     const ilegibles = new Map<string, string>();
     const entradas = await escanearVault(
       port,
@@ -385,7 +428,7 @@ const handlers: Record<string, Handler> = {
     return pushOnce(
       {
         store,
-        port: new HttpFileSystemPort(globalThis.location.origin),
+        port: abrirFilePort(),
         keys,
         conn: syncConn,
         vaultUuid: syncVaultMeta.vaultUuid,
@@ -412,7 +455,7 @@ const handlers: Record<string, Handler> = {
       store,
       keys,
       conn: syncConn,
-      port: new HttpFileSystemPort(globalThis.location.origin),
+      port: abrirFilePort(),
     };
     if (!params.aplicar) return planificarPrune(deps);
 
@@ -488,7 +531,7 @@ const handlers: Record<string, Handler> = {
     const { store, keys } = exigirApply();
     return correrCiclo({
       store,
-      port: new HttpFileSystemPort(globalThis.location.origin),
+      port: abrirFilePort(),
       keys,
       conn: syncConn,
       vaultUuid: syncVaultMeta.vaultUuid,
@@ -497,7 +540,7 @@ const handlers: Record<string, Handler> = {
   },
 };
 
-const dispatch = async (request: RuntimeRequest): Promise<RuntimeResponse> => {
+export const dispatch = async (request: RuntimeRequest): Promise<RuntimeResponse> => {
   try {
     const handler = handlers[request.method];
     if (!handler) throw new Error(`método desconocido: ${request.method}`);

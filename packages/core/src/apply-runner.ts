@@ -23,7 +23,8 @@ import { createIntent } from './apply.js';
 import type { FileSystemPort } from './file-port.js';
 import { bytesParaHash, esApariencia, mergeDeApariencia } from './apariencia.js';
 import { esMergeablePorTipo, mergeDeTexto } from './merge.js';
-import type { IntentEntry, StateStore } from './StateStore.js';
+import type { Store } from './Store.js';
+import type { IntentEntry } from './StateStore.js';
 import type { SyncConnection } from './SyncConnection.js';
 import { colisionDeCase, nombreBase, validarRutaDeVault } from './vault-path.js';
 
@@ -42,7 +43,7 @@ export interface ApplyRevision {
 }
 
 export interface ApplyDeps {
-  store: StateStore;
+  store: Store;
   port: FileSystemPort;
   /** Subclaves `sync2` del vault (incluye la de contenido). */
   keys: SubKeys;

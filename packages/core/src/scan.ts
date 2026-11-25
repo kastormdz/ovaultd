@@ -22,7 +22,7 @@ import { toHex } from '@ovaultd/protocol';
 import type { FileSystemPort, VaultDirEntry, VaultStat } from './file-port.js';
 import { bytesParaHash } from './apariencia.js';
 import { estaExcluido } from './SyncFilter.js';
-import type { StateStore } from './StateStore.js';
+import type { Store } from './Store.js';
 
 export interface EntradaEscaneada {
   path: string;
@@ -170,7 +170,7 @@ export async function escanearVault(
 
 /** Diff contra la base: qué falta empujar, con la outbox pendiente como filtro. */
 export async function diffLocal(
-  store: StateStore,
+  store: Store,
   entradas: EntradaEscaneada[],
   ilegibles?: Map<string, string>,
   /** Config dir del vault: las entradas del índice que viven ahí no cuentan como borrado. */

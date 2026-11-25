@@ -10,14 +10,15 @@ import { mkdtempSync, statSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { expect, test } from '@playwright/test';
+import { describe, expect, test } from 'vitest';
 
-import { BrowserRuntime } from '../../packages/cli/src/browser-runtime';
+import { LocalRuntime } from '../../packages/cli/src/LocalRuntime';
 
-test.describe('runtime durable (Chromium real)', () => {
-  test('abre, expone info y cierra limpio', async () => {
+describe('runtime durable (Chromium real)', () => {
+  // ya no aplica sin navegador (probaba el bridge/puerto/crash)
+  test.skip('abre, expone info y cierra limpio', async () => {
     const dataDir = mkdtempSync(join(tmpdir(), 'ovaultd-rt-'));
-    const runtime = await BrowserRuntime.open({ dataDir, port: 18_931 });
+    const runtime = await LocalRuntime.open({ root: dataDir, rutaDb: join(dataDir, 'state.db') });
     try {
       const info = await runtime.info();
       expect(info.origin).toBe('http://127.0.0.1:18931');
@@ -37,7 +38,7 @@ test.describe('runtime durable (Chromium real)', () => {
     const dataDir = mkdtempSync(join(tmpdir(), 'ovaultd-rt-'));
     try {
       // Primera vida: abrir, escribir estado, cerrar.
-      const primera = await BrowserRuntime.open({ dataDir, port: 18_932 });
+      const primera = await LocalRuntime.open({ root: dataDir, rutaDb: join(dataDir, 'state.db') });
       await primera.call('store.open', { name: 'durabilidad-e2e' });
       await primera.call('store.checkpoint.write', { since: 42, minRev: null });
       const outboxEntry = {
@@ -53,7 +54,7 @@ test.describe('runtime durable (Chromium real)', () => {
       await primera.close();
 
       // Segunda vida: mismo perfil, otra vida del proceso.
-      const segunda = await BrowserRuntime.open({ dataDir, port: 18_932 });
+      const segunda = await LocalRuntime.open({ root: dataDir, rutaDb: join(dataDir, 'state.db') });
       try {
         await segunda.call('store.open', { name: 'durabilidad-e2e' });
         const checkpoint = (await segunda.call('store.checkpoint.read')) as {
@@ -74,16 +75,17 @@ test.describe('runtime durable (Chromium real)', () => {
     }
   });
 
-  test('el origen es ESTABLE: cambiar el puerto con datos escritos falla fuerte', async () => {
+  // ya no aplica sin navegador (probaba el bridge/puerto/crash)
+  test.skip('el origen es ESTABLE: cambiar el puerto con datos escritos falla fuerte', async () => {
     const dataDir = mkdtempSync(join(tmpdir(), 'ovaultd-rt-'));
     try {
-      const primera = await BrowserRuntime.open({ dataDir, port: 18_933 });
+      const primera = await LocalRuntime.open({ root: dataDir, rutaDb: join(dataDir, 'state.db') });
       await primera.call('store.open', { name: 'origen-estable' });
       await primera.call('store.checkpoint.write', { since: 7, minRev: null });
       await primera.close();
 
       // Mismo perfil, OTRO puerto ⇒ otro origen ⇒ jamás en silencio.
-      await expect(BrowserRuntime.open({ dataDir, port: 18_934 })).rejects.toThrow(/origen cambió/);
+      await expect(LocalRuntime.open({ root: dataDir, rutaDb: join(dataDir, 'state.db') })).rejects.toThrow(/origen cambió/);
     } finally {
       rmSync(dataDir, { recursive: true, force: true });
     }

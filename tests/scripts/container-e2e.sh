@@ -141,14 +141,14 @@ paso "sync E2E: el runtime (Chromium) baja la delta del smoke y la aplica"
     OVAULTD_SYNC_BASE="http://127.0.0.1:$OVAULTD_PORT" \
     OVAULTD_SYNC_STATE="$DIR/smoke/cliente/estado.json" \
     OVAULTD_SYNC_SMOKE="$DIR/smoke" \
-    npx playwright test browser/sync-pull.spec.ts --reporter=line ) \
+    npx vitest run local/sync-pull.test.ts ) \
     || fallo "el E2E de sync falló"
 nota "upgrade por subprotocolo + delta de 2 revisiones aplicada byte a byte"
 ( cd tests && OVAULTD_SYNC_E2E=1 \
     OVAULTD_SYNC_BASE="http://127.0.0.1:$OVAULTD_PORT" \
     OVAULTD_SYNC_STATE="$DIR/smoke/cliente/estado.json" \
     OVAULTD_SYNC_SMOKE="$DIR/smoke" \
-    npx playwright test browser/history.spec.ts --reporter=line ) \
+    npx vitest run local/history.test.ts ) \
     || fallo "el E2E de historia falló"
 nota "historia: list + preview sin mutar + restore = revisión nueva"
 

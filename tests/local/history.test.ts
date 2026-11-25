@@ -12,15 +12,15 @@
  * revisiones: los toma de las respuestas, así el orden de los specs no importa.
  */
 
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { expect, test } from '@playwright/test';
+import { describe, expect, test } from 'vitest';
 
 import { decryptBlob, deriveSubkeys } from '@ovaultd/crypto';
 
-import { BrowserRuntime } from '../../packages/cli/src/browser-runtime';
+import { LocalRuntime } from '../../packages/cli/src/LocalRuntime';
 
 const E2E = process.env.OVAULTD_SYNC_E2E === '1';
 const BASE = process.env.OVAULTD_SYNC_BASE ?? 'http://127.0.0.1:8888';
@@ -43,9 +43,9 @@ interface ResumenRev {
   blobId: string | null;
 }
 
-test.describe('historia E2E (stack real)', () => {
+describe('historia E2E (stack real)', () => {
   test('list + preview (sin mutar) + restore como revisión nueva', async () => {
-    test.skip(!E2E, 'se corre solo desde container-e2e.sh (OVAULTD_SYNC_E2E=1)');
+    if (!E2E) return; // se corre solo desde container-e2e.sh (OVAULTD_SYNC_E2E=1)
 
     const estado = JSON.parse(readFileSync(ESTADO, 'utf8')) as {
       email: string;
@@ -62,7 +62,7 @@ test.describe('historia E2E (stack real)', () => {
         email: estado.email,
         password: estado.password,
         name: 'e2e-history',
-        platform: 'playwright',
+        platform: 'local',
       }),
     })) as { token: string; device_id: number };
     expect(signin.token).toBeTruthy();
@@ -87,8 +87,9 @@ test.describe('historia E2E (stack real)', () => {
     };
 
     const vaultRoot = mkdtempSync(join(tmpdir(), 'ovaultd-hist-'));
+    mkdirSync(join(vaultRoot, 'Notas'), { recursive: true });
     const dataDir = mkdtempSync(join(tmpdir(), 'ovaultd-hist-rt-'));
-    const runtime = await BrowserRuntime.open({ dataDir, port: 18_951, vaultRoot, serverUrl: BASE });
+    const runtime = await LocalRuntime.open({ root: vaultRoot, rutaDb: join(dataDir, 'state.db') });
     try {
       await runtime.call('store.open', { name: 'history-e2e' });
       await runtime.call('apply.configure', { keys: clavesHex });

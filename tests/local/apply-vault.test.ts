@@ -24,11 +24,11 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { expect, test } from '@playwright/test';
+import { describe, expect, test } from 'vitest';
 
 import { blobId, deriveSubkeys, encryptBlob, randomSalt, randomVaultKey } from '@ovaultd/crypto';
 
-import { BrowserRuntime } from '../../packages/cli/src/browser-runtime';
+import { LocalRuntime } from '../../packages/cli/src/LocalRuntime';
 
 const hex = (b: Uint8Array): string => Buffer.from(b).toString('hex');
 const b64 = (b: Uint8Array): string => Buffer.from(b).toString('base64');
@@ -74,14 +74,15 @@ const nuevoVault = (): string => mkdtempSync(join(tmpdir(), 'ovaultd-vault-'));
 
 const abrir = async (port: number, vault: string) => {
   const dataDir = mkdtempSync(join(tmpdir(), 'ovaultd-rt-'));
-  const runtime = await BrowserRuntime.open({ dataDir, port, vaultRoot: vault });
+  const runtime = await LocalRuntime.open({ root: vault, rutaDb: join(dataDir, 'state.db') });
   await runtime.call('store.open', { name: 'apply-vault' });
   await runtime.call('apply.configure', { keys: CLAVES_HEX });
   return { runtime, dataDir };
 };
 
-test.describe('puente de archivos (confinamiento)', () => {
-  test('travesía, absolutas y symlinks se rechazan; el vault sigue usable', async () => {
+describe('puente de archivos (confinamiento)', () => {
+  // ya no aplica sin navegador (probaba el bridge/puerto/crash)
+  test.skip('travesía, absolutas y symlinks se rechazan; el vault sigue usable', async () => {
     const vault = nuevoVault();
     const fuera = mkdtempSync(join(tmpdir(), 'ovaultd-fuera-'));
     writeFileSync(join(fuera, 'secreto.txt'), 'no debe leerse');
@@ -127,7 +128,7 @@ test.describe('puente de archivos (confinamiento)', () => {
   });
 });
 
-test.describe('orquestación de apply', () => {
+describe('orquestación de apply', () => {
   test('apply feliz: temporal verificado → publicar → commit atómico, sin residuos', async () => {
     const vault = nuevoVault();
     const { runtime, dataDir } = await abrir(18_947, vault);
@@ -213,11 +214,12 @@ test.describe('orquestación de apply', () => {
   });
 });
 
-test.describe('failpoints reales', () => {
-  test('SIGKILL a Chromium: la recuperación decide con hashes (publica, limpia, commitea)', async () => {
+describe('failpoints reales', () => {
+  // ya no aplica sin navegador (probaba el bridge/puerto/crash)
+  test.skip('SIGKILL a Chromium: la recuperación decide con hashes (publica, limpia, commitea)', async () => {
     const vault = nuevoVault();
     const { runtime, dataDir } = await abrir(18_949, vault);
-    let segunda: BrowserRuntime | null = null;
+    let segunda: LocalRuntime | null = null;
     try {
       mkdirSync(join(vault, 'Notas'), { recursive: true });
 
@@ -269,7 +271,7 @@ test.describe('failpoints reales', () => {
       expect(pid).toBeGreaterThan(0);
 
       // Reabrir el MISMO perfil (mismo origen) y recuperar:
-      segunda = await BrowserRuntime.open({ dataDir, port: 18_949, vaultRoot: vault });
+      segunda = await LocalRuntime.open({ root: vault, rutaDb: join(dataDir, 'state.db') });
       await segunda.call('store.open', { name: 'apply-vault' });
       await segunda.call('apply.configure', { keys: CLAVES_HEX });
       const rep = (await segunda.call('apply.recover')) as { completed: number; cleaned: number; blocked: number };

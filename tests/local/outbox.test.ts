@@ -15,9 +15,9 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { expect, test } from '@playwright/test';
+import { describe, expect, test } from 'vitest';
 
-import { BrowserRuntime } from '../../packages/cli/src/browser-runtime';
+import { LocalRuntime } from '../../packages/cli/src/LocalRuntime';
 
 const sha256hex = (texto: string): string => createHash('sha256').update(texto, 'utf8').digest('hex');
 const b64 = (texto: string): string => Buffer.from(texto, 'utf8').toString('base64');
@@ -27,10 +27,10 @@ const PATH_ID_1 = 'aa'.repeat(32);
 const CONTENIDO_V1 = '# nota\ncontenido local v1\n';
 const HASH_V1 = sha256hex(CONTENIDO_V1);
 
-test.describe('outbox save-first', () => {
+describe('outbox save-first', () => {
   test('el snapshot viaja verificado y el operation_id es estable por payload', async () => {
     const dataDir = mkdtempSync(join(tmpdir(), 'ovaultd-ob-'));
-    const runtime = await BrowserRuntime.open({ dataDir, port: 18_941 });
+    const runtime = await LocalRuntime.open({ root: dataDir, rutaDb: join(dataDir, 'state.db') });
     try {
       await runtime.call('store.open', { name: 'outbox-spec' });
 
@@ -86,14 +86,14 @@ test.describe('outbox save-first', () => {
   test('la outbox y su snapshot SOBREVIVEN al cierre REAL del runtime', async () => {
     const dataDir = mkdtempSync(join(tmpdir(), 'ovaultd-ob-'));
     try {
-      const primera = await BrowserRuntime.open({ dataDir, port: 18_942 });
+      const primera = await LocalRuntime.open({ root: dataDir, rutaDb: join(dataDir, 'state.db') });
       await primera.call('store.open', { name: 'outbox-durable' });
       await primera.call('outbox.enqueue', {
         request: { kind: 'mod', path: PATH_1, pathId: PATH_ID_1, expectedRev: 5, contentB64: b64(CONTENIDO_V1), contentHash: HASH_V1 },
       });
       await primera.close();
 
-      const segunda = await BrowserRuntime.open({ dataDir, port: 18_942 });
+      const segunda = await LocalRuntime.open({ root: dataDir, rutaDb: join(dataDir, 'state.db') });
       try {
         await segunda.call('store.open', { name: 'outbox-durable' });
         const lista = (await segunda.call('outbox.list')) as Array<{ pathId: string; state: string }>;
@@ -114,7 +114,7 @@ test.describe('outbox save-first', () => {
 
   test('máquina de estados: pending → sent → confirmed → remove', async () => {
     const dataDir = mkdtempSync(join(tmpdir(), 'ovaultd-ob-'));
-    const runtime = await BrowserRuntime.open({ dataDir, port: 18_943 });
+    const runtime = await LocalRuntime.open({ root: dataDir, rutaDb: join(dataDir, 'state.db') });
     try {
       await runtime.call('store.open', { name: 'outbox-estados' });
       const { entry } = (await runtime.call('outbox.enqueue', {
@@ -137,10 +137,10 @@ test.describe('outbox save-first', () => {
   });
 });
 
-test.describe('journal de aplicación', () => {
+describe('journal de aplicación', () => {
   test('el commit es atómico: intención + base + índice + checkpoint en un paso', async () => {
     const dataDir = mkdtempSync(join(tmpdir(), 'ovaultd-ap-'));
-    const runtime = await BrowserRuntime.open({ dataDir, port: 18_944 });
+    const runtime = await LocalRuntime.open({ root: dataDir, rutaDb: join(dataDir, 'state.db') });
     try {
       await runtime.call('store.open', { name: 'journal-spec' });
 
@@ -193,7 +193,7 @@ test.describe('journal de aplicación', () => {
 
   test('remote_apply_preserves_unqueued_local_edit: el remoto NUNCA pisa la edición local encolada', async () => {
     const dataDir = mkdtempSync(join(tmpdir(), 'ovaultd-ap-'));
-    const runtime = await BrowserRuntime.open({ dataDir, port: 18_945 });
+    const runtime = await LocalRuntime.open({ root: dataDir, rutaDb: join(dataDir, 'state.db') });
     try {
       await runtime.call('store.open', { name: 'invariante-spec' });
 

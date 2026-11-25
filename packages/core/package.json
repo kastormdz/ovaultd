@@ -4,7 +4,7 @@
   "private": true,
   "license": "MIT",
   "type": "module",
-  "description": "Núcleo durable de ovaultd: estado (IndexedDB), outbox, apply, reconciliación. Corre en el runtime Chromium.",
+  "description": "N\u00facleo durable de ovaultd: estado (IndexedDB), outbox, apply, reconciliaci\u00f3n. Corre en el runtime Chromium.",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -16,7 +16,7 @@
   ],
   "scripts": {
     "build": "tsc -b && npm run build:runtime",
-    "build:runtime": "esbuild src/runtime.ts --bundle --format=iife --platform=browser --target=es2022 --outfile=dist/runtime.js",
+    "build:runtime": "esbuild src/runtime.ts --bundle --format=iife --platform=browser --target=es2022 --outfile=dist/runtime.browser.js",
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {

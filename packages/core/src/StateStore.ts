@@ -61,7 +61,7 @@ export interface OutboxEntry {
   expectedRev: number;
   queuedAt: number;
   /** Snapshot recuperable del contenido local (save-first). */
-  snapshot?: Blob | null;
+  snapshot?: Blob | Uint8Array | null;
   snapshotHash?: string | null;
   /** Estado de publicación: pending → sent (ack) → confirmed; `rejected` = el server la
    *  rechazó por un problema de ESTA operación (archivo demasiado grande, sin snapshot,

@@ -14,7 +14,7 @@ import { b64Decode, toHex } from '@ovaultd/protocol';
 
 import type { FileSystemPort } from './file-port.js';
 import { prepareOutboxEntry } from './outbox.js';
-import type { StateStore } from './StateStore.js';
+import type { Store } from './Store.js';
 import type { SyncConnection } from './SyncConnection.js';
 import { validarRutaDeVault } from './vault-path.js';
 
@@ -117,7 +117,7 @@ export interface ResultadoPrune extends PlanDePrune {
  * normal después (`pushOnce`), para que el lote salga con la firma y el
  * `expected_rev` de siempre.
  */
-export async function aplicarPrune(deps: DepsPrune & { store: StateStore }): Promise<ResultadoPrune> {
+export async function aplicarPrune(deps: DepsPrune & { store: Store }): Promise<ResultadoPrune> {
   const plan = await planificarPrune(deps);
   if (plan.huerfanos.length === 0) return { ...plan, encolados: 0 };
 

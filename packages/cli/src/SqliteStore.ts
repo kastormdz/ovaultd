@@ -26,6 +26,36 @@ import type {
   TransferEntry,
 } from '@ovaultd/core';
 
+
+/**
+ * `Blob` y `Uint8Array` no sobreviven a JSON: el primero se serializa como `{}` y el
+ * segundo como `{"0":…,"1":…}`. Sin empaquetar, el snapshot del outbox se perdía y el
+ * push fallaba con "sin snapshot recuperable" (o peor, con un hash que no cerraba).
+ */
+const MARCA_B64 = '__ovaultd_b64';
+
+const bytesDe = async (
+  snapshot: Blob | Uint8Array | null | undefined,
+): Promise<Uint8Array | null> => {
+  if (!snapshot) return null;
+  return snapshot instanceof Uint8Array ? snapshot : new Uint8Array(await snapshot.arrayBuffer());
+};
+
+const empaquetarOutbox = async (entry: OutboxEntry): Promise<Record<string, unknown>> => {
+  const bytes = await bytesDe(entry.snapshot);
+  if (!bytes) return entry as unknown as Record<string, unknown>;
+  return { ...entry, snapshot: { [MARCA_B64]: Buffer.from(bytes).toString('base64') } };
+};
+
+const desempaquetarOutbox = (entry: OutboxEntry | null): OutboxEntry | null => {
+  if (!entry) return null;
+  const crudo = entry.snapshot as unknown as Record<string, unknown> | null | undefined;
+  if (crudo && typeof crudo === 'object' && typeof crudo[MARCA_B64] === 'string') {
+    entry.snapshot = new Uint8Array(Buffer.from(crudo[MARCA_B64] as string, 'base64'));
+  }
+  return entry;
+};
+
 const ESQUEMA = `
   CREATE TABLE IF NOT EXISTS kv (
     store TEXT NOT NULL,
@@ -152,23 +182,29 @@ export class SqliteStore implements Store {
   // ------------------------------------------------------------------ outbox
 
   async putOutbox(entry: OutboxEntry): Promise<void> {
-    this.escribir('outbox', entry.operationId, entry);
+    this.escribir('outbox', entry.operationId, await empaquetarOutbox(entry));
   }
 
   async putOutboxMany(entries: OutboxEntry[]): Promise<void> {
     if (entries.length === 0) return;
+    const empaquetadas = await Promise.all(entries.map(empaquetarOutbox));
     this.enTransaccion(() => {
-      for (const entry of entries) this.escribir('outbox', entry.operationId, entry);
+      for (const entry of empaquetadas) {
+        this.escribir('outbox', entry.operationId as string, entry);
+      }
     });
   }
 
   async getOutbox(operationId: string): Promise<OutboxEntry | null> {
-    return this.leer<OutboxEntry>('outbox', operationId);
+    return desempaquetarOutbox(this.leer<OutboxEntry>('outbox', operationId));
   }
 
   /** FIFO por `queuedAt` (el orden de la cola serial). */
   async listOutbox(): Promise<OutboxEntry[]> {
-    return this.todos<OutboxEntry>('outbox').sort((a, b) => a.queuedAt - b.queuedAt);
+    return this.todos<OutboxEntry>('outbox')
+      .map((entry) => desempaquetarOutbox(entry))
+      .filter((entry): entry is OutboxEntry => entry !== null)
+      .sort((a, b) => a.queuedAt - b.queuedAt);
   }
 
   async deleteOutbox(operationId: string): Promise<void> {

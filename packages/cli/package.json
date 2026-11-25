@@ -1,12 +1,12 @@
 {
   "name": "@ovaultd/cli",
-  "version": "0.2.11",
+  "version": "0.3.0",
   "private": true,
   "license": "MIT",
   "type": "module",
-  "description": "CLI de ovaultd: login, vaults remotos, setup local. Toda la cripto vive acá; el server no ve secretos.",
+  "description": "CLI de ovaultd: login, vaults remotos, setup local. Toda la cripto vive ac\u00e1; el server no ve secretos.",
   "bin": {
-    "ovaultd": "dist/main.js"
+    "ovaultd-cli": "dist/main.js"
   },
   "scripts": {
     "build": "tsc -b",
@@ -16,7 +16,6 @@
     "@ovaultd/core": "*",
     "@ovaultd/crypto": "*",
     "@ovaultd/protocol": "*",
-    "commander": "15.0.0",
-    "playwright": "1.64.1"
+    "commander": "15.0.0"
   }
 }

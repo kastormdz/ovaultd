@@ -63,10 +63,8 @@ jobs:
           npm ci
           npm run build
           npm test
-      - name: Specs de browser (durabilidad contra un Chromium real)
-        run: |
-          npx playwright install --with-deps chromium
-          npm run test:browser
+      - name: E2E del motor (SQLite + filesystem real, sin navegador)
+        run: npm run test -w @ovaultd/tests
       - name: Suites Rust
         run: cargo test --workspace
       - name: Smoke del server (cripto viva y WebSocket)
@@ -124,17 +122,14 @@ jobs:
         with:
           node-version: '22'
           cache: npm
-      # El E2E del contenedor no es solo docker: el paso de sync real corre el runtime en
-      # Chromium contra el server del contenedor, así que hacen falta las dependencias del
-      # repo y el browser. Sin esto, `npx playwright` se baja cualquier versión y revienta
-      # con ERR_MODULE_NOT_FOUND.
-      - name: Dependencias del cliente (el E2E usa Chromium de verdad)
+      # El E2E del contenedor corre el motor de sync de verdad contra el server del
+      # contenedor: hacen falta las dependencias del repo. Ya no hay navegador de por medio.
+      - name: Dependencias del cliente (el E2E corre el motor nativo)
         run: |
           npm ci
           npm run build
-          npx playwright install --with-deps chromium
       # Construye la imagen del compose, la levanta, corre el smoke completo (HTTP +
-      # WebSocket, cripto viva) + el sync real en Chromium, y verifica que la base
+      # WebSocket, cripto viva) + el sync real del motor nativo, y verifica que la base
       # sobreviva a un recreate.
       # El driver por defecto de compose (`docker`) no soporta cache_from/cache_to de GHA: esta
       # action deja un builder docker-container como default, que es el que entiende `type=gha`.
